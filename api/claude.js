@@ -1,0 +1,195 @@
+// ============================================================================
+// /api/claude.js — Proxy a Claude con cuota por usuario
+// ============================================================================
+// Recibe del frontend: { messages, system, max_tokens, tipo }
+// Hace:
+//   1. Verifica el token JWT del usuario (Authorization header)
+//   2. Carga su profile y su plan
+//   3. Verifica que tenga cuota disponible (reseteando el contador si pasó un mes)
+//   4. Llama a la API de Claude con la API key del servidor (la tuya)
+//   5. Incrementa el contador de consultas
+//   6. Loguea el uso en uso_ia (tokens y costo)
+//   7. Devuelve la respuesta de Claude al frontend
+// ============================================================================
+
+const { createClient } = require('@supabase/supabase-js');
+
+// Precios Claude Haiku 4.5 (USD por millón de tokens)
+const PRECIOS = {
+  input: 1.0,
+  cache_write: 1.25,
+  cache_read: 0.10,
+  output: 5.0
+};
+
+const LIMITES_IA = { free: 0, pro: 150, business: 500 };
+
+module.exports = async function handler(req, res) {
+  // CORS (Vercel maneja same-origin si todo está en el mismo dominio,
+  // pero por las dudas habilitamos lo básico)
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    // 1) Validar config del servidor
+    const SUPABASE_URL = process.env.SUPABASE_URL;
+    const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    if (!SUPABASE_URL || !SERVICE_KEY || !ANTHROPIC_KEY) {
+      console.error('Faltan variables de entorno');
+      return res.status(500).json({ error: 'Servidor mal configurado' });
+    }
+
+    // 2) Verificar el JWT del usuario
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace('Bearer ', '').trim();
+    if (!token) {
+      return res.status(401).json({ error: 'No autenticado' });
+    }
+
+    // Cliente de Supabase con service_role para hacer cualquier cosa
+    const sb = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // Validar el token y obtener el user
+    const { data: userData, error: userError } = await sb.auth.getUser(token);
+    if (userError || !userData || !userData.user) {
+      return res.status(401).json({ error: 'Token inválido' });
+    }
+    const userId = userData.user.id;
+
+    // 3) Cargar profile del usuario
+    const { data: profile, error: profileError } = await sb
+      .from('profiles')
+      .select('plan, plan_estado, consultas_ia_mes, consultas_ia_reset')
+      .eq('id', userId)
+      .single();
+    if (profileError || !profile) {
+      return res.status(404).json({ error: 'Profile no encontrado' });
+    }
+
+    const plan = profile.plan || 'free';
+    const limite = LIMITES_IA[plan] || 0;
+
+    if (limite === 0) {
+      return res.status(403).json({
+        error: 'Tu plan actual no incluye asistente IA. Mejorá a Pro para usarlo.',
+        codigo: 'PLAN_SIN_IA'
+      });
+    }
+
+    // 4) Verificar si hay que resetear el contador (pasaron 30 días)
+    let consultasUsadas = profile.consultas_ia_mes || 0;
+    const ahora = new Date();
+    const reset = new Date(profile.consultas_ia_reset || 0);
+    const diasDesdeReset = (ahora - reset) / (1000 * 60 * 60 * 24);
+    if (diasDesdeReset >= 30) {
+      consultasUsadas = 0;
+      await sb.from('profiles').update({
+        consultas_ia_mes: 0,
+        consultas_ia_reset: ahora.toISOString()
+      }).eq('id', userId);
+    }
+
+    // 5) Verificar cuota
+    if (consultasUsadas >= limite) {
+      return res.status(403).json({
+        error: 'Llegaste al límite de consultas IA de este mes (' + limite + '). Se renueva el ' + new Date(reset.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('es-AR') + '.',
+        codigo: 'CUOTA_IA_AGOTADA',
+        usadas: consultasUsadas,
+        limite: limite
+      });
+    }
+
+    // 6) Validar payload
+    const body = req.body || {};
+    const messages = body.messages;
+    const system = body.system;
+    const maxTokens = Math.min(body.max_tokens || 800, 2000);
+    const tipo = body.tipo || 'chat';
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'Falta el campo messages' });
+    }
+
+    // 7) Llamar a Claude
+    const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: maxTokens,
+        system: system,
+        messages: messages
+      })
+    });
+
+    if (!claudeResp.ok) {
+      const errBody = await claudeResp.json().catch(() => ({}));
+      console.error('Error Claude:', claudeResp.status, errBody);
+      return res.status(502).json({
+        error: 'Error al consultar a la IA',
+        detalle: errBody.error && errBody.error.message
+      });
+    }
+
+    const claudeData = await claudeResp.json();
+
+    // 8) Calcular costo (para tracking interno)
+    const usage = claudeData.usage || {};
+    const inputT = usage.input_tokens || 0;
+    const outputT = usage.output_tokens || 0;
+    const cacheReadT = usage.cache_read_input_tokens || 0;
+    const cacheCreationT = usage.cache_creation_input_tokens || 0;
+
+    const costo = (
+      (inputT * PRECIOS.input) +
+      (cacheCreationT * PRECIOS.cache_write) +
+      (cacheReadT * PRECIOS.cache_read) +
+      (outputT * PRECIOS.output)
+    ) / 1_000_000;
+
+    // 9) Incrementar contador y loguear uso (no bloqueamos la respuesta si falla)
+    Promise.all([
+      sb.from('profiles').update({
+        consultas_ia_mes: consultasUsadas + 1
+      }).eq('id', userId),
+      sb.from('uso_ia').insert({
+        user_id: userId,
+        tipo: tipo,
+        input_tokens: inputT,
+        output_tokens: outputT,
+        cache_read_tokens: cacheReadT,
+        cache_creation_tokens: cacheCreationT,
+        costo_usd: costo
+      })
+    ]).catch(e => console.error('Error logueando uso:', e));
+
+    // 10) Devolver al frontend
+    return res.status(200).json({
+      content: claudeData.content,
+      stop_reason: claudeData.stop_reason,
+      usage: usage,
+      cuota: {
+        usadas: consultasUsadas + 1,
+        limite: limite,
+        restantes: limite - (consultasUsadas + 1)
+      }
+    });
+
+  } catch (e) {
+    console.error('Error en /api/claude:', e);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};

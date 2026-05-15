@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>ProveLink — Ingresar</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📦</text></svg>">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-elev: #161616;
+    --bg-elev2: #1f1f1f;
+    --border: #2a2a2a;
+    --text: #ededed;
+    --text-muted: #888;
+    --accent: #4ade80;
+    --accent-hover: #22c55e;
+    --danger: #ef4444;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container {
+    width: 100%;
+    max-width: 380px;
+  }
+  .logo {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .logo-emoji {
+    font-size: 48px;
+    margin-bottom: 8px;
+  }
+  .logo-text {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+  .logo-sub {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-top: 4px;
+  }
+  .card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+  }
+  .tabs {
+    display: flex;
+    background: var(--bg-elev2);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 20px;
+  }
+  .tab {
+    flex: 1;
+    padding: 9px;
+    text-align: center;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-muted);
+    transition: all 0.15s;
+  }
+  .tab.active {
+    background: var(--bg);
+    color: var(--text);
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    margin-top: 14px;
+  }
+  label:first-of-type { margin-top: 0; }
+  input[type="email"], input[type="password"], input[type="text"] {
+    width: 100%;
+    background: var(--bg-elev2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 11px 12px;
+    border-radius: 9px;
+    font-size: 15px;
+    outline: none;
+    transition: border 0.15s;
+  }
+  input:focus {
+    border-color: var(--accent);
+  }
+  button.primary {
+    width: 100%;
+    background: var(--accent);
+    color: #0a0a0a;
+    border: none;
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 20px;
+    transition: background 0.15s;
+  }
+  button.primary:hover { background: var(--accent-hover); }
+  button.primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .error {
+    background: #2d1414;
+    border: 1px solid #5a2828;
+    color: #fca5a5;
+    padding: 10px 12px;
+    border-radius: 9px;
+    font-size: 13px;
+    margin-top: 16px;
+    display: none;
+  }
+  .success {
+    background: #14271a;
+    border: 1px solid #2d5a3a;
+    color: #86efac;
+    padding: 10px 12px;
+    border-radius: 9px;
+    font-size: 13px;
+    margin-top: 16px;
+    display: none;
+  }
+  .link {
+    text-align: center;
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .link a { color: var(--accent); text-decoration: none; cursor: pointer; }
+  .link a:hover { text-decoration: underline; }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="logo">
+    <div class="logo-emoji">📦</div>
+    <div class="logo-text">ProveLink</div>
+    <div class="logo-sub">Gestioná tus proveedores fácil</div>
+  </div>
+
+  <div class="card">
+    <div class="tabs">
+      <div class="tab active" id="tab-login" onclick="cambiarTab('login')">Ingresar</div>
+      <div class="tab" id="tab-registro" onclick="cambiarTab('registro')">Crear cuenta</div>
+    </div>
+
+    <!-- LOGIN -->
+    <div id="form-login">
+      <label for="login-email">Email</label>
+      <input type="email" id="login-email" autocomplete="email" placeholder="tu@email.com">
+
+      <label for="login-pass">Contraseña</label>
+      <input type="password" id="login-pass" autocomplete="current-password">
+
+      <button class="primary" id="btn-login" onclick="hacerLogin()">Ingresar</button>
+
+      <div class="error" id="login-error"></div>
+
+      <div class="link">
+        <a onclick="recuperar()">¿Olvidaste tu contraseña?</a>
+      </div>
+    </div>
+
+    <!-- REGISTRO -->
+    <div id="form-registro" class="hide">
+      <label for="reg-negocio">Nombre del negocio</label>
+      <input type="text" id="reg-negocio" placeholder="Ej: Panadería La Esquina">
+
+      <label for="reg-email">Email</label>
+      <input type="email" id="reg-email" autocomplete="email" placeholder="tu@email.com">
+
+      <label for="reg-pass">Contraseña (mín 6 caracteres)</label>
+      <input type="password" id="reg-pass" autocomplete="new-password">
+
+      <button class="primary" id="btn-registro" onclick="hacerRegistro()">Crear cuenta gratis</button>
+
+      <div class="error" id="reg-error"></div>
+      <div class="success" id="reg-success"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Supabase JS -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  // =========================================================
+  // CONFIG — Reemplazar estas dos líneas con tus credenciales
+  // =========================================================
+  var SUPABASE_URL = 'https://himtrizetvkywrtperqu.supabase.co';
+  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhpbXRyaXpldHZreXdydHBlcnF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4NjAxODgsImV4cCI6MjA5NDQzNjE4OH0.MIuFHZmJMxVYZmJ3SXBgKumw9XYLrhNwHNlzfNgKMVs';
+
+  var supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // Si ya hay sesión activa, redirigir a la app
+  (async function() {
+    try {
+      var { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        window.location.href = '/app';
+      }
+    } catch(e) { console.error('check session', e); }
+  })();
+
+  function cambiarTab(tab) {
+    document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+    document.getElementById('tab-registro').classList.toggle('active', tab === 'registro');
+    document.getElementById('form-login').classList.toggle('hide', tab !== 'login');
+    document.getElementById('form-registro').classList.toggle('hide', tab !== 'registro');
+    document.getElementById('login-error').style.display = 'none';
+    document.getElementById('reg-error').style.display = 'none';
+    document.getElementById('reg-success').style.display = 'none';
+  }
+
+  function mostrarError(elId, msg) {
+    var el = document.getElementById(elId);
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function mostrarOk(elId, msg) {
+    var el = document.getElementById(elId);
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  async function hacerLogin() {
+    var email = document.getElementById('login-email').value.trim();
+    var pass = document.getElementById('login-pass').value;
+    var btn = document.getElementById('btn-login');
+    var errEl = document.getElementById('login-error');
+    errEl.style.display = 'none';
+
+    if (!email || !pass) {
+      mostrarError('login-error', 'Completá email y contraseña');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Ingresando...';
+
+    try {
+      var { data, error } = await supabase.auth.signInWithPassword({ email: email, password: pass });
+      if (error) {
+        var msg = error.message;
+        if (msg.indexOf('Invalid login') >= 0) msg = 'Email o contraseña incorrectos';
+        else if (msg.indexOf('Email not confirmed') >= 0) msg = 'Tenés que confirmar el mail antes de ingresar';
+        mostrarError('login-error', msg);
+        btn.disabled = false;
+        btn.textContent = 'Ingresar';
+        return;
+      }
+      // Login OK -> redirigir
+      window.location.href = '/app';
+    } catch(e) {
+      console.error('login error', e);
+      mostrarError('login-error', 'Error de conexión. Probá de nuevo.');
+      btn.disabled = false;
+      btn.textContent = 'Ingresar';
+    }
+  }
+
+  async function hacerRegistro() {
+    var negocio = document.getElementById('reg-negocio').value.trim();
+    var email = document.getElementById('reg-email').value.trim();
+    var pass = document.getElementById('reg-pass').value;
+    var btn = document.getElementById('btn-registro');
+    document.getElementById('reg-error').style.display = 'none';
+    document.getElementById('reg-success').style.display = 'none';
+
+    if (!negocio || !email || !pass) {
+      mostrarError('reg-error', 'Completá todos los campos');
+      return;
+    }
+    if (pass.length < 6) {
+      mostrarError('reg-error', 'La contraseña debe tener al menos 6 caracteres');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Creando cuenta...';
+
+    try {
+      var { data, error } = await supabase.auth.signUp({
+        email: email,
+        password: pass,
+        options: {
+          data: { nombre_negocio: negocio }
+        }
+      });
+      if (error) {
+        var msg = error.message;
+        if (msg.indexOf('already registered') >= 0 || msg.indexOf('already exists') >= 0) {
+          msg = 'Ese email ya está registrado. Probá ingresando.';
+        }
+        mostrarError('reg-error', msg);
+        btn.disabled = false;
+        btn.textContent = 'Crear cuenta gratis';
+        return;
+      }
+
+      // Guardar el nombre del negocio en el profile
+      if (data.user) {
+        await supabase.from('profiles').update({ nombre_negocio: negocio }).eq('id', data.user.id);
+      }
+
+      // Si hay sesión inmediata (confirmación de email desactivada) -> a la app
+      if (data.session) {
+        window.location.href = '/app';
+      } else {
+        mostrarOk('reg-success', 'Cuenta creada. Revisá tu mail para confirmar y después ingresá.');
+        btn.disabled = false;
+        btn.textContent = 'Crear cuenta gratis';
+      }
+    } catch(e) {
+      console.error('registro error', e);
+      mostrarError('reg-error', 'Error de conexión. Probá de nuevo.');
+      btn.disabled = false;
+      btn.textContent = 'Crear cuenta gratis';
+    }
+  }
+
+  async function recuperar() {
+    var email = document.getElementById('login-email').value.trim();
+    if (!email) {
+      mostrarError('login-error', 'Escribí tu email arriba y volvé a tocar "Olvidaste tu contraseña"');
+      return;
+    }
+    try {
+      var { error } = await supabase.auth.resetPasswordForEmail(email);
+      if (error) {
+        mostrarError('login-error', 'No se pudo enviar el mail: ' + error.message);
+      } else {
+        mostrarError('login-error', ''); // limpiar
+        var ok = document.getElementById('login-error');
+        ok.style.background = '#14271a';
+        ok.style.borderColor = '#2d5a3a';
+        ok.style.color = '#86efac';
+        ok.textContent = 'Te enviamos un mail para recuperar la contraseña';
+        ok.style.display = 'block';
+      }
+    } catch(e) {
+      console.error('recuperar', e);
+    }
+  }
+
+  // Enter para enviar
+  document.getElementById('login-pass').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') hacerLogin();
+  });
+  document.getElementById('reg-pass').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') hacerRegistro();
+  });
+</script>
+
+</body>
+</html>

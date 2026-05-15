@@ -1,0 +1,243 @@
+-- ============================================================================
+-- ProveLink SaaS - Esquema de base de datos (Supabase)
+-- ============================================================================
+-- Este archivo se ejecuta UNA VEZ en el SQL Editor de Supabase.
+-- Crea todas las tablas, políticas de seguridad (RLS) e índices.
+--
+-- Tabla `auth.users` ya existe en Supabase, no la creamos.
+-- ============================================================================
+
+
+-- ============================================================================
+-- TABLA: profiles (extiende auth.users con datos del negocio)
+-- ============================================================================
+create table if not exists public.profiles (
+  id uuid references auth.users(id) on delete cascade primary key,
+  email text not null,
+  nombre_negocio text,                  -- "Panadería La Esquina"
+  telefono text,
+  plan text default 'free' not null,    -- 'free' | 'pro' | 'business'
+  plan_estado text default 'activo',    -- 'activo' | 'pendiente_pago' | 'cancelado'
+  plan_vence timestamptz,               -- cuando vence el plan pago actual
+  mp_suscripcion_id text,               -- id de suscripción de Mercado Pago
+  consultas_ia_mes int default 0,       -- contador del mes en curso
+  consultas_ia_reset timestamptz default now(), -- cuando se reseteó el contador
+  creado timestamptz default now() not null,
+  actualizado timestamptz default now() not null
+);
+
+-- Crear profile automáticamente cuando se registra un nuevo usuario
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email)
+  values (new.id, new.email);
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+
+-- ============================================================================
+-- TABLA: proveedores
+-- ============================================================================
+create table if not exists public.proveedores (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  nombre text not null,
+  telefono text,
+  logo_url text,
+  creado timestamptz default now() not null,
+  actualizado timestamptz default now() not null
+);
+
+create index if not exists idx_proveedores_user on public.proveedores(user_id);
+
+
+-- ============================================================================
+-- TABLA: listas_precios (versión actual de la lista de cada proveedor)
+-- ============================================================================
+create table if not exists public.listas_precios (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  proveedor_id uuid references public.proveedores(id) on delete cascade not null,
+  items jsonb default '[]'::jsonb not null,  -- [{productoLista, precio, ...}]
+  fecha_actualizacion timestamptz default now() not null,
+  unique (proveedor_id)  -- 1 lista actual por proveedor
+);
+
+create index if not exists idx_listas_user on public.listas_precios(user_id);
+
+
+-- ============================================================================
+-- TABLA: snapshots_precios (versiones históricas de listas)
+-- ============================================================================
+create table if not exists public.snapshots_precios (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  proveedor_id uuid references public.proveedores(id) on delete cascade not null,
+  items jsonb default '[]'::jsonb not null,
+  fecha timestamptz default now() not null
+);
+
+create index if not exists idx_snapshots_user on public.snapshots_precios(user_id);
+create index if not exists idx_snapshots_proveedor on public.snapshots_precios(proveedor_id);
+
+
+-- ============================================================================
+-- TABLA: pedido_actual (el pedido que está armando ahora el usuario)
+-- ============================================================================
+create table if not exists public.pedido_actual (
+  user_id uuid references auth.users(id) on delete cascade primary key,
+  items jsonb default '{}'::jsonb not null,
+  actualizado timestamptz default now() not null
+);
+
+
+-- ============================================================================
+-- TABLA: historial_pedidos (pedidos confirmados)
+-- ============================================================================
+create table if not exists public.historial_pedidos (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  fecha timestamptz default now() not null,
+  total numeric default 0,
+  items jsonb default '[]'::jsonb not null,
+  ediciones int default 0,
+  verificado boolean default false,
+  faltantes jsonb default '[]'::jsonb
+);
+
+create index if not exists idx_historial_user on public.historial_pedidos(user_id);
+create index if not exists idx_historial_fecha on public.historial_pedidos(user_id, fecha desc);
+
+
+-- ============================================================================
+-- TABLA: uso_ia (log de consultas a la IA, para análisis y debug)
+-- ============================================================================
+create table if not exists public.uso_ia (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  tipo text not null,                  -- 'chat' | 'procesar_lista'
+  input_tokens int default 0,
+  output_tokens int default 0,
+  cache_read_tokens int default 0,
+  cache_creation_tokens int default 0,
+  costo_usd numeric(10,6) default 0,
+  fecha timestamptz default now() not null
+);
+
+create index if not exists idx_uso_ia_user_fecha on public.uso_ia(user_id, fecha desc);
+
+
+-- ============================================================================
+-- ROW LEVEL SECURITY (RLS)
+-- Cada usuario solo ve/edita sus propios datos
+-- ============================================================================
+
+-- profiles
+alter table public.profiles enable row level security;
+
+drop policy if exists "Profiles: usuarios ven su propio profile" on public.profiles;
+create policy "Profiles: usuarios ven su propio profile"
+  on public.profiles for select
+  using (auth.uid() = id);
+
+drop policy if exists "Profiles: usuarios actualizan su propio profile" on public.profiles;
+create policy "Profiles: usuarios actualizan su propio profile"
+  on public.profiles for update
+  using (auth.uid() = id);
+
+-- proveedores
+alter table public.proveedores enable row level security;
+
+drop policy if exists "Proveedores: CRUD propios" on public.proveedores;
+create policy "Proveedores: CRUD propios"
+  on public.proveedores for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- listas_precios
+alter table public.listas_precios enable row level security;
+
+drop policy if exists "Listas: CRUD propias" on public.listas_precios;
+create policy "Listas: CRUD propias"
+  on public.listas_precios for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- snapshots_precios
+alter table public.snapshots_precios enable row level security;
+
+drop policy if exists "Snapshots: CRUD propios" on public.snapshots_precios;
+create policy "Snapshots: CRUD propios"
+  on public.snapshots_precios for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- pedido_actual
+alter table public.pedido_actual enable row level security;
+
+drop policy if exists "Pedido: CRUD propio" on public.pedido_actual;
+create policy "Pedido: CRUD propio"
+  on public.pedido_actual for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- historial_pedidos
+alter table public.historial_pedidos enable row level security;
+
+drop policy if exists "Historial: CRUD propio" on public.historial_pedidos;
+create policy "Historial: CRUD propio"
+  on public.historial_pedidos for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- uso_ia: el usuario solo puede LEER su propio uso (la inserción la hace el backend con service_role)
+alter table public.uso_ia enable row level security;
+
+drop policy if exists "Uso IA: usuarios ven su propio uso" on public.uso_ia;
+create policy "Uso IA: usuarios ven su propio uso"
+  on public.uso_ia for select
+  using (auth.uid() = user_id);
+
+
+-- ============================================================================
+-- LÍMITES POR PLAN (función helper para el backend)
+-- ============================================================================
+create or replace function public.limite_consultas_ia(plan_text text)
+returns int
+language plpgsql
+immutable
+as $$
+begin
+  case plan_text
+    when 'free' then return 0;
+    when 'pro' then return 150;
+    when 'business' then return 500;
+    else return 0;
+  end case;
+end;
+$$;
+
+create or replace function public.limite_proveedores(plan_text text)
+returns int
+language plpgsql
+immutable
+as $$
+begin
+  case plan_text
+    when 'free' then return 3;
+    when 'pro' then return 999;
+    when 'business' then return 999;
+    else return 3;
+  end case;
+end;
+$$;

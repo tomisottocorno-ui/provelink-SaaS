@@ -1,0 +1,12 @@
+{
+  "name": "provelink-saas",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ProveLink SaaS - Gestión de proveedores y pedidos",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -361,6 +361,149 @@
     color: var(--text-muted);
   }
   .plan-banner-txt strong { color: var(--text); }
+
+  /* ===== Tabs ===== */
+  .tabs-nav {
+    display: flex;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 20px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 9px 12px;
+    text-align: center;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    white-space: nowrap;
+  }
+  .tab-btn.active {
+    background: var(--bg-elev2);
+    color: var(--text);
+  }
+  .tab-section { display: none; }
+  .tab-section.active { display: block; }
+
+  /* ===== Listas de precios ===== */
+  .lista-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 10px;
+  }
+  .lista-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .lista-prov {
+    font-weight: 600;
+    font-size: 15px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lista-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .lista-items-count {
+    background: var(--bg-elev2);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  /* Modal de lista de precios */
+  .modal-lg .modal {
+    max-width: 800px;
+  }
+  .upload-zone {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .upload-btn {
+    flex: 1;
+    background: var(--bg-elev2);
+    border: 1px dashed var(--border);
+    color: var(--text);
+    padding: 14px;
+    border-radius: 10px;
+    cursor: pointer;
+    text-align: center;
+    font-size: 13px;
+    transition: all 0.15s;
+  }
+  .upload-btn:hover {
+    border-color: var(--accent);
+    background: var(--bg-elev3);
+  }
+  .loading-box {
+    background: #14271a;
+    border: 1px solid #2d5a3a;
+    color: #86efac;
+    padding: 10px 14px;
+    border-radius: 9px;
+    font-size: 13px;
+    margin-bottom: 14px;
+    display: none;
+  }
+  .preview-tabla {
+    max-height: 380px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    margin-bottom: 14px;
+  }
+  .preview-fila {
+    display: flex;
+    gap: 8px;
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+  }
+  .preview-fila:last-child { border-bottom: none; }
+  .preview-fila input {
+    background: var(--bg-elev2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 9px;
+    border-radius: 7px;
+    font-size: 13px;
+    outline: none;
+  }
+  .preview-fila input.nombre { flex: 1; min-width: 0; }
+  .preview-fila input.precio { width: 100px; text-align: right; }
+  .preview-fila .btn-icon { padding: 4px; }
+
+  .buscador {
+    background: var(--bg-elev2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 9px;
+    font-size: 14px;
+    width: 100%;
+    margin-bottom: 12px;
+    outline: none;
+  }
+  .buscador:focus { border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -399,16 +542,39 @@
     <button class="btn primary" onclick="abrirPlanes()">Mejorar</button>
   </div>
 
-  <!-- Proveedores -->
-  <div class="seccion-titulo">
-    <h2>Proveedores <span class="badge" id="prov-count">0</span></h2>
-    <button class="btn primary" onclick="abrirModalProv()">+ Nuevo</button>
+  <!-- Tabs de navegación -->
+  <div class="tabs-nav">
+    <button class="tab-btn active" data-tab="proveedores" onclick="cambiarTab('proveedores')">Proveedores</button>
+    <button class="tab-btn" data-tab="listas" onclick="cambiarTab('listas')">Listas</button>
   </div>
 
-  <div id="prov-lista">
-    <div class="empty">
-      <div class="empty-emoji">📦</div>
-      <div class="empty-title">Cargando...</div>
+  <!-- ============ TAB: PROVEEDORES ============ -->
+  <div class="tab-section active" id="tab-proveedores">
+    <div class="seccion-titulo">
+      <h2>Proveedores <span class="badge" id="prov-count">0</span></h2>
+      <button class="btn primary" onclick="abrirModalProv()">+ Nuevo</button>
+    </div>
+
+    <div id="prov-lista">
+      <div class="empty">
+        <div class="empty-emoji">📦</div>
+        <div class="empty-title">Cargando...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ TAB: LISTAS ============ -->
+  <div class="tab-section" id="tab-listas">
+    <div class="seccion-titulo">
+      <h2>Listas de precios <span class="badge" id="listas-count">0</span></h2>
+      <button class="btn primary" onclick="abrirModalLista()">+ Cargar</button>
+    </div>
+
+    <div id="listas-lista">
+      <div class="empty">
+        <div class="empty-emoji">📋</div>
+        <div class="empty-title">Cargando...</div>
+      </div>
     </div>
   </div>
 
@@ -436,6 +602,53 @@
   </div>
 </div>
 
+<!-- Modal cargar/editar lista de precios -->
+<div class="modal-overlay modal-lg" id="modal-lista">
+  <div class="modal">
+    <h3 id="modal-lista-titulo">Cargar lista de precios</h3>
+
+    <div class="form-row">
+      <label for="lista-prov-select">Proveedor *</label>
+      <select id="lista-prov-select" style="width:100%;background:var(--bg-elev2);border:1px solid var(--border);color:var(--text);padding:11px 12px;border-radius:9px;font-size:15px;"></select>
+    </div>
+
+    <div class="upload-zone">
+      <button class="upload-btn" onclick="document.getElementById('lista-input-img').click()">
+        📷 Subir foto o PDF
+      </button>
+    </div>
+    <input type="file" id="lista-input-img" accept="image/*,application/pdf" style="display:none;" onchange="procesarArchivo(event)">
+
+    <div class="loading-box" id="lista-loading">Procesando...</div>
+
+    <div style="margin-bottom:10px;font-size:13px;color:var(--text-muted);" id="preview-info"></div>
+
+    <div class="preview-tabla" id="preview-tabla" style="display:none;"></div>
+
+    <div class="modal-actions">
+      <button class="btn" onclick="cerrarModalLista()">Cancelar</button>
+      <button class="btn danger" id="btn-eliminar-lista" onclick="eliminarLista()" style="display:none;">Eliminar</button>
+      <button class="btn primary" id="btn-guardar-lista" onclick="guardarLista()" disabled>Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal ver lista (con buscador) -->
+<div class="modal-overlay modal-lg" id="modal-ver-lista">
+  <div class="modal">
+    <h3 id="ver-lista-titulo">Lista de precios</h3>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;" id="ver-lista-fecha"></div>
+
+    <input type="text" class="buscador" id="ver-lista-buscar" placeholder="🔍 Buscar producto..." oninput="filtrarVerLista()">
+
+    <div class="preview-tabla" id="ver-lista-items"></div>
+
+    <div class="modal-actions">
+      <button class="btn" onclick="cerrarVerLista()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 // ============================================================
@@ -451,6 +664,10 @@ var sesion = null;
 var profile = null;
 var proveedores = [];
 var provEditandoId = null;
+var listas = [];
+var listaEditandoId = null;  // id del proveedor cuya lista estamos editando
+var filasPreview = [];  // [{productoLista, precio}, ...] del preview de la nueva lista
+var verListaItems = [];  // items en la modal de ver lista (para filtrar)
 
 // Límites por plan (espejo de la función SQL)
 var LIMITES = {
@@ -699,6 +916,418 @@ async function borrarProveedor(id) {
 }
 
 // ============================================================
+// TABS — Cambiar entre Proveedores / Listas
+// ============================================================
+function cambiarTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+  document.querySelectorAll('.tab-section').forEach(function(s) {
+    s.classList.toggle('active', s.id === 'tab-' + tab);
+  });
+  if (tab === 'listas') {
+    cargarListas();
+  }
+}
+
+// ============================================================
+// LISTAS DE PRECIOS — Carga y render
+// ============================================================
+async function cargarListas() {
+  try {
+    var { data, error } = await supabase
+      .from('listas_precios')
+      .select('*')
+      .order('fecha_actualizacion', { ascending: false });
+    if (error) throw error;
+    listas = data || [];
+    renderListas();
+  } catch(e) {
+    console.error('cargarListas', e);
+    showToast('Error al cargar listas', 'error');
+  }
+}
+
+function renderListas() {
+  $('listas-count').textContent = listas.length;
+  var cont = $('listas-lista');
+  if (proveedores.length === 0) {
+    cont.innerHTML = '<div class="empty">' +
+      '<div class="empty-emoji">📋</div>' +
+      '<div class="empty-title">Primero agregá proveedores</div>' +
+      '<div class="empty-sub">Las listas de precios se asocian a un proveedor</div>' +
+      '</div>';
+    return;
+  }
+  if (listas.length === 0) {
+    cont.innerHTML = '<div class="empty">' +
+      '<div class="empty-emoji">📋</div>' +
+      '<div class="empty-title">No cargaste ninguna lista todavía</div>' +
+      '<div class="empty-sub">Subí una foto o PDF y la IA extrae los productos sola</div>' +
+      '</div>';
+    return;
+  }
+  var html = '';
+  listas.forEach(function(l) {
+    var prov = proveedores.find(function(p) { return p.id === l.proveedor_id; });
+    var provNombre = prov ? prov.nombre : '?';
+    var cantItems = (l.items || []).length;
+    var fechaStr = new Date(l.fecha_actualizacion).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' });
+    html += '<div class="lista-card">' +
+      '<div class="lista-header">' +
+        '<div class="lista-prov">' + escapeHtml(provNombre) + '</div>' +
+        '<span class="lista-items-count">' + cantItems + ' items</span>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">' +
+        '<div class="lista-meta">Actualizada ' + fechaStr + '</div>' +
+        '<div style="display:flex;gap:4px;">' +
+          '<button class="btn-icon" onclick="abrirVerLista(\'' + l.proveedor_id + '\')" title="Ver">👁️</button>' +
+          '<button class="btn-icon" onclick="abrirModalLista(\'' + l.proveedor_id + '\')" title="Editar">✏️</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  });
+  cont.innerHTML = html;
+}
+
+// ============================================================
+// MODAL: cargar/editar lista
+// ============================================================
+function abrirModalLista(proveedorId) {
+  if (proveedores.length === 0) {
+    showToast('Primero agregá un proveedor', 'error');
+    return;
+  }
+  // Plan free: no permitir IA (procesar archivo)
+  // pero sí permitir cargar lista manualmente (en una próxima iteración).
+  // Por ahora: si free, avisar
+  if (profile.plan === 'free') {
+    showToast('Cargar listas requiere plan Pro o superior (usa IA)', 'error');
+    return;
+  }
+
+  listaEditandoId = proveedorId || null;
+  filasPreview = [];
+
+  // Llenar select de proveedores
+  var sel = $('lista-prov-select');
+  sel.innerHTML = '';
+  proveedores.forEach(function(p) {
+    var opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.nombre;
+    sel.appendChild(opt);
+  });
+
+  if (proveedorId) {
+    // Modo edición: cargar lista existente
+    var lista = listas.find(function(l) { return l.proveedor_id === proveedorId; });
+    if (lista) {
+      sel.value = proveedorId;
+      sel.disabled = true;
+      filasPreview = (lista.items || []).map(function(it) {
+        return { productoLista: it.productoLista, precio: parseFloat(it.precio) };
+      });
+      $('modal-lista-titulo').textContent = 'Editar lista de precios';
+      $('btn-eliminar-lista').style.display = 'inline-flex';
+      renderPreview();
+    }
+  } else {
+    sel.disabled = false;
+    $('modal-lista-titulo').textContent = 'Cargar lista de precios';
+    $('btn-eliminar-lista').style.display = 'none';
+    $('preview-tabla').style.display = 'none';
+    $('preview-info').textContent = '';
+    $('btn-guardar-lista').disabled = true;
+  }
+
+  $('lista-loading').style.display = 'none';
+  $('modal-lista').classList.add('open');
+}
+
+function cerrarModalLista() {
+  $('modal-lista').classList.remove('open');
+  $('lista-input-img').value = '';
+  filasPreview = [];
+  listaEditandoId = null;
+}
+
+// ============================================================
+// Procesar archivo con IA (foto o PDF)
+// ============================================================
+function fileToBase64(file) {
+  return new Promise(function(resolve, reject) {
+    var r = new FileReader();
+    r.onload = function() { resolve(r.result.split(',')[1]); };
+    r.onerror = function() { reject(new Error('No se pudo leer el archivo')); };
+    r.readAsDataURL(file);
+  });
+}
+
+async function procesarArchivo(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+
+  // Validar tamaño (max 5 MB)
+  var maxBytes = 5 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    showToast('El archivo es muy grande (máx 5 MB). Probá con una foto de menor resolución.', 'error');
+    event.target.value = '';
+    return;
+  }
+
+  // Mostrar loading
+  var loading = $('lista-loading');
+  loading.textContent = '🔄 Procesando con IA... (puede tardar 20-40 seg)';
+  loading.style.display = 'block';
+  $('btn-guardar-lista').disabled = true;
+
+  try {
+    var base64 = await fileToBase64(file);
+    var mimeType = file.type || 'image/jpeg';
+
+    var prompt = 'Esta imagen o PDF es una lista de precios de un proveedor. Extrae cada producto con su precio.\n\nIMPORTANTE:\n- Devolvé EXCLUSIVAMENTE un array JSON, sin texto adicional, sin markdown.\n- Cada elemento: {"nombre": "...", "precio": numero}\n- Mantené los nombres COMPLETOS incluyendo marca, presentación y tamaño del envase\n- El precio es solo el número (usá punto decimal: 9644.07)\n- Ignorá encabezados, totales, fechas y filas que no sean productos';
+
+    // Llamar al backend (no a Claude directo)
+    var resp = await fetch('/api/claude', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + sesion.access_token
+      },
+      body: JSON.stringify({
+        tipo: 'procesar_lista',
+        max_tokens: 8000,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
+            { type: 'text', text: prompt }
+          ]
+        }]
+      })
+    });
+
+    var data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data.error || 'Error desconocido');
+    }
+
+    var texto = data.content && data.content[0] && data.content[0].text || '';
+    texto = texto.replace(/```json|```/g, '').trim();
+    // Si la IA puso algo antes/después del array, extraer
+    var ini = texto.indexOf('['), fin = texto.lastIndexOf(']');
+    if (ini < 0 || fin <= ini) throw new Error('La IA no devolvió un formato válido');
+    var items = JSON.parse(texto.slice(ini, fin + 1));
+
+    filasPreview = items
+      .filter(function(it) { return it.nombre && it.precio > 0; })
+      .map(function(it) {
+        return { productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio) };
+      });
+
+    loading.style.display = 'none';
+    renderPreview();
+    showToast('IA extrajo ' + filasPreview.length + ' productos');
+
+  } catch(e) {
+    console.error('procesarArchivo', e);
+    loading.style.display = 'none';
+    showToast('Error: ' + (e.message || 'no se pudo procesar'), 'error');
+  } finally {
+    event.target.value = '';
+  }
+}
+
+function renderPreview() {
+  var tabla = $('preview-tabla');
+  if (filasPreview.length === 0) {
+    tabla.style.display = 'none';
+    $('preview-info').textContent = '';
+    $('btn-guardar-lista').disabled = true;
+    return;
+  }
+  $('preview-info').textContent = 'Revisá y editá si hace falta. Después tocá "Guardar".';
+  var html = '';
+  filasPreview.forEach(function(it, idx) {
+    html += '<div class="preview-fila">' +
+      '<input type="text" class="nombre" value="' + escapeHtmlAttr(it.productoLista) + '" oninput="editarFilaPreview(' + idx + ', this.value, null)">' +
+      '<input type="number" step="0.01" class="precio" value="' + it.precio + '" oninput="editarFilaPreview(' + idx + ', null, this.value)">' +
+      '<button class="btn-icon" onclick="borrarFilaPreview(' + idx + ')" title="Borrar">🗑️</button>' +
+    '</div>';
+  });
+  tabla.innerHTML = html;
+  tabla.style.display = 'block';
+  $('btn-guardar-lista').disabled = false;
+}
+
+function editarFilaPreview(idx, nombre, precio) {
+  if (nombre !== null) filasPreview[idx].productoLista = nombre;
+  if (precio !== null) {
+    var p = parseFloat(precio);
+    filasPreview[idx].precio = isNaN(p) ? 0 : p;
+  }
+}
+
+function borrarFilaPreview(idx) {
+  filasPreview.splice(idx, 1);
+  renderPreview();
+}
+
+// ============================================================
+// Guardar lista (con snapshot de la versión anterior)
+// ============================================================
+async function guardarLista() {
+  var proveedorId = $('lista-prov-select').value;
+  if (!proveedorId) {
+    showToast('Seleccioná un proveedor', 'error');
+    return;
+  }
+  // Filtrar filas válidas
+  var items = filasPreview.filter(function(it) {
+    return it.productoLista && it.productoLista.trim() && it.precio > 0;
+  });
+  if (items.length === 0) {
+    showToast('No hay items válidos para guardar', 'error');
+    return;
+  }
+
+  var btn = $('btn-guardar-lista');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+
+  try {
+    // 1) Si ya existe una lista para este proveedor, hacer snapshot de la anterior
+    var listaExistente = listas.find(function(l) { return l.proveedor_id === proveedorId; });
+    if (listaExistente && listaExistente.items && listaExistente.items.length > 0) {
+      var { error: snapError } = await supabase
+        .from('snapshots_precios')
+        .insert({
+          user_id: sesion.user.id,
+          proveedor_id: proveedorId,
+          items: listaExistente.items
+        });
+      if (snapError) console.error('Error guardando snapshot:', snapError);
+    }
+
+    // 2) Upsert de la lista (insert si no existe, update si existe)
+    if (listaExistente) {
+      var { error } = await supabase
+        .from('listas_precios')
+        .update({
+          items: items,
+          fecha_actualizacion: new Date().toISOString()
+        })
+        .eq('id', listaExistente.id);
+      if (error) throw error;
+    } else {
+      var { error } = await supabase
+        .from('listas_precios')
+        .insert({
+          user_id: sesion.user.id,
+          proveedor_id: proveedorId,
+          items: items
+        });
+      if (error) throw error;
+    }
+
+    showToast('Lista guardada (' + items.length + ' items)', 'success');
+    cerrarModalLista();
+    await cargarListas();
+  } catch(e) {
+    console.error('guardarLista', e);
+    showToast('Error al guardar: ' + (e.message || ''), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Guardar';
+  }
+}
+
+// ============================================================
+// Eliminar lista entera
+// ============================================================
+async function eliminarLista() {
+  if (!listaEditandoId) return;
+  var prov = proveedores.find(function(p) { return p.id === listaEditandoId; });
+  if (!confirm('¿Eliminar la lista de "' + (prov ? prov.nombre : '?') + '"?')) return;
+  try {
+    var { error } = await supabase
+      .from('listas_precios')
+      .delete()
+      .eq('proveedor_id', listaEditandoId);
+    if (error) throw error;
+    showToast('Lista eliminada', 'success');
+    cerrarModalLista();
+    await cargarListas();
+  } catch(e) {
+    console.error('eliminarLista', e);
+    showToast('Error: ' + (e.message || ''), 'error');
+  }
+}
+
+// ============================================================
+// Modal: ver lista (solo lectura con buscador)
+// ============================================================
+function abrirVerLista(proveedorId) {
+  var lista = listas.find(function(l) { return l.proveedor_id === proveedorId; });
+  if (!lista) return;
+  var prov = proveedores.find(function(p) { return p.id === proveedorId; });
+  $('ver-lista-titulo').textContent = 'Lista de ' + (prov ? prov.nombre : '?');
+  var fechaStr = new Date(lista.fecha_actualizacion).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' });
+  $('ver-lista-fecha').textContent = (lista.items || []).length + ' items · Actualizada ' + fechaStr;
+  $('ver-lista-buscar').value = '';
+  verListaItems = lista.items || [];
+  renderVerLista(verListaItems);
+  $('modal-ver-lista').classList.add('open');
+}
+
+function cerrarVerLista() {
+  $('modal-ver-lista').classList.remove('open');
+}
+
+function filtrarVerLista() {
+  var q = $('ver-lista-buscar').value.toLowerCase().trim();
+  if (!q) {
+    renderVerLista(verListaItems);
+    return;
+  }
+  var filtrados = verListaItems.filter(function(it) {
+    return (it.productoLista || '').toLowerCase().indexOf(q) >= 0;
+  });
+  renderVerLista(filtrados);
+}
+
+function renderVerLista(items) {
+  var cont = $('ver-lista-items');
+  if (items.length === 0) {
+    cont.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:13px;">Sin resultados</div>';
+    return;
+  }
+  var html = '';
+  items.forEach(function(it) {
+    html += '<div class="preview-fila" style="cursor:default;">' +
+      '<div style="flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(it.productoLista) + '</div>' +
+      '<div style="font-size:13px;font-weight:600;color:var(--accent);white-space:nowrap;">' + formatPrecio(it.precio) + '</div>' +
+    '</div>';
+  });
+  cont.innerHTML = html;
+}
+
+function formatPrecio(n) {
+  if (isNaN(n)) return '$0';
+  var num = parseFloat(n);
+  var s = num.toFixed(2);
+  var parts = s.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return '$' + parts.join(',');
+}
+
+function escapeHtmlAttr(s) {
+  if (s == null) return '';
+  return String(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/&/g, '&amp;');
+}
+
+// ============================================================
 // PLACEHOLDERS para features futuras
 // ============================================================
 function abrirPlanes() {
@@ -740,8 +1369,10 @@ document.addEventListener('keydown', function(e) {
       guardarProveedor();
     }
   }
-  if (e.key === 'Escape' && $('modal-prov').classList.contains('open')) {
-    cerrarModalProv();
+  if (e.key === 'Escape') {
+    if ($('modal-prov').classList.contains('open')) cerrarModalProv();
+    if ($('modal-lista').classList.contains('open')) cerrarModalLista();
+    if ($('modal-ver-lista').classList.contains('open')) cerrarVerLista();
   }
 });
 </script>

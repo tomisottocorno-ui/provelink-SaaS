@@ -1,10 +1,10 @@
 {
   "rewrites": [
-    { "source": "/", "destination": "/public/index.html" },
-    { "source": "/app", "destination": "/app/index.html" },
-    { "source": "/app/", "destination": "/app/index.html" },
+    { "source": "/", "destination": "/app/login.html" },
     { "source": "/login", "destination": "/app/login.html" },
-    { "source": "/planes", "destination": "/app/planes.html" }
+    { "source": "/login.html", "destination": "/app/login.html" },
+    { "source": "/app", "destination": "/app/index.html" },
+    { "source": "/app/", "destination": "/app/index.html" }
   ],
   "functions": {
     "api/*.js": {

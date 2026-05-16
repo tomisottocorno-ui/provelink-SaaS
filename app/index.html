@@ -1076,6 +1076,25 @@ async function procesarArchivo(event) {
     return;
   }
 
+  // Detectar tipo
+  var esPDF = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  var mimeType = file.type || (esPDF ? 'application/pdf' : 'image/jpeg');
+
+  // Si es imagen, validar tipo soportado por la API
+  if (!esPDF) {
+    var tiposValidos = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (tiposValidos.indexOf(mimeType) < 0) {
+      // Algunos navegadores envían 'image/jpg' o variantes; normalizamos
+      if (mimeType === 'image/jpg') {
+        mimeType = 'image/jpeg';
+      } else {
+        showToast('Tipo de imagen no soportado. Usá JPG, PNG, GIF o WEBP.', 'error');
+        event.target.value = '';
+        return;
+      }
+    }
+  }
+
   // Mostrar loading
   var loading = $('lista-loading');
   loading.textContent = '🔄 Procesando con IA... (puede tardar 20-40 seg)';
@@ -1084,9 +1103,22 @@ async function procesarArchivo(event) {
 
   try {
     var base64 = await fileToBase64(file);
-    var mimeType = file.type || 'image/jpeg';
 
     var prompt = 'Esta imagen o PDF es una lista de precios de un proveedor. Extrae cada producto con su precio.\n\nIMPORTANTE:\n- Devolvé EXCLUSIVAMENTE un array JSON, sin texto adicional, sin markdown.\n- Cada elemento: {"nombre": "...", "precio": numero}\n- Mantené los nombres COMPLETOS incluyendo marca, presentación y tamaño del envase\n- El precio es solo el número (usá punto decimal: 9644.07)\n- Ignorá encabezados, totales, fechas y filas que no sean productos';
+
+    // Construir el bloque de contenido según tipo: image o document
+    var bloqueArchivo;
+    if (esPDF) {
+      bloqueArchivo = {
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: base64 }
+      };
+    } else {
+      bloqueArchivo = {
+        type: 'image',
+        source: { type: 'base64', media_type: mimeType, data: base64 }
+      };
+    }
 
     // Llamar al backend (no a Claude directo)
     var resp = await fetch('/api/claude', {
@@ -1101,7 +1133,7 @@ async function procesarArchivo(event) {
         messages: [{
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
+            bloqueArchivo,
             { type: 'text', text: prompt }
           ]
         }]

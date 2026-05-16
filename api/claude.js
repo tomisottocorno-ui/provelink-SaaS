@@ -78,42 +78,90 @@ module.exports = async function handler(req, res) {
     const plan = profile.plan || 'free';
     const limite = LIMITES_IA[plan] || 0;
 
-    if (limite === 0) {
-      return res.status(403).json({
-        error: 'Tu plan actual no incluye asistente IA. Mejorá a Pro para usarlo.',
-        codigo: 'PLAN_SIN_IA'
-      });
-    }
-
-    // 4) Verificar si hay que resetear el contador (pasaron 30 días)
-    let consultasUsadas = profile.consultas_ia_mes || 0;
-    const ahora = new Date();
-    const reset = new Date(profile.consultas_ia_reset || 0);
-    const diasDesdeReset = (ahora - reset) / (1000 * 60 * 60 * 24);
-    if (diasDesdeReset >= 30) {
-      consultasUsadas = 0;
-      await sb.from('profiles').update({
-        consultas_ia_mes: 0,
-        consultas_ia_reset: ahora.toISOString()
-      }).eq('id', userId);
-    }
-
-    // 5) Verificar cuota
-    if (consultasUsadas >= limite) {
-      return res.status(403).json({
-        error: 'Llegaste al límite de consultas IA de este mes (' + limite + '). Se renueva el ' + new Date(reset.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('es-AR') + '.',
-        codigo: 'CUOTA_IA_AGOTADA',
-        usadas: consultasUsadas,
-        limite: limite
-      });
-    }
-
-    // 6) Validar payload
+    // Validar payload temprano
     const body = req.body || {};
     const messages = body.messages;
     const system = body.system;
-    const maxTokens = Math.min(body.max_tokens || 800, 2000);
+    const maxTokens = Math.min(body.max_tokens || 800, 16000);
     const tipo = body.tipo || 'chat';
+
+    // Los tipos relacionados con procesar listas NO consumen cuota de IA
+    // pero tienen sus propias restricciones por plan
+    const tiposProcesarLista = ['procesar_lista', 'detectar_columnas', 'procesar_chunk'];
+    const esProcesarLista = tiposProcesarLista.indexOf(tipo) >= 0;
+
+    if (esProcesarLista) {
+      // Validar límite de listas para plan free: máximo 1 lista en total
+      if (plan === 'free') {
+        const { count, error: countError } = await sb
+          .from('listas_precios')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', userId);
+        if (countError) {
+          console.error('Error contando listas:', countError);
+        } else if ((count || 0) >= 1) {
+          // En el plan free, solo se puede tener 1 lista. Si ya tiene una,
+          // bloquear procesamiento de nuevas listas. Sí puede editar la existente
+          // (eso no pasa por acá porque no llama a IA).
+          // Excepción: si ya estamos actualizando una lista existente, el frontend
+          // debería usar el endpoint de update directo, no éste.
+          // Para diferenciar, requerimos que se pase proveedor_id y validamos.
+          const proveedorId = body.proveedor_id;
+          if (proveedorId) {
+            const { data: listaExistente } = await sb
+              .from('listas_precios')
+              .select('id')
+              .eq('user_id', userId)
+              .eq('proveedor_id', proveedorId)
+              .maybeSingle();
+            if (!listaExistente) {
+              return res.status(403).json({
+                error: 'El plan Free permite cargar 1 lista. Mejorá a Pro para listas ilimitadas.',
+                codigo: 'LIMITE_LISTAS_FREE'
+              });
+            }
+            // Si existe lista para ese proveedor, está actualizándola: permitir
+          } else {
+            return res.status(403).json({
+              error: 'El plan Free permite cargar 1 lista. Mejorá a Pro para listas ilimitadas.',
+              codigo: 'LIMITE_LISTAS_FREE'
+            });
+          }
+        }
+      }
+      // Pro y Business: ilimitado, no validamos cuota de IA
+    } else {
+      // Tipo 'chat' (asistente IA): valida cuota normal
+      if (limite === 0) {
+        return res.status(403).json({
+          error: 'Tu plan actual no incluye asistente IA. Mejorá a Pro para usarlo.',
+          codigo: 'PLAN_SIN_IA'
+        });
+      }
+
+      // 4) Verificar si hay que resetear el contador (pasaron 30 días)
+      let consultasUsadas = profile.consultas_ia_mes || 0;
+      const ahora = new Date();
+      const reset = new Date(profile.consultas_ia_reset || 0);
+      const diasDesdeReset = (ahora - reset) / (1000 * 60 * 60 * 24);
+      if (diasDesdeReset >= 30) {
+        consultasUsadas = 0;
+        await sb.from('profiles').update({
+          consultas_ia_mes: 0,
+          consultas_ia_reset: ahora.toISOString()
+        }).eq('id', userId);
+      }
+
+      // 5) Verificar cuota
+      if (consultasUsadas >= limite) {
+        return res.status(403).json({
+          error: 'Llegaste al límite de consultas IA de este mes (' + limite + '). Se renueva el ' + new Date(reset.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('es-AR') + '.',
+          codigo: 'CUOTA_IA_AGOTADA',
+          usadas: consultasUsadas,
+          limite: limite
+        });
+      }
+    }
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'Falta el campo messages' });
@@ -160,11 +208,17 @@ module.exports = async function handler(req, res) {
       (outputT * PRECIOS.output)
     ) / 1_000_000;
 
-    // 9) Incrementar contador y loguear uso (no bloqueamos la respuesta si falla)
-    Promise.all([
-      sb.from('profiles').update({
-        consultas_ia_mes: consultasUsadas + 1
-      }).eq('id', userId),
+    // 9) Loguear uso siempre. Solo incrementar contador si es tipo 'chat'
+    const updates = [];
+    if (!esProcesarLista) {
+      const consultasUsadas = profile.consultas_ia_mes || 0;
+      updates.push(
+        sb.from('profiles').update({
+          consultas_ia_mes: consultasUsadas + 1
+        }).eq('id', userId)
+      );
+    }
+    updates.push(
       sb.from('uso_ia').insert({
         user_id: userId,
         tipo: tipo,
@@ -174,18 +228,20 @@ module.exports = async function handler(req, res) {
         cache_creation_tokens: cacheCreationT,
         costo_usd: costo
       })
-    ]).catch(e => console.error('Error logueando uso:', e));
+    );
+    Promise.all(updates).catch(e => console.error('Error logueando uso:', e));
 
     // 10) Devolver al frontend
+    const cuotaInfo = esProcesarLista ? null : {
+      usadas: (profile.consultas_ia_mes || 0) + 1,
+      limite: limite,
+      restantes: limite - ((profile.consultas_ia_mes || 0) + 1)
+    };
     return res.status(200).json({
       content: claudeData.content,
       stop_reason: claudeData.stop_reason,
       usage: usage,
-      cuota: {
-        usadas: consultasUsadas + 1,
-        limite: limite,
-        restantes: limite - (consultasUsadas + 1)
-      }
+      cuota: cuotaInfo
     });
 
   } catch (e) {

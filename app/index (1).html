@@ -650,7 +650,12 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
+// Configurar el worker de PDF.js
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
 // ============================================================
 // CONFIG
 // ============================================================
@@ -998,12 +1003,14 @@ function abrirModalLista(proveedorId) {
     showToast('Primero agregá un proveedor', 'error');
     return;
   }
-  // Plan free: no permitir IA (procesar archivo)
-  // pero sí permitir cargar lista manualmente (en una próxima iteración).
-  // Por ahora: si free, avisar
+
+  // Plan free: máximo 1 lista. Si ya tiene una y no está editando esa misma, bloquear
   if (profile.plan === 'free') {
-    showToast('Cargar listas requiere plan Pro o superior (usa IA)', 'error');
-    return;
+    var yaEditandoEsta = proveedorId && listas.some(function(l) { return l.proveedor_id === proveedorId; });
+    if (listas.length >= 1 && !yaEditandoEsta) {
+      showToast('El plan Free permite 1 lista. Mejorá a Pro para cargar más.', 'error');
+      return;
+    }
   }
 
   listaEditandoId = proveedorId || null;
@@ -1064,142 +1071,340 @@ function fileToBase64(file) {
   });
 }
 
+// Recupera items aunque la IA haya devuelto JSON truncado
+// Busca pares {"nombre":"...", "precio":NUM} en cualquier lugar del texto
+function recuperarItemsTruncados(texto) {
+  var items = [];
+  // Regex que matchea: {"nombre": "...", "precio": 1234.56}
+  var re = /\{\s*"nombre"\s*:\s*"([^"]+)"\s*,\s*"precio"\s*:\s*([\d.]+)\s*\}/g;
+  var m;
+  while ((m = re.exec(texto)) !== null) {
+    var precio = parseFloat(m[2]);
+    if (!isNaN(precio) && precio > 0) {
+      items.push({ nombre: m[1], precio: precio });
+    }
+  }
+  console.log('[IA] Recuperados ' + items.length + ' items del JSON truncado');
+  return items;
+}
+
 async function procesarArchivo(event) {
   var file = event.target.files[0];
   if (!file) return;
 
-  // Validar tamaño (max 5 MB)
-  var maxBytes = 5 * 1024 * 1024;
+  // Validar tamaño (max 20 MB)
+  var maxBytes = 20 * 1024 * 1024;
   if (file.size > maxBytes) {
-    showToast('El archivo es muy grande (máx 5 MB). Probá con una foto de menor resolución.', 'error');
+    showToast('El archivo es muy grande (máx 20 MB).', 'error');
     event.target.value = '';
     return;
   }
 
-  // Detectar tipo
-  var esPDF = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
-  var mimeType = file.type || (esPDF ? 'application/pdf' : 'image/jpeg');
-
-  // Si es imagen, validar tipo soportado por la API
-  if (!esPDF) {
-    var tiposValidos = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    if (tiposValidos.indexOf(mimeType) < 0) {
-      // Algunos navegadores envían 'image/jpg' o variantes; normalizamos
-      if (mimeType === 'image/jpg') {
-        mimeType = 'image/jpeg';
-      } else {
-        showToast('Tipo de imagen no soportado. Usá JPG, PNG, GIF o WEBP.', 'error');
-        event.target.value = '';
-        return;
-      }
+  // Validar límite del plan free ANTES de procesar
+  if (profile.plan === 'free') {
+    // Si ya tiene una lista y NO está editando esa misma, bloquear
+    var proveedorElegido = $('lista-prov-select').value;
+    var listaExistenteEseProv = listas.find(function(l) { return l.proveedor_id === proveedorElegido; });
+    if (listas.length >= 1 && !listaExistenteEseProv) {
+      showToast('El plan Free permite 1 lista. Mejorá a Pro para listas ilimitadas.', 'error');
+      event.target.value = '';
+      return;
     }
   }
 
-  // Mostrar loading
-  var loading = $('lista-loading');
-  loading.textContent = '🔄 Procesando con IA... (puede tardar 20-40 seg)';
-  loading.style.display = 'block';
-  $('btn-guardar-lista').disabled = true;
+  var esPDF = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
 
   try {
-    var base64 = await fileToBase64(file);
-
-    var prompt = 'Esta imagen o PDF es una lista de precios de un proveedor. Extrae cada producto con su precio.\n\nFORMATO DE RESPUESTA OBLIGATORIO:\n- Tu respuesta debe ser ÚNICAMENTE un array JSON válido.\n- Empezá con [ y terminá con ]\n- NO incluyas texto explicativo antes ni después.\n- NO uses markdown ni bloques de código.\n- Cada elemento debe tener exactamente: {"nombre": "...", "precio": numero}\n- Mantené nombres COMPLETOS (marca, presentación, tamaño del envase)\n- precio es número con punto decimal: 9644.07\n- Ignorá encabezados, totales, fechas y filas que no sean productos\n- Si no encontrás ningún producto, devolvé []';
-
-    // Construir el bloque de contenido según tipo: image o document
-    var bloqueArchivo;
     if (esPDF) {
-      bloqueArchivo = {
-        type: 'document',
-        source: { type: 'base64', media_type: 'application/pdf', data: base64 }
-      };
+      await procesarPDF(file);
     } else {
-      bloqueArchivo = {
-        type: 'image',
-        source: { type: 'base64', media_type: mimeType, data: base64 }
-      };
+      await procesarImagen(file);
     }
-
-    // Llamar al backend (no a Claude directo)
-    var resp = await fetch('/api/claude', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + sesion.access_token
-      },
-      body: JSON.stringify({
-        tipo: 'procesar_lista',
-        max_tokens: 8000,
-        messages: [{
-          role: 'user',
-          content: [
-            bloqueArchivo,
-            { type: 'text', text: prompt }
-          ]
-        }]
-      })
-    });
-
-    var data = await resp.json();
-    if (!resp.ok) {
-      throw new Error(data.error || 'Error desconocido');
-    }
-
-    var texto = data.content && data.content[0] && data.content[0].text || '';
-    console.log('[IA] Respuesta completa:', texto);
-    console.log('[IA] Usage:', data.usage);
-
-    // Limpiar markdown
-    texto = texto.replace(/```json|```/g, '').trim();
-
-    var items = null;
-    // Intento 1: parsear como JSON directo
-    try {
-      items = JSON.parse(texto);
-    } catch(e1) {
-      // Intento 2: buscar el array [...] dentro del texto
-      var ini = texto.indexOf('[');
-      var fin = texto.lastIndexOf(']');
-      if (ini >= 0 && fin > ini) {
-        try {
-          items = JSON.parse(texto.slice(ini, fin + 1));
-        } catch(e2) {
-          console.error('[IA] No se pudo parsear, respuesta:', texto.slice(0, 500));
-          throw new Error('La IA respondió pero no en formato esperado. Revisá la consola.');
-        }
-      } else {
-        console.error('[IA] No hay array en la respuesta:', texto.slice(0, 500));
-        // Si la respuesta es texto en prosa, mostrarla al usuario
-        var respCorta = texto.slice(0, 200);
-        throw new Error('La IA respondió: "' + respCorta + '..."');
-      }
-    }
-
-    if (!Array.isArray(items)) {
-      throw new Error('La IA no devolvió una lista de productos');
-    }
-
-    filasPreview = items
-      .filter(function(it) { return it.nombre && it.precio > 0; })
-      .map(function(it) {
-        return { productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio) };
-      });
-
-    loading.style.display = 'none';
-    if (filasPreview.length === 0) {
-      showToast('No se detectaron productos. Probá con una foto/PDF de mejor calidad', 'error');
-      return;
-    }
-    renderPreview();
-    showToast('IA extrajo ' + filasPreview.length + ' productos');
-
   } catch(e) {
-    console.error('procesarArchivo', e);
-    loading.style.display = 'none';
+    console.error('procesarArchivo error:', e);
+    $('lista-loading').style.display = 'none';
     showToast('Error: ' + (e.message || 'no se pudo procesar'), 'error');
   } finally {
     event.target.value = '';
   }
+}
+
+// ============================================================
+// PROCESAR IMAGEN (foto): una sola llamada con visión
+// ============================================================
+async function procesarImagen(file) {
+  var tiposValidos = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  var mimeType = file.type || 'image/jpeg';
+  if (mimeType === 'image/jpg') mimeType = 'image/jpeg';
+  if (tiposValidos.indexOf(mimeType) < 0) {
+    throw new Error('Tipo de imagen no soportado. Usá JPG, PNG, GIF o WEBP.');
+  }
+
+  var loading = $('lista-loading');
+  loading.textContent = '🔄 Procesando imagen con IA... (15-30 seg)';
+  loading.style.display = 'block';
+  $('btn-guardar-lista').disabled = true;
+
+  var base64 = await fileToBase64(file);
+  var proveedorId = $('lista-prov-select').value;
+  var prompt = 'Esta imagen es una lista de precios de un proveedor. Extrae cada producto con su precio.\n\nFORMATO DE RESPUESTA OBLIGATORIO:\n- Tu respuesta debe ser ÚNICAMENTE un array JSON válido.\n- Empezá con [ y terminá con ]\n- NO incluyas texto explicativo antes ni después.\n- NO uses markdown ni bloques de código.\n- Cada elemento debe tener exactamente: {"nombre": "...", "precio": numero}\n- Mantené nombres COMPLETOS (marca, presentación, tamaño del envase)\n- precio es número con punto decimal: 9644.07\n- Ignorá encabezados, totales, fechas y filas que no sean productos';
+
+  var items = await llamarClaudeProcesarLista({
+    tipo: 'procesar_lista',
+    max_tokens: 16000,
+    proveedor_id: proveedorId,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
+        { type: 'text', text: prompt }
+      ]
+    }]
+  });
+
+  filasPreview = items
+    .filter(function(it) { return it.nombre && it.precio > 0; })
+    .map(function(it) {
+      return { productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio) };
+    });
+
+  loading.style.display = 'none';
+  if (filasPreview.length === 0) {
+    showToast('No se detectaron productos. Probá con una foto de mejor calidad', 'error');
+    return;
+  }
+  renderPreview();
+  showToast('IA extrajo ' + filasPreview.length + ' productos');
+}
+
+// ============================================================
+// PROCESAR PDF: extraer texto local → detectar columnas → chunks
+// ============================================================
+async function procesarPDF(file) {
+  if (typeof pdfjsLib === 'undefined') {
+    throw new Error('PDF.js no cargó. Recargá la página.');
+  }
+  var loading = $('lista-loading');
+  loading.textContent = '📄 Extrayendo texto del PDF...';
+  loading.style.display = 'block';
+
+  // 1. Extraer texto del PDF localmente (sin IA)
+  var buffer = await file.arrayBuffer();
+  var pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  var lineas = [];
+  for (var i = 1; i <= pdf.numPages; i++) {
+    loading.textContent = '📄 Leyendo página ' + i + ' de ' + pdf.numPages + '...';
+    var page = await pdf.getPage(i);
+    var tc = await page.getTextContent();
+    var lineasPag = {};
+    tc.items.forEach(function(it) {
+      var y = Math.round(it.transform[5]);
+      if (!lineasPag[y]) lineasPag[y] = [];
+      lineasPag[y].push({ x: it.transform[4], texto: it.str });
+    });
+    Object.keys(lineasPag).sort(function(a, b) { return parseInt(b) - parseInt(a); }).forEach(function(y) {
+      var partes = lineasPag[y].sort(function(a, b) { return a.x - b.x; }).map(function(p) { return p.texto; });
+      var linea = partes.join(' ').trim();
+      if (linea) lineas.push(linea);
+    });
+  }
+
+  if (!lineas.length) {
+    throw new Error('El PDF no tiene texto extraíble. Si es escaneado, probá subir como imagen.');
+  }
+  console.log('[PDF] Líneas extraídas:', lineas.length);
+
+  // 2. Detectar columnas con IA usando una muestra
+  loading.textContent = '🔍 Detectando columnas de precio...';
+  var muestra = lineas.slice(0, 60).join('\n');
+  var columnas = await detectarColumnasPDF(muestra);
+
+  if (!columnas || !columnas.precios || !columnas.precios.length) {
+    throw new Error('No se detectaron columnas de precio en el PDF');
+  }
+
+  // 3. Si hay UNA columna sola, procesar directo. Si hay varias, mostrar selector
+  if (columnas.precios.length === 1) {
+    await procesarPDFConColumna(lineas, columnas.precios[0].nombre);
+  } else {
+    loading.style.display = 'none';
+    mostrarSelectorColumnasPDF(lineas, columnas);
+  }
+}
+
+async function detectarColumnasPDF(muestraTexto) {
+  var prompt = 'Mirá esta muestra de una lista de precios. Identificá las columnas que parecen ser PRECIOS (puede haber varias: precio lista, precio con descuento, precio mayorista, etc).\n\nDevolvé EXCLUSIVAMENTE un JSON con este formato:\n{"precios":[{"nombre":"nombre/encabezado de la columna","ejemplo":"valor de ejemplo"}, ...]}\n\nIMPORTANTE: solo columnas de PRECIO (números monetarios). No incluyas códigos, cantidades de stock, ni descripciones.\n\nMuestra:\n\n' + muestraTexto;
+  var proveedorId = $('lista-prov-select').value;
+  var resp = await fetch('/api/claude', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + sesion.access_token
+    },
+    body: JSON.stringify({
+      tipo: 'detectar_columnas',
+      max_tokens: 1000,
+      proveedor_id: proveedorId,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+  var data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'Error detectando columnas');
+  var texto = (data.content && data.content[0] && data.content[0].text || '').replace(/```json|```/g, '').trim();
+  try { return JSON.parse(texto); }
+  catch(e) {
+    var ini = texto.indexOf('{'), fin = texto.lastIndexOf('}');
+    if (ini >= 0 && fin > ini) return JSON.parse(texto.slice(ini, fin + 1));
+    throw new Error('La IA respondió mal formato al detectar columnas');
+  }
+}
+
+function mostrarSelectorColumnasPDF(lineas, columnas) {
+  // Crear modal dinámico
+  var opciones = columnas.precios.map(function(c, idx) {
+    return '<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;background:var(--bg-elev2);">' +
+      '<input type="radio" name="sel-col-pdf" value="' + escapeHtmlAttr(c.nombre) + '" ' + (idx === 0 ? 'checked' : '') + ' style="margin:0;flex-shrink:0;">' +
+      '<div style="flex:1;min-width:0;">' +
+      '<div style="font-weight:500;font-size:13px;">' + escapeHtml(c.nombre) + '</div>' +
+      (c.ejemplo ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">ej: ' + escapeHtml(c.ejemplo) + '</div>' : '') +
+      '</div></label>';
+  }).join('');
+  var modalHtml = '<div class="modal-overlay open" id="col-pdf-modal" style="z-index:600;">' +
+    '<div class="modal" style="max-width:500px;">' +
+    '<h3>Elegí la columna de precio</h3>' +
+    '<p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">La IA detectó varias columnas con precios. ¿Cuál querés tomar?</p>' +
+    opciones +
+    '<div class="modal-actions">' +
+    '<button class="btn" onclick="cerrarModalColPDF()">Cancelar</button>' +
+    '<button class="btn primary" id="btn-confirmar-col-pdf">Procesar</button>' +
+    '</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+  document.getElementById('btn-confirmar-col-pdf').onclick = function() {
+    var sel = document.querySelector('input[name="sel-col-pdf"]:checked');
+    if (!sel) return;
+    var nombreCol = sel.value;
+    cerrarModalColPDF();
+    procesarPDFConColumna(lineas, nombreCol).catch(function(e) {
+      console.error(e);
+      $('lista-loading').style.display = 'none';
+      showToast('Error: ' + (e.message || ''), 'error');
+    });
+  };
+}
+
+function cerrarModalColPDF() {
+  var m = document.getElementById('col-pdf-modal');
+  if (m) m.remove();
+}
+
+async function procesarPDFConColumna(lineas, nombreColumna) {
+  var loading = $('lista-loading');
+  loading.style.display = 'block';
+  filasPreview = [];
+  var chunkSize = 200;
+  var totalChunks = Math.ceil(lineas.length / chunkSize);
+  for (var c = 0; c < totalChunks; c++) {
+    loading.textContent = '🤖 IA procesando parte ' + (c + 1) + ' de ' + totalChunks + '...';
+    var chunkLineas = lineas.slice(c * chunkSize, (c + 1) * chunkSize);
+    var chunkTexto = chunkLineas.join('\n');
+    try {
+      var items = await extraerChunkConClaude(chunkTexto, nombreColumna);
+      items.forEach(function(it) {
+        if (it.nombre && it.precio > 0) {
+          filasPreview.push({ productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio) });
+        }
+      });
+      // Render incremental para que el usuario vea progreso
+      renderPreview();
+    } catch(chunkErr) {
+      console.error('[PDF] Chunk', c + 1, 'falló:', chunkErr.message);
+      // Continuar con los siguientes chunks aunque uno falle
+    }
+  }
+  loading.style.display = 'none';
+  if (filasPreview.length === 0) {
+    showToast('No se pudieron extraer productos', 'error');
+    return;
+  }
+  showToast('IA extrajo ' + filasPreview.length + ' productos');
+}
+
+async function extraerChunkConClaude(textoCrudo, nombreColumna) {
+  if (textoCrudo.length > 30000) textoCrudo = textoCrudo.slice(0, 30000) + '...';
+  var prompt = 'Texto crudo de una lista de precios. Hay varias columnas de precios; tu tarea es extraer el nombre del producto y EL PRECIO QUE CORRESPONDE A LA COLUMNA "' + nombreColumna + '".\n\nDevolvé EXCLUSIVAMENTE un array JSON, sin texto adicional:\n[{"nombre":"...","precio":numero}, ...]\n\n- Mantené nombres COMPLETOS (marca, presentación, tamaño)\n- precio es solo número con punto decimal (ej: 9644.07)\n- Ignorá encabezados, totales y filas que no sean productos\n- Si una línea tiene varios productos juntos, separalos\n\nTexto:\n\n' + textoCrudo;
+  var proveedorId = $('lista-prov-select').value;
+  var resp = await fetch('/api/claude', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + sesion.access_token
+    },
+    body: JSON.stringify({
+      tipo: 'procesar_chunk',
+      max_tokens: 8000,
+      proveedor_id: proveedorId,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+  var data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'Error');
+  var texto = (data.content && data.content[0] && data.content[0].text || '').replace(/```json|```/g, '').trim();
+  try {
+    var arr = JSON.parse(texto);
+    if (!Array.isArray(arr)) throw new Error('No es array');
+    return arr;
+  } catch(e) {
+    // Intentar extraer array de adentro
+    var ini = texto.indexOf('['), fin = texto.lastIndexOf(']');
+    if (ini >= 0 && fin > ini) {
+      try { return JSON.parse(texto.slice(ini, fin + 1)); } catch(e2) {}
+    }
+    // Último recurso: recuperar items con regex
+    return recuperarItemsTruncados(texto).map(function(it) {
+      return { nombre: it.nombre, precio: it.precio };
+    });
+  }
+}
+
+// ============================================================
+// Helper genérico para llamar a Claude y parsear array
+// ============================================================
+async function llamarClaudeProcesarLista(payload) {
+  var resp = await fetch('/api/claude', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + sesion.access_token
+    },
+    body: JSON.stringify(payload)
+  });
+  var data = await resp.json();
+  if (!resp.ok) {
+    throw new Error(data.error || 'Error desconocido');
+  }
+  var texto = data.content && data.content[0] && data.content[0].text || '';
+  console.log('[IA] Respuesta length:', texto.length);
+  console.log('[IA] Usage:', data.usage);
+  texto = texto.replace(/```json|```/g, '').trim();
+
+  var items = null;
+  try {
+    items = JSON.parse(texto);
+  } catch(e1) {
+    var ini = texto.indexOf('[');
+    var fin = texto.lastIndexOf(']');
+    if (ini >= 0 && fin > ini) {
+      try { items = JSON.parse(texto.slice(ini, fin + 1)); } catch(e2) {}
+    }
+    if (!items) {
+      items = recuperarItemsTruncados(texto);
+    }
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    var respCorta = texto.slice(0, 200);
+    throw new Error('La IA respondió pero no se pudo extraer: "' + respCorta + '..."');
+  }
+  return items;
 }
 
 function renderPreview() {

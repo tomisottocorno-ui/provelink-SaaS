@@ -922,37 +922,52 @@ async function procesarPDFConColumna(lineas, nombreColumna) {
   var loading = $('lista-loading');
   loading.style.display = 'block';
   filasPreview = [];
-  var chunkSize = 200;
+  var chunkSize = 80;
   var totalChunks = Math.ceil(lineas.length / chunkSize);
+  var errores = 0;
   for (var c = 0; c < totalChunks; c++) {
-    loading.textContent = 'IA procesando parte ' + (c + 1) + ' de ' + totalChunks + '...';
+    loading.textContent = 'Procesando parte ' + (c + 1) + ' de ' + totalChunks + '... (' + filasPreview.length + ' productos encontrados)';
     var chunkLineas = lineas.slice(c * chunkSize, (c + 1) * chunkSize);
-    var chunkTexto = chunkLineas.join('\n');
-    try {
-      var items = await extraerChunkConClaude(chunkTexto, nombreColumna);
-      items.forEach(function(it) {
-        if (it.nombre && it.precio > 0) {
-          filasPreview.push({ productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio) });
+    var items = [];
+    // Hasta 3 intentos por chunk
+    for (var intento = 1; intento <= 3; intento++) {
+      try {
+        items = await extraerChunkConClaude(chunkLineas, nombreColumna);
+        break;
+      } catch(chunkErr) {
+        console.warn('[PDF] Chunk ' + (c + 1) + ' intento ' + intento + ' falló:', chunkErr.message);
+        if (intento === 3) {
+          errores++;
+          console.error('[PDF] Chunk ' + (c + 1) + ' falló 3 veces, se omite');
+        } else {
+          // Esperar 1 segundo antes de reintentar
+          await new Promise(function(r) { setTimeout(r, 1000); });
         }
-      });
-      // Render incremental para que el usuario vea progreso
-      renderPreview();
-    } catch(chunkErr) {
-      console.error('[PDF] Chunk', c + 1, 'falló:', chunkErr.message);
-      // Continuar con los siguientes chunks aunque uno falle
+      }
     }
+    items.forEach(function(it) {
+      if (it.nombre && it.precio > 0) {
+        filasPreview.push({ productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio) });
+      }
+    });
+    renderPreview();
   }
   loading.style.display = 'none';
   if (filasPreview.length === 0) {
     showToast('No se pudieron extraer productos', 'error');
     return;
   }
-  showToast('IA extrajo ' + filasPreview.length + ' productos');
+  var msg = 'IA extrajo ' + filasPreview.length + ' productos';
+  if (errores > 0) msg += ' (' + errores + ' partes fallaron)';
+  showToast(msg, errores > 0 ? 'warn' : 'ok');
 }
 
-async function extraerChunkConClaude(textoCrudo, nombreColumna) {
-  if (textoCrudo.length > 30000) textoCrudo = textoCrudo.slice(0, 30000) + '...';
-  var prompt = 'Texto crudo de una lista de precios. Hay varias columnas de precios; tu tarea es extraer el nombre del producto y EL PRECIO QUE CORRESPONDE A LA COLUMNA "' + nombreColumna + '".\n\nDevolvé EXCLUSIVAMENTE un array JSON, sin texto adicional:\n[{"nombre":"...","precio":numero}, ...]\n\n- Mantené nombres COMPLETOS (marca, presentación, tamaño)\n- precio es solo número con punto decimal (ej: 9644.07)\n- Ignorá encabezados, totales y filas que no sean productos\n- Si una línea tiene varios productos juntos, separalos\n\nTexto:\n\n' + textoCrudo;
+// extraerChunkConClaude recibe el array de líneas para poder subdividir si se trunca
+async function extraerChunkConClaude(chunkLineas, nombreColumna) {
+  var textoCrudo = chunkLineas.join('\n');
+  // Si el texto es muy largo, reducir a 20000 chars (unas 60-80 líneas = seguro)
+  if (textoCrudo.length > 20000) textoCrudo = textoCrudo.slice(0, 20000);
+  var prompt = 'Texto crudo de una lista de precios. Extraé el nombre del producto y EL PRECIO de la columna "' + nombreColumna + '".\n\nDevolvé EXCLUSIVAMENTE un array JSON sin texto adicional:\n[{"nombre":"...","precio":numero}, ...]\n\n- Nombres COMPLETOS (marca, presentación, tamaño)\n- precio solo número decimal (ej: 9644.07)\n- Ignorá encabezados, totales, líneas vacías\n- Incluí TODOS los productos, sin omitir ninguno\n\nTexto:\n\n' + textoCrudo;
   var proveedorId = $('lista-prov-select').value;
   var resp = await fetch('/api/claude', {
     method: 'POST',
@@ -962,25 +977,33 @@ async function extraerChunkConClaude(textoCrudo, nombreColumna) {
     },
     body: JSON.stringify({
       tipo: 'procesar_chunk',
-      max_tokens: 8000,
+      max_tokens: 16000,
       proveedor_id: proveedorId,
       messages: [{ role: 'user', content: prompt }]
     })
   });
   var data = await resp.json();
-  if (!resp.ok) throw new Error(data.error || 'Error');
+  if (!resp.ok) throw new Error(data.error || 'Error en API');
+
+  // Si Claude truncó la respuesta por max_tokens, subdividir el chunk y rellamar
+  if (data.stop_reason === 'max_tokens' && chunkLineas.length > 10) {
+    console.warn('[PDF] Chunk truncado por max_tokens (' + chunkLineas.length + ' líneas), subdividiendo...');
+    var mitad = Math.ceil(chunkLineas.length / 2);
+    var a = await extraerChunkConClaude(chunkLineas.slice(0, mitad), nombreColumna);
+    var b = await extraerChunkConClaude(chunkLineas.slice(mitad), nombreColumna);
+    return a.concat(b);
+  }
+
   var texto = (data.content && data.content[0] && data.content[0].text || '').replace(/```json|```/g, '').trim();
   try {
     var arr = JSON.parse(texto);
     if (!Array.isArray(arr)) throw new Error('No es array');
     return arr;
   } catch(e) {
-    // Intentar extraer array de adentro
     var ini = texto.indexOf('['), fin = texto.lastIndexOf(']');
     if (ini >= 0 && fin > ini) {
       try { return JSON.parse(texto.slice(ini, fin + 1)); } catch(e2) {}
     }
-    // Último recurso: recuperar items con regex
     return recuperarItemsTruncados(texto).map(function(it) {
       return { nombre: it.nombre, precio: it.precio };
     });

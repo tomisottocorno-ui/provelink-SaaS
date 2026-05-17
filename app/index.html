@@ -1818,17 +1818,22 @@ function escapeHtml(s) {
 // INIT
 // ============================================================
 (async function init() {
-  var ok = await verificarSesion();
-  if (!ok) return;
-  ok = await cargarProfile();
-  if (!ok) return;
-  renderHeader();
-  await cargarProveedores();
-  await cargarListas();
-  renderHistorial();
-  actualizarBadgePedido();
-  $('loader').style.display = 'none';
-  $('app-shell').style.display = 'flex';
+  try {
+    var ok = await verificarSesion();
+    if (!ok) { window.location.href = '/login'; return; }
+    ok = await cargarProfile();
+    if (!ok) { window.location.href = '/login'; return; }
+    renderHeader();
+    await cargarProveedores();
+    await cargarListas();
+    renderHistorial();
+    actualizarBadgePedido();
+    $('loader').style.display = 'none';
+    $('app-shell').style.display = 'flex';
+  } catch(e) {
+    console.error('init error', e);
+    window.location.href = '/login';
+  }
 })();
 
 // Pintar íconos estáticos del HTML
@@ -1855,9 +1860,177 @@ document.addEventListener('keydown', function(e) {
     if ($('modal-prov').classList.contains('open')) cerrarModalProv();
     if ($('modal-lista').classList.contains('open')) cerrarModalLista();
     if ($('modal-ver-lista').classList.contains('open')) cerrarVerLista();
+    cerrarAsistente();
   }
 });
+
+// ============================================================
+// ASISTENTE IA
+// ============================================================
+var aiHistorial = [];
+
+function abrirAsistente() {
+  if (!profile || (profile.plan || 'free') === 'free') {
+    showToast('El asistente IA requiere plan Pro o superior.', 'error');
+    return;
+  }
+  var m = $('ai-modal');
+  m.style.display = 'flex';
+  if (aiHistorial.length === 0) {
+    renderMensajeAI('assistant', '¡Hola! Soy tu asistente ProveLink. Puedo ayudarte a:\n\n• Buscar productos en tus listas\n• Comparar precios entre proveedores\n• Encontrar las mejores opciones\n• Revisar tus pedidos anteriores\n\nProbá: *"cuál es el dulce de leche más barato?"* o *"qué opciones de manteca hay?"*');
+  }
+  setTimeout(function() { document.getElementById('ai-input').focus(); }, 100);
+}
+
+function cerrarAsistente() {
+  var m = document.getElementById('ai-modal');
+  if (m) m.style.display = 'none';
+}
+
+function renderMensajeAI(role, texto) {
+  var cont = $('ai-chat');
+  var div = document.createElement('div');
+  if (role === 'user') {
+    div.style.cssText = 'align-self:flex-end;max-width:82%;background:var(--accent);color:white;padding:10px 14px;border-radius:14px 14px 4px 14px;font-size:13px;white-space:pre-wrap;word-break:break-word;';
+  } else {
+    div.style.cssText = 'align-self:flex-start;max-width:92%;background:var(--bg-elev2);color:var(--text);padding:10px 14px;border-radius:14px 14px 14px 4px;font-size:13px;white-space:pre-wrap;line-height:1.5;word-break:break-word;';
+  }
+  var html = escapeHtml(texto)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+  div.innerHTML = html;
+  cont.appendChild(div);
+  cont.scrollTop = cont.scrollHeight;
+}
+
+function renderEscribiendo() {
+  var cont = $('ai-chat');
+  var div = document.createElement('div');
+  div.id = 'ai-escribiendo';
+  div.style.cssText = 'align-self:flex-start;background:var(--bg-elev2);padding:10px 14px;border-radius:14px;font-size:13px;color:var(--text-muted);';
+  div.innerHTML = '<span style="display:inline-block;animation:dotpulse 1.2s infinite;">●</span> <span style="display:inline-block;animation:dotpulse 1.2s infinite 0.2s;">●</span> <span style="display:inline-block;animation:dotpulse 1.2s infinite 0.4s;">●</span>';
+  cont.appendChild(div);
+  cont.scrollTop = cont.scrollHeight;
+}
+
+function quitarEscribiendo() {
+  var d = document.getElementById('ai-escribiendo');
+  if (d) d.remove();
+}
+
+function construirContextoIA() {
+  var ctx = 'Sos un asistente de ProveLink que ayuda al usuario a buscar productos, comparar precios entre proveedores y gestionar pedidos.\n\n';
+  ctx += '=== PROVEEDORES (' + proveedores.length + ') ===\n';
+  proveedores.forEach(function(p) {
+    ctx += '- ' + p.nombre + (p.telefono ? ' | tel: ' + p.telefono : '') + '\n';
+  });
+  ctx += '\n=== LISTAS DE PRECIOS ===\n';
+  listas.forEach(function(l) {
+    var prov = proveedores.find(function(p) { return p.id === l.proveedor_id; });
+    var items = l.items || [];
+    var fecha = l.actualizada_en ? new Date(l.actualizada_en).toLocaleDateString('es-AR') : '?';
+    ctx += '\n--- ' + (prov ? prov.nombre : '?') + ' (' + items.length + ' prod, actualizada ' + fecha + ') ---\n';
+    // Máximo 400 items por lista para mantener tokens razonables
+    items.slice(0, 400).forEach(function(it) {
+      ctx += it.productoLista + ' | $' + it.precio + '\n';
+    });
+    if (items.length > 400) ctx += '... y ' + (items.length - 400) + ' productos más\n';
+  });
+  var hist = histGet();
+  if (hist.length) {
+    ctx += '\n=== HISTORIAL (últimos 5 pedidos) ===\n';
+    hist.slice(0, 5).forEach(function(h) {
+      ctx += '\n[' + h.fecha + '] $' + (h.total || 0).toLocaleString('es-AR') + '\n';
+      (h.items || []).forEach(function(it) {
+        var prov = proveedores.find(function(p) { return p.id === it.proveedorId; });
+        ctx += '  ' + (it.qty || 1) + 'x ' + it.productoLista + ' → ' + (prov ? prov.nombre : '?') + '\n';
+      });
+    });
+  }
+  ctx += '\n=== INSTRUCCIONES ===\n';
+  ctx += '- Respondé en español argentino (vos, podés), de forma breve y clara\n';
+  ctx += '- Para buscar: mostrá las 3-5 mejores opciones por precio con proveedor\n';
+  ctx += '- Formato de precios: $9.644,07 (punto de miles, coma decimal)\n';
+  ctx += '- No inventes datos. Si no sabés, decilo\n';
+  return ctx;
+}
+
+async function enviarMensajeAI() {
+  var input = document.getElementById('ai-input');
+  var btn = document.getElementById('ai-enviar-btn');
+  var texto = input.value.trim();
+  if (!texto) return;
+  input.value = '';
+  input.disabled = true;
+  btn.disabled = true;
+  btn.style.opacity = '0.5';
+  renderMensajeAI('user', texto);
+  aiHistorial.push({ role: 'user', content: texto });
+  renderEscribiendo();
+  try {
+    var resp = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      body: JSON.stringify({
+        tipo: 'chat',
+        max_tokens: 800,
+        system: construirContextoIA(),
+        messages: aiHistorial.slice(-6)
+      })
+    });
+    quitarEscribiendo();
+    var data = await resp.json();
+    if (!resp.ok) {
+      var msg = data.error || 'Error';
+      if (data.codigo === 'PLAN_SIN_IA') msg = 'Tu plan no incluye el asistente IA. Mejorá a Pro.';
+      else if (data.codigo === 'CUOTA_IA_AGOTADA') msg = 'Llegaste al límite mensual de consultas IA (' + data.limite + ').';
+      renderMensajeAI('assistant', '❌ ' + msg);
+      aiHistorial.pop();
+      return;
+    }
+    var contenido = (data.content && data.content[0] && data.content[0].text) || '(sin respuesta)';
+    aiHistorial.push({ role: 'assistant', content: contenido });
+    renderMensajeAI('assistant', contenido);
+    if (data.cuota && data.cuota.restantes <= 10) {
+      renderMensajeAI('assistant', '⚠️ Te quedan ' + data.cuota.restantes + ' consultas IA este mes.');
+    }
+  } catch(e) {
+    quitarEscribiendo();
+    renderMensajeAI('assistant', '❌ Error de red: ' + e.message);
+    aiHistorial.pop();
+  } finally {
+    input.disabled = false;
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    input.focus();
+  }
+}
 </script>
+
+<!-- Botón flotante asistente -->
+<button class="ai-fab" id="ai-fab" onclick="abrirAsistente()">
+  💬 <span class="ai-fab-txt">Hablar con el asistente</span>
+</button>
+
+<!-- Ventana del asistente -->
+<div id="ai-modal" style="display:none;position:fixed;bottom:80px;right:20px;width:380px;max-width:calc(100vw - 30px);height:520px;max-height:calc(100vh - 100px);background:var(--bg-elev);border:1px solid var(--border-strong);border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,0.55);z-index:91;flex-direction:column;overflow:hidden;">
+  <div style="padding:12px 16px;background:linear-gradient(135deg,#1e3a5f,#0f172a);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);flex-shrink:0;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#60a5fa);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;">🤖</div>
+      <div>
+        <div style="font-size:14px;font-weight:600;color:#60a5fa;">Asistente ProveLink</div>
+        <div style="font-size:11px;color:var(--text-muted);">Buscar productos · Comparar precios</div>
+      </div>
+    </div>
+    <button onclick="cerrarAsistente()" style="background:transparent;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;padding:4px;line-height:1;">✕</button>
+  </div>
+  <div id="ai-chat" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;min-height:0;"></div>
+  <div style="padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:6px;background:var(--bg-elev2);flex-shrink:0;">
+    <input id="ai-input" type="text" placeholder="Preguntale algo..." onkeydown="if(event.key==='Enter')enviarMensajeAI()" style="flex:1;padding:10px 12px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font);">
+    <button onclick="enviarMensajeAI()" id="ai-enviar-btn" style="padding:10px 16px;background:var(--accent);color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">→</button>
+  </div>
+</div>
 
 </body>
 </html>

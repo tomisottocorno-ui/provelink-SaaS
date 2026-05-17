@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>ProveLink</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22white%22><rect width=%2224%22 height=%2224%22 rx=%226%22/></svg>">
+<link rel="icon" href="/imagenes/logo.png">
 <link rel="stylesheet" href="/app/styles.css">
 <script src="/app/icons.js"></script>
 </head>
@@ -1891,7 +1891,7 @@ function renderMensajeAI(role, texto) {
   var cont = $('ai-chat');
   var div = document.createElement('div');
   if (role === 'user') {
-    div.style.cssText = 'align-self:flex-end;max-width:82%;background:var(--accent);color:white;padding:10px 14px;border-radius:14px 14px 4px 14px;font-size:13px;white-space:pre-wrap;word-break:break-word;';
+    div.style.cssText = 'align-self:flex-end;max-width:82%;background:#1d4ed8;color:#e0f0ff;padding:10px 14px;border-radius:14px 14px 4px 14px;font-size:13px;white-space:pre-wrap;word-break:break-word;';
   } else {
     div.style.cssText = 'align-self:flex-start;max-width:92%;background:var(--bg-elev2);color:var(--text);padding:10px 14px;border-radius:14px 14px 14px 4px;font-size:13px;white-space:pre-wrap;line-height:1.5;word-break:break-word;';
   }
@@ -1953,6 +1953,20 @@ function construirContextoIA() {
   ctx += '- Para buscar: mostrá las 3-5 mejores opciones por precio con proveedor\n';
   ctx += '- Formato de precios: $9.644,07 (punto de miles, coma decimal)\n';
   ctx += '- No inventes datos. Si no sabés, decilo\n';
+  ctx += '\n=== COMPARACIÓN DE PRECIOS — MUY IMPORTANTE ===\n';
+  ctx += 'Antes de comparar precios SIEMPRE convertí a la misma unidad base.\n';
+  ctx += 'Ejemplos de conversión:\n';
+  ctx += '  - "x 500g" → dividí el precio por 0.5 para obtener precio/kg\n';
+  ctx += '  - "x 250g" → dividí por 0.25\n';
+  ctx += '  - "x 5 kg" → dividí por 5\n';
+  ctx += '  - "x 500ml" o "x 0.5 lt" → dividí por 0.5 para precio/litro\n';
+  ctx += '  - "x 2.755 kg" → dividí por 2.755\n';
+  ctx += 'Cuando compares productos similares:\n';
+  ctx += '  1. Detectá la cantidad de cada presentación en el nombre\n';
+  ctx += '  2. Calculá el precio por unidad base (kg o litro)\n';
+  ctx += '  3. Mostrá: nombre | $precio original (presentación) | $X.XXX/kg\n';
+  ctx += '  4. Ordená por precio/kg o precio/litro, no por precio absoluto\n';
+  ctx += 'Nunca compares precios absolutos de diferentes presentaciones sin normalizar.\n';
   return ctx;
 }
 
@@ -2028,7 +2042,7 @@ async function enviarMensajeAI() {
   <div id="ai-chat" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;min-height:0;"></div>
   <div style="padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:6px;background:var(--bg-elev2);flex-shrink:0;">
     <input id="ai-input" type="text" placeholder="Preguntale algo..." onkeydown="if(event.key==='Enter')enviarMensajeAI()" style="flex:1;padding:10px 12px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font);">
-    <button onclick="enviarMensajeAI()" id="ai-enviar-btn" style="padding:10px 16px;background:var(--accent);color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">→</button>
+    <button onclick="enviarMensajeAI()" id="ai-enviar-btn" style="padding:10px 16px;background:#1d4ed8;color:#e0f0ff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">→</button>
   </div>
 </div>
 

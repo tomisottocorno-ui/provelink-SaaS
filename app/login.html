@@ -6,12 +6,13 @@
 <title>ProveLink — Ingresar</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22white%22><rect width=%2224%22 height=%2224%22 rx=%226%22/></svg>">
 <link rel="stylesheet" href="/app/styles.css">
+<script src="/app/icons.js"></script>
 </head>
 <body class="auth-body">
 
 <div class="auth-wrap">
   <div class="auth-logo">
-    <div class="auth-logo-mark">P</div>
+    <div class="auth-logo-mark"><img src="/imagenes/logo.png" alt="ProveLink" class="logo-img"></div>
     <div class="auth-logo-name">ProveLink</div>
     <div class="auth-logo-sub">Gestioná tus proveedores fácil</div>
   </div>
@@ -222,6 +223,18 @@
   document.getElementById('reg-pass').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') hacerRegistro();
   });
+
+  // Pintar íconos estáticos del HTML
+  function pintarIconosEstaticos(root) {
+    (root || document).querySelectorAll('.icon-slot[data-icon]').forEach(function(el) {
+      var name = el.dataset.icon;
+      if (window.Icon && typeof window.Icon[name] === 'function') {
+        el.innerHTML = window.Icon[name]();
+      }
+    });
+  }
+  document.addEventListener('DOMContentLoaded', function(){ pintarIconosEstaticos(); });
+  pintarIconosEstaticos();
 </script>
 
 </body>

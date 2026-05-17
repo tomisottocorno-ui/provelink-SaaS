@@ -27,6 +27,11 @@ window.Icon = (function() {
     camera: function(o){ return svg('<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>', o); },
     file: function(o){ return svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>', o); },
     info: function(o){ return svg('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>', o); },
-    alert: function(o){ return svg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>', o); }
+    alert: function(o){ return svg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>', o); },
+    truck: function(o){
+      var size = (o && o.size) || 24;
+      var cls = (o && o.cls) || 'icon';
+      return '<svg class="' + cls + '" width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 11c0-1 1-2 2-2h6c1 0 2 1 2 2v8c0 1-1 2-2 2H4c-1 0-2-1-2-2v-8z"/><circle cx="16" cy="14" r="4" fill="none"/><path d="M15 13l2 3" stroke-width="1.5"/><path d="M17 13v3" stroke-width="1.5"/><circle cx="4" cy="19" r="1" fill="currentColor"/><circle cx="16" cy="19" r="1" fill="currentColor"/><path d="M10 9c1-1.5 2-2.5 3-3"/></svg>';
+    }
   };
 })();

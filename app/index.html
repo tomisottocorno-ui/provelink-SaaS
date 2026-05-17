@@ -1818,17 +1818,22 @@ function escapeHtml(s) {
 // INIT
 // ============================================================
 (async function init() {
-  var ok = await verificarSesion();
-  if (!ok) return;
-  ok = await cargarProfile();
-  if (!ok) return;
-  renderHeader();
-  await cargarProveedores();
-  await cargarListas();
-  renderHistorial();
-  actualizarBadgePedido();
-  $('loader').style.display = 'none';
-  $('app-shell').style.display = 'flex';
+  try {
+    var ok = await verificarSesion();
+    if (!ok) { window.location.href = '/login'; return; }
+    ok = await cargarProfile();
+    if (!ok) { window.location.href = '/login'; return; }
+    renderHeader();
+    await cargarProveedores();
+    await cargarListas();
+    renderHistorial();
+    actualizarBadgePedido();
+    $('loader').style.display = 'none';
+    $('app-shell').style.display = 'flex';
+  } catch(e) {
+    console.error('init error', e);
+    window.location.href = '/login';
+  }
 })();
 
 // Pintar íconos estáticos del HTML

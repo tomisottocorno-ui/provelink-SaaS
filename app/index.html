@@ -1502,7 +1502,8 @@ function renderResumen() {
   }
   if (footer) footer.style.display = '';
 
-  var html = '';
+  // Precalcular datos por proveedor
+  var provData = {};
   var totalGeneral = 0;
   keys.forEach(function(provId) {
     var prov = porProv[provId];
@@ -1510,30 +1511,50 @@ function renderResumen() {
     totalGeneral += total;
     var mensaje = 'Hola, buen día ' + prov.nombre + '! Te paso el pedido:\n';
     prov.items.forEach(function(it) { mensaje += it.qty + ' ' + it.productoLista + '\n'; });
-    var msgEnc = encodeURIComponent(mensaje);
     var waNum = (prov.tel || '').replace(/[^\d]/g, '');
+    provData[provId] = { prov: prov, total: total, mensaje: mensaje, waNum: waNum, msgEnc: encodeURIComponent(mensaje) };
+  });
 
+  var html = '';
+
+  // ── SECCIÓN SUPERIOR: Links WhatsApp bien visibles ──
+  html += '<div style="background:var(--bg-elev);border:1px solid #25D366;border-radius:14px;padding:16px;margin-bottom:20px;">';
+  html += '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#25D366;margin-bottom:12px;">📱 Enviá los pedidos por WhatsApp</div>';
+  html += '<div style="display:flex;flex-direction:column;gap:10px;">';
+  keys.forEach(function(provId) {
+    var d = provData[provId];
+    if (d.waNum) {
+      html += '<a href="https://wa.me/' + d.waNum + '?text=' + d.msgEnc + '" target="_blank" rel="noopener" style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:#25D366;color:white;padding:14px 18px;border-radius:10px;font-size:15px;font-weight:700;text-decoration:none;">';
+      html += '<span>📱 ' + escapeHtml(d.prov.nombre) + '</span>';
+      html += '<span style="font-size:13px;opacity:0.9;">$' + formatPrecio(d.total) + ' →</span>';
+      html += '</a>';
+    } else {
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-radius:10px;border:1px solid var(--border);opacity:0.5;font-size:14px;">';
+      html += '<span>' + escapeHtml(d.prov.nombre) + ' — sin teléfono</span><span>$' + formatPrecio(d.total) + '</span></div>';
+    }
+  });
+  html += '</div></div>';
+
+  // ── DETALLE POR PROVEEDOR ──
+  keys.forEach(function(provId) {
+    var d = provData[provId];
     html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:16px;">';
-    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:14px;flex-wrap:wrap;">';
-    html += '<div><h3 style="font-size:18px;font-weight:700;">' + escapeHtml(prov.nombre) + '</h3>';
-    if (prov.tel) html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">📞 ' + escapeHtml(prov.tel) + '</div>';
-    html += '</div><div style="text-align:right;"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Total</div><div style="font-size:22px;font-weight:700;">$' + formatPrecio(total) + '</div></div></div>';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;">';
+    html += '<div><h3 style="font-size:16px;font-weight:700;">' + escapeHtml(d.prov.nombre) + '</h3>';
+    if (d.prov.tel) html += '<div style="font-size:11px;color:var(--text-muted);">📞 ' + escapeHtml(d.prov.tel) + '</div>';
+    html += '</div><div style="font-size:18px;font-weight:700;">$' + formatPrecio(d.total) + '</div></div>';
 
-    html += '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:14px;">';
-    prov.items.forEach(function(it) {
-      html += '<div style="display:flex;justify-content:space-between;padding:9px 14px;border-bottom:1px solid var(--border);font-size:13px;">';
+    html += '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px;">';
+    d.prov.items.forEach(function(it) {
+      html += '<div style="display:flex;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--border);font-size:13px;">';
       html += '<span><strong>' + it.qty + '</strong> ' + escapeHtml(it.productoLista) + '</span>';
       html += '<span style="color:var(--text-muted);">$' + formatPrecio(it.precio * it.qty) + '</span></div>';
     });
     html += '</div>';
 
-    html += '<div style="background:var(--bg-elev2);border-left:3px solid #25D366;padding:10px 14px;border-radius:6px;font-size:12px;white-space:pre-wrap;margin-bottom:12px;font-family:monospace;">' + escapeHtml(mensaje) + '</div>';
-    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
-    if (waNum) {
-      html += '<a href="https://wa.me/' + waNum + '?text=' + msgEnc + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#25D366;color:white;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;border:none;cursor:pointer;">📱 WhatsApp ' + escapeHtml(prov.nombre) + '</a>';
-    }
-    html += '<button data-copiar="' + escapeHtml(mensaje) + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:9px 14px;border-radius:8px;font-size:13px;cursor:pointer;">Copiar texto</button>';
-    html += '</div></div>';
+    html += '<div style="background:var(--bg-elev2);border-left:3px solid #25D366;padding:10px 14px;border-radius:6px;font-size:12px;white-space:pre-wrap;margin-bottom:10px;font-family:monospace;">' + escapeHtml(d.mensaje) + '</div>';
+    html += '<button data-copiar="' + escapeHtml(d.mensaje) + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:8px 14px;border-radius:8px;font-size:12px;cursor:pointer;">Copiar mensaje</button>';
+    html += '</div>';
   });
 
   html += '<div style="background:var(--bg-elev2);border:1px solid var(--border-hi);border-radius:12px;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;">';

@@ -4,507 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>ProveLink</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📦</text></svg>">
-<style>
-  :root {
-    --bg: #0a0a0a;
-    --bg-elev: #161616;
-    --bg-elev2: #1f1f1f;
-    --bg-elev3: #2a2a2a;
-    --border: #2a2a2a;
-    --text: #ededed;
-    --text-muted: #888;
-    --accent: #4ade80;
-    --accent-hover: #22c55e;
-    --danger: #ef4444;
-    --warn: #f59e0b;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  /* ===== Loader inicial ===== */
-  .loader {
-    position: fixed;
-    inset: 0;
-    background: var(--bg);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 9999;
-  }
-  .spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid var(--bg-elev2);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* ===== Header ===== */
-  .header {
-    position: sticky;
-    top: 0;
-    background: var(--bg-elev);
-    border-bottom: 1px solid var(--border);
-    padding: 12px 16px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    z-index: 100;
-  }
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-  .header-logo {
-    font-size: 22px;
-  }
-  .header-titulos {
-    min-width: 0;
-  }
-  .header-negocio {
-    font-weight: 600;
-    font-size: 15px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 200px;
-  }
-  .header-plan {
-    font-size: 11px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  .header-plan.pro { color: var(--accent); }
-  .header-plan.business { color: #fbbf24; }
-  .menu-btn {
-    background: var(--bg-elev2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    width: 36px;
-    height: 36px;
-    border-radius: 9px;
-    cursor: pointer;
-    font-size: 18px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  /* ===== Menú desplegable ===== */
-  .menu {
-    position: absolute;
-    top: 56px;
-    right: 16px;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 6px;
-    min-width: 200px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-    z-index: 200;
-    display: none;
-  }
-  .menu.open { display: block; }
-  .menu-item {
-    padding: 10px 12px;
-    border-radius: 8px;
-    font-size: 14px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .menu-item:hover { background: var(--bg-elev2); }
-  .menu-item.danger { color: var(--danger); }
-  .menu-divider {
-    height: 1px;
-    background: var(--border);
-    margin: 4px 0;
-  }
-
-  /* ===== Contenido principal ===== */
-  .container {
-    max-width: 700px;
-    margin: 0 auto;
-    padding: 16px;
-    padding-bottom: 100px;
-  }
-
-  .seccion-titulo {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin: 20px 0 12px;
-  }
-  .seccion-titulo h2 {
-    font-size: 18px;
-    font-weight: 600;
-  }
-  .badge {
-    background: var(--bg-elev2);
-    color: var(--text-muted);
-    font-size: 11px;
-    padding: 3px 8px;
-    border-radius: 999px;
-    font-weight: 500;
-  }
-  .badge.warn { background: #2d2010; color: var(--warn); }
-
-  /* ===== Botones ===== */
-  .btn {
-    background: var(--bg-elev2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 9px 14px;
-    border-radius: 9px;
-    font-size: 14px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    transition: background 0.15s;
-  }
-  .btn:hover { background: var(--bg-elev3); }
-  .btn.primary {
-    background: var(--accent);
-    color: #0a0a0a;
-    border-color: var(--accent);
-    font-weight: 600;
-  }
-  .btn.primary:hover { background: var(--accent-hover); }
-  .btn.danger {
-    background: transparent;
-    color: var(--danger);
-    border-color: #5a2828;
-  }
-  .btn.danger:hover { background: #2d1414; }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-icon {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 6px;
-    border-radius: 6px;
-    font-size: 16px;
-  }
-  .btn-icon:hover { background: var(--bg-elev2); color: var(--text); }
-
-  /* ===== Lista de proveedores ===== */
-  .prov-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-  .prov-card {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .prov-logo {
-    width: 44px;
-    height: 44px;
-    border-radius: 10px;
-    background: var(--bg-elev2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--text-muted);
-    flex-shrink: 0;
-    background-size: cover;
-    background-position: center;
-  }
-  .prov-info { flex: 1; min-width: 0; }
-  .prov-nombre {
-    font-weight: 600;
-    font-size: 15px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .prov-tel {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 2px;
-  }
-  .prov-actions {
-    display: flex;
-    gap: 4px;
-  }
-
-  /* ===== Empty state ===== */
-  .empty {
-    text-align: center;
-    padding: 60px 20px;
-    color: var(--text-muted);
-  }
-  .empty-emoji { font-size: 48px; margin-bottom: 12px; }
-  .empty-title { font-size: 16px; color: var(--text); margin-bottom: 6px; font-weight: 500; }
-  .empty-sub { font-size: 13px; margin-bottom: 20px; }
-
-  /* ===== Modal ===== */
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.7);
-    backdrop-filter: blur(4px);
-    display: none;
-    align-items: flex-end;
-    justify-content: center;
-    z-index: 500;
-  }
-  .modal-overlay.open { display: flex; }
-  .modal {
-    background: var(--bg-elev);
-    border-top: 1px solid var(--border);
-    border-radius: 16px 16px 0 0;
-    width: 100%;
-    max-width: 700px;
-    padding: 20px;
-    max-height: 90vh;
-    overflow-y: auto;
-  }
-  @media (min-width: 600px) {
-    .modal-overlay { align-items: center; }
-    .modal { border-radius: 16px; border: 1px solid var(--border); }
-  }
-  .modal h3 {
-    font-size: 18px;
-    margin-bottom: 16px;
-  }
-  .form-row { margin-bottom: 14px; }
-  .form-row label {
-    display: block;
-    font-size: 13px;
-    color: var(--text-muted);
-    margin-bottom: 6px;
-  }
-  .form-row input[type="text"],
-  .form-row input[type="tel"],
-  .form-row input[type="email"] {
-    width: 100%;
-    background: var(--bg-elev2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 11px 12px;
-    border-radius: 9px;
-    font-size: 15px;
-    outline: none;
-  }
-  .form-row input:focus { border-color: var(--accent); }
-  .modal-actions {
-    display: flex;
-    gap: 10px;
-    margin-top: 20px;
-  }
-  .modal-actions .btn { flex: 1; justify-content: center; }
-
-  /* ===== Toast ===== */
-  .toast {
-    position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 12px 18px;
-    border-radius: 10px;
-    font-size: 14px;
-    z-index: 1000;
-    box-shadow: 0 6px 16px rgba(0,0,0,0.5);
-    animation: toastIn 0.2s ease;
-  }
-  .toast.success { border-color: var(--accent); }
-  .toast.error { border-color: var(--danger); color: #fca5a5; }
-  @keyframes toastIn {
-    from { opacity: 0; transform: translate(-50%, 10px); }
-    to { opacity: 1; transform: translate(-50%, 0); }
-  }
-
-  /* ===== Plan banner ===== */
-  .plan-banner {
-    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px;
-    margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .plan-banner.warn {
-    background: linear-gradient(135deg, #2d2010 0%, #3a2a14 100%);
-    border-color: #5a401c;
-  }
-  .plan-banner-txt {
-    font-size: 13px;
-    color: var(--text-muted);
-  }
-  .plan-banner-txt strong { color: var(--text); }
-
-  /* ===== Tabs ===== */
-  .tabs-nav {
-    display: flex;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 4px;
-    margin-bottom: 20px;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  .tab-btn {
-    flex: 1;
-    padding: 9px 12px;
-    text-align: center;
-    border-radius: 7px;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-muted);
-    background: transparent;
-    border: none;
-    white-space: nowrap;
-  }
-  .tab-btn.active {
-    background: var(--bg-elev2);
-    color: var(--text);
-  }
-  .tab-section { display: none; }
-  .tab-section.active { display: block; }
-
-  /* ===== Listas de precios ===== */
-  .lista-card {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px;
-    margin-bottom: 10px;
-  }
-  .lista-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 4px;
-  }
-  .lista-prov {
-    font-weight: 600;
-    font-size: 15px;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .lista-meta {
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-  .lista-items-count {
-    background: var(--bg-elev2);
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 500;
-  }
-
-  /* Modal de lista de precios */
-  .modal-lg .modal {
-    max-width: 800px;
-  }
-  .upload-zone {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 14px;
-  }
-  .upload-btn {
-    flex: 1;
-    background: var(--bg-elev2);
-    border: 1px dashed var(--border);
-    color: var(--text);
-    padding: 14px;
-    border-radius: 10px;
-    cursor: pointer;
-    text-align: center;
-    font-size: 13px;
-    transition: all 0.15s;
-  }
-  .upload-btn:hover {
-    border-color: var(--accent);
-    background: var(--bg-elev3);
-  }
-  .loading-box {
-    background: #14271a;
-    border: 1px solid #2d5a3a;
-    color: #86efac;
-    padding: 10px 14px;
-    border-radius: 9px;
-    font-size: 13px;
-    margin-bottom: 14px;
-    display: none;
-  }
-  .preview-tabla {
-    max-height: 380px;
-    overflow-y: auto;
-    border: 1px solid var(--border);
-    border-radius: 9px;
-    margin-bottom: 14px;
-  }
-  .preview-fila {
-    display: flex;
-    gap: 8px;
-    padding: 8px;
-    border-bottom: 1px solid var(--border);
-    align-items: center;
-  }
-  .preview-fila:last-child { border-bottom: none; }
-  .preview-fila input {
-    background: var(--bg-elev2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 7px 9px;
-    border-radius: 7px;
-    font-size: 13px;
-    outline: none;
-  }
-  .preview-fila input.nombre { flex: 1; min-width: 0; }
-  .preview-fila input.precio { width: 100px; text-align: right; }
-  .preview-fila .btn-icon { padding: 4px; }
-
-  .buscador {
-    background: var(--bg-elev2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 10px 12px;
-    border-radius: 9px;
-    font-size: 14px;
-    width: 100%;
-    margin-bottom: 12px;
-    outline: none;
-  }
-  .buscador:focus { border-color: var(--accent); }
-</style>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22white%22><rect width=%2224%22 height=%2224%22 rx=%226%22/></svg>">
+<link rel="stylesheet" href="styles.css">
+<script src="icons.js"></script>
 </head>
 <body>
 
@@ -513,71 +15,97 @@
   <div class="spinner"></div>
 </div>
 
-<!-- Header -->
-<div class="header" id="header" style="display:none;">
-  <div class="header-left">
-    <div class="header-logo">📦</div>
-    <div class="header-titulos">
-      <div class="header-negocio" id="header-negocio">—</div>
-      <div class="header-plan" id="header-plan">FREE</div>
+<div class="app-shell" id="app-shell" style="display:none;">
+
+  <!-- ============ SIDEBAR (desktop) ============ -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="header-logo">P</div>
+      <div class="sidebar-brand-name">ProveLink</div>
     </div>
+    <nav class="sidebar-nav">
+      <button class="sidebar-link active" data-tab="proveedores" onclick="cambiarTab('proveedores')" id="side-link-prov">
+        <span class="icon-slot" data-icon="box"></span>
+        <span>Proveedores</span>
+      </button>
+      <button class="sidebar-link" data-tab="listas" onclick="cambiarTab('listas')" id="side-link-listas">
+        <span class="icon-slot" data-icon="list"></span>
+        <span>Listas de precios</span>
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="sidebar-user" onclick="toggleMenu()">
+        <span class="icon-slot" data-icon="user"></span>
+        <div class="header-titulos">
+          <div class="header-negocio" id="header-negocio-desktop">—</div>
+          <div class="header-plan" id="header-plan-desktop">FREE</div>
+        </div>
+        <span class="icon-slot" data-icon="chevronDown"></span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="container" id="app">
+
+    <!-- ============ HEADER (mobile) ============ -->
+    <div class="header" id="header">
+      <div class="header-left">
+        <div class="header-logo">P</div>
+        <div class="header-titulos">
+          <div class="header-negocio" id="header-negocio">—</div>
+          <div class="header-plan" id="header-plan">FREE</div>
+        </div>
+      </div>
+      <button class="menu-btn" onclick="toggleMenu()" aria-label="Menú">
+        <span class="icon-slot" data-icon="kebab"></span>
+      </button>
+    </div>
+
+    <!-- Banner del plan -->
+    <div class="plan-banner" id="plan-banner" style="display:none;">
+      <div class="plan-banner-txt" id="plan-banner-txt"></div>
+      <button class="btn primary" onclick="abrirPlanes()">Mejorar</button>
+    </div>
+
+    <!-- Tabs (solo mobile; en desktop quedan ocultas) -->
+    <div class="tabs-nav">
+      <button class="tab-btn active" data-tab="proveedores" onclick="cambiarTab('proveedores')">Proveedores</button>
+      <button class="tab-btn" data-tab="listas" onclick="cambiarTab('listas')">Listas</button>
+    </div>
+
+    <!-- ============ TAB: PROVEEDORES ============ -->
+    <div class="tab-section active" id="tab-proveedores">
+      <div class="seccion-titulo">
+        <h2>Proveedores <span class="badge" id="prov-count">0</span></h2>
+        <button class="btn primary" onclick="abrirModalProv()"><span class="icon-slot" data-icon="plus"></span> Nuevo</button>
+      </div>
+
+      <div id="prov-lista">
+        <div class="empty"><div class="empty-emoji"></div><div class="empty-title">Cargando...</div></div>
+      </div>
+    </div>
+
+    <!-- ============ TAB: LISTAS ============ -->
+    <div class="tab-section" id="tab-listas">
+      <div class="seccion-titulo">
+        <h2>Listas de precios <span class="badge" id="listas-count">0</span></h2>
+        <button class="btn primary" onclick="abrirModalLista()"><span class="icon-slot" data-icon="plus"></span> Cargar</button>
+      </div>
+
+      <div id="listas-lista">
+        <div class="empty"><div class="empty-emoji"></div><div class="empty-title">Cargando...</div></div>
+      </div>
+    </div>
+
   </div>
-  <button class="menu-btn" onclick="toggleMenu()">⋮</button>
 </div>
 
-<!-- Menú -->
+<!-- Menú desplegable global (mobile: top-right, desktop: junto al sidebar-user) -->
 <div class="menu" id="menu">
-  <div class="menu-item" onclick="abrirPlanes()">⭐ Cambiar plan</div>
-  <div class="menu-item" onclick="abrirConfig()">⚙️ Configuración</div>
+  <div class="menu-item" onclick="abrirPlanes()"><span class="icon-slot" data-icon="star"></span> Cambiar plan</div>
+  <div class="menu-item" onclick="abrirConfig()"><span class="icon-slot" data-icon="settings"></span> Configuración</div>
   <div class="menu-divider"></div>
-  <div class="menu-item danger" onclick="cerrarSesion()">🚪 Cerrar sesión</div>
-</div>
-
-<!-- Contenido -->
-<div class="container" id="app" style="display:none;">
-
-  <!-- Banner del plan -->
-  <div class="plan-banner" id="plan-banner" style="display:none;">
-    <div class="plan-banner-txt" id="plan-banner-txt"></div>
-    <button class="btn primary" onclick="abrirPlanes()">Mejorar</button>
-  </div>
-
-  <!-- Tabs de navegación -->
-  <div class="tabs-nav">
-    <button class="tab-btn active" data-tab="proveedores" onclick="cambiarTab('proveedores')">Proveedores</button>
-    <button class="tab-btn" data-tab="listas" onclick="cambiarTab('listas')">Listas</button>
-  </div>
-
-  <!-- ============ TAB: PROVEEDORES ============ -->
-  <div class="tab-section active" id="tab-proveedores">
-    <div class="seccion-titulo">
-      <h2>Proveedores <span class="badge" id="prov-count">0</span></h2>
-      <button class="btn primary" onclick="abrirModalProv()">+ Nuevo</button>
-    </div>
-
-    <div id="prov-lista">
-      <div class="empty">
-        <div class="empty-emoji">📦</div>
-        <div class="empty-title">Cargando...</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ============ TAB: LISTAS ============ -->
-  <div class="tab-section" id="tab-listas">
-    <div class="seccion-titulo">
-      <h2>Listas de precios <span class="badge" id="listas-count">0</span></h2>
-      <button class="btn primary" onclick="abrirModalLista()">+ Cargar</button>
-    </div>
-
-    <div id="listas-lista">
-      <div class="empty">
-        <div class="empty-emoji">📋</div>
-        <div class="empty-title">Cargando...</div>
-      </div>
-    </div>
-  </div>
-
+  <div class="menu-item danger" onclick="cerrarSesion()"><span class="icon-slot" data-icon="logout"></span> Cerrar sesión</div>
 </div>
 
 <!-- Modal nuevo/editar proveedor -->
@@ -609,12 +137,13 @@
 
     <div class="form-row">
       <label for="lista-prov-select">Proveedor *</label>
-      <select id="lista-prov-select" style="width:100%;background:var(--bg-elev2);border:1px solid var(--border);color:var(--text);padding:11px 12px;border-radius:9px;font-size:15px;"></select>
+      <select id="lista-prov-select"></select>
     </div>
 
     <div class="upload-zone">
       <button class="upload-btn" onclick="document.getElementById('lista-input-img').click()">
-        📷 Subir foto o PDF
+        <span class="icon-slot" data-icon="camera"></span>
+        Subir foto o PDF
       </button>
     </div>
     <input type="file" id="lista-input-img" accept="image/*,application/pdf" style="display:none;" onchange="procesarArchivo(event)">
@@ -639,7 +168,10 @@
     <h3 id="ver-lista-titulo">Lista de precios</h3>
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;" id="ver-lista-fecha"></div>
 
-    <input type="text" class="buscador" id="ver-lista-buscar" placeholder="🔍 Buscar producto..." oninput="filtrarVerLista()">
+    <div class="buscador-wrap">
+      <span class="icon-slot" data-icon="search"></span>
+      <input type="text" class="buscador" id="ver-lista-buscar" placeholder="Buscar producto..." oninput="filtrarVerLista()">
+    </div>
 
     <div class="preview-tabla" id="ver-lista-items"></div>
 
@@ -759,10 +291,17 @@ async function cerrarSesion() {
 // RENDERIZAR HEADER + PLAN BANNER
 // ============================================================
 function renderHeader() {
-  $('header-negocio').textContent = profile.nombre_negocio || profile.email || 'Mi negocio';
-  var planEl = $('header-plan');
-  planEl.textContent = (profile.plan || 'free').toUpperCase();
-  planEl.className = 'header-plan ' + (profile.plan || 'free');
+  var negocio = profile.nombre_negocio || profile.email || 'Mi negocio';
+  var planClass = 'header-plan ' + (profile.plan || 'free');
+  var planText = (profile.plan || 'free').toUpperCase();
+  ['header-negocio', 'header-negocio-desktop'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) el.textContent = negocio;
+  });
+  ['header-plan', 'header-plan-desktop'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) { el.textContent = planText; el.className = planClass; }
+  });
 }
 
 function renderPlanBanner() {
@@ -808,7 +347,7 @@ function renderProveedores() {
   var cont = $('prov-lista');
   if (proveedores.length === 0) {
     cont.innerHTML = '<div class="empty">' +
-      '<div class="empty-emoji">📦</div>' +
+      '<div class="empty-emoji">' + Icon.box() + '</div>' +
       '<div class="empty-title">No tenés proveedores todavía</div>' +
       '<div class="empty-sub">Empezá agregando uno con el botón "+ Nuevo"</div>' +
       '</div>';
@@ -823,11 +362,11 @@ function renderProveedores() {
       '<div class="prov-logo" ' + logoStyle + '>' + logoTxt + '</div>' +
       '<div class="prov-info">' +
         '<div class="prov-nombre">' + escapeHtml(p.nombre) + '</div>' +
-        (p.telefono ? '<div class="prov-tel">📞 ' + escapeHtml(p.telefono) + '</div>' : '') +
+        (p.telefono ? '<div class="prov-tel">' + Icon.phone({size:12}) + '<span>' + escapeHtml(p.telefono) + '</span></div>' : '') +
       '</div>' +
       '<div class="prov-actions">' +
-        '<button class="btn-icon" onclick="editarProveedor(\'' + p.id + '\')" title="Editar">✏️</button>' +
-        '<button class="btn-icon" onclick="borrarProveedor(\'' + p.id + '\')" title="Borrar">🗑️</button>' +
+        '<button class="btn-icon" onclick="editarProveedor(\'' + p.id + '\')" title="Editar">' + Icon.pencil() + '</button>' +
+        '<button class="btn-icon" onclick="borrarProveedor(\'' + p.id + '\')" title="Borrar">' + Icon.trash() + '</button>' +
       '</div>' +
     '</div>';
   });
@@ -924,8 +463,8 @@ async function borrarProveedor(id) {
 // TABS — Cambiar entre Proveedores / Listas
 // ============================================================
 function cambiarTab(tab) {
-  document.querySelectorAll('.tab-btn').forEach(function(b) {
-    b.classList.toggle('active', b.dataset.tab === tab);
+  document.querySelectorAll('.tab-btn, .sidebar-link').forEach(function(b) {
+    if (b.dataset.tab) b.classList.toggle('active', b.dataset.tab === tab);
   });
   document.querySelectorAll('.tab-section').forEach(function(s) {
     s.classList.toggle('active', s.id === 'tab-' + tab);
@@ -958,7 +497,7 @@ function renderListas() {
   var cont = $('listas-lista');
   if (proveedores.length === 0) {
     cont.innerHTML = '<div class="empty">' +
-      '<div class="empty-emoji">📋</div>' +
+      '<div class="empty-emoji">' + Icon.list() + '</div>' +
       '<div class="empty-title">Primero agregá proveedores</div>' +
       '<div class="empty-sub">Las listas de precios se asocian a un proveedor</div>' +
       '</div>';
@@ -966,7 +505,7 @@ function renderListas() {
   }
   if (listas.length === 0) {
     cont.innerHTML = '<div class="empty">' +
-      '<div class="empty-emoji">📋</div>' +
+      '<div class="empty-emoji">' + Icon.list() + '</div>' +
       '<div class="empty-title">No cargaste ninguna lista todavía</div>' +
       '<div class="empty-sub">Subí una foto o PDF y la IA extrae los productos sola</div>' +
       '</div>';
@@ -986,8 +525,8 @@ function renderListas() {
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">' +
         '<div class="lista-meta">Actualizada ' + fechaStr + '</div>' +
         '<div style="display:flex;gap:4px;">' +
-          '<button class="btn-icon" onclick="abrirVerLista(\'' + l.proveedor_id + '\')" title="Ver">👁️</button>' +
-          '<button class="btn-icon" onclick="abrirModalLista(\'' + l.proveedor_id + '\')" title="Editar">✏️</button>' +
+          '<button class="btn-icon" onclick="abrirVerLista(\'' + l.proveedor_id + '\')" title="Ver">' + Icon.eye() + '</button>' +
+          '<button class="btn-icon" onclick="abrirModalLista(\'' + l.proveedor_id + '\')" title="Editar">' + Icon.pencil() + '</button>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -1141,7 +680,7 @@ async function procesarImagen(file) {
   }
 
   var loading = $('lista-loading');
-  loading.textContent = '🔄 Procesando imagen con IA... (15-30 seg)';
+  loading.textContent = 'Procesando imagen con IA... (15-30 seg)';
   loading.style.display = 'block';
   $('btn-guardar-lista').disabled = true;
 
@@ -1185,7 +724,7 @@ async function procesarPDF(file) {
     throw new Error('PDF.js no cargó. Recargá la página.');
   }
   var loading = $('lista-loading');
-  loading.textContent = '📄 Extrayendo texto del PDF...';
+  loading.textContent = 'Extrayendo texto del PDF...';
   loading.style.display = 'block';
 
   // 1. Extraer texto del PDF localmente (sin IA)
@@ -1193,7 +732,7 @@ async function procesarPDF(file) {
   var pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
   var lineas = [];
   for (var i = 1; i <= pdf.numPages; i++) {
-    loading.textContent = '📄 Leyendo página ' + i + ' de ' + pdf.numPages + '...';
+    loading.textContent = 'Leyendo página ' + i + ' de ' + pdf.numPages + '...';
     var page = await pdf.getPage(i);
     var tc = await page.getTextContent();
     var lineasPag = {};
@@ -1215,7 +754,7 @@ async function procesarPDF(file) {
   console.log('[PDF] Líneas extraídas:', lineas.length);
 
   // 2. Detectar columnas con IA usando una muestra
-  loading.textContent = '🔍 Detectando columnas de precio...';
+  loading.textContent = 'Detectando columnas de precio...';
   var muestra = lineas.slice(0, 60).join('\n');
   var columnas = await detectarColumnasPDF(muestra);
 
@@ -1304,7 +843,7 @@ async function procesarPDFConColumna(lineas, nombreColumna) {
   var chunkSize = 200;
   var totalChunks = Math.ceil(lineas.length / chunkSize);
   for (var c = 0; c < totalChunks; c++) {
-    loading.textContent = '🤖 IA procesando parte ' + (c + 1) + ' de ' + totalChunks + '...';
+    loading.textContent = 'IA procesando parte ' + (c + 1) + ' de ' + totalChunks + '...';
     var chunkLineas = lineas.slice(c * chunkSize, (c + 1) * chunkSize);
     var chunkTexto = chunkLineas.join('\n');
     try {
@@ -1421,7 +960,7 @@ function renderPreview() {
     html += '<div class="preview-fila">' +
       '<input type="text" class="nombre" value="' + escapeHtmlAttr(it.productoLista) + '" oninput="editarFilaPreview(' + idx + ', this.value, null)">' +
       '<input type="number" step="0.01" class="precio" value="' + it.precio + '" oninput="editarFilaPreview(' + idx + ', null, this.value)">' +
-      '<button class="btn-icon" onclick="borrarFilaPreview(' + idx + ')" title="Borrar">🗑️</button>' +
+      '<button class="btn-icon" onclick="borrarFilaPreview(' + idx + ')" title="Borrar">' + Icon.trash() + '</button>' +
     '</div>';
   });
   tabla.innerHTML = html;
@@ -1575,7 +1114,7 @@ function renderVerLista(items) {
   items.forEach(function(it) {
     html += '<div class="preview-fila" style="cursor:default;">' +
       '<div style="flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(it.productoLista) + '</div>' +
-      '<div style="font-size:13px;font-weight:600;color:var(--accent);white-space:nowrap;">' + formatPrecio(it.precio) + '</div>' +
+      '<div style="font-size:13px;font-weight:600;color:var(--success);white-space:nowrap;font-variant-numeric:tabular-nums;">' + formatPrecio(it.precio) + '</div>' +
     '</div>';
   });
   cont.innerHTML = html;
@@ -1626,9 +1165,21 @@ function escapeHtml(s) {
   renderHeader();
   await cargarProveedores();
   $('loader').style.display = 'none';
-  $('header').style.display = 'flex';
-  $('app').style.display = 'block';
+  $('app-shell').style.display = 'flex';
 })();
+
+// Pintar íconos estáticos del HTML
+function pintarIconosEstaticos(root) {
+  (root || document).querySelectorAll('.icon-slot[data-icon]').forEach(function(el) {
+    var name = el.dataset.icon;
+    if (window.Icon && typeof window.Icon[name] === 'function') {
+      el.innerHTML = window.Icon[name]();
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', function(){ pintarIconosEstaticos(); });
+// Si el DOM ya cargó (script al final), pintar ahora también
+pintarIconosEstaticos();
 
 // Enter en el modal para guardar
 document.addEventListener('keydown', function(e) {

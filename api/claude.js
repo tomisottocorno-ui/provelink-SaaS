@@ -167,20 +167,25 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'Falta el campo messages' });
     }
 
-    // 7) Llamar a Claude
+    // 7) Llamar a Claude con prompt caching en el system prompt
+    // El caching reduce el costo de input hasta 10x en requests consecutivos
+    const apiBody = {
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: maxTokens,
+      messages: messages
+    };
+    if (system) {
+      apiBody.system = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
+    }
     const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'x-api-key': ANTHROPIC_KEY,
         'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'prompt-caching-2024-07-31',
         'content-type': 'application/json'
       },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: maxTokens,
-        system: system,
-        messages: messages
-      })
+      body: JSON.stringify(apiBody)
     });
 
     if (!claudeResp.ok) {

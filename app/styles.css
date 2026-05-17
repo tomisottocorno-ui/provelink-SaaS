@@ -327,7 +327,7 @@ h3 { font-size: 18px; }
   }
 
   /* En desktop, las tabs se ocultan: el sidebar ya navega */
-  .tabs-nav { display: none; }
+  .tabs-nav { display: none !important; }
 
   /* Grids más amplios */
   .prov-grid { grid-template-columns: repeat(2, 1fr); }
@@ -950,4 +950,40 @@ h3 { font-size: 18px; }
   align-items: center;
   justify-content: center;
   padding: 20px;
+}
+
+/* ============================================================
+   ASISTENTE IA
+   ============================================================ */
+@keyframes dotpulse {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40%            { opacity: 1;   transform: scale(1);   }
+}
+.ai-fab {
+  position: fixed;
+  bottom: 24px;
+  right: 20px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 28px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 88;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 20px rgba(59,130,246,0.35);
+  transition: transform 0.15s, box-shadow 0.15s;
+  font-family: var(--font);
+}
+.ai-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 26px rgba(59,130,246,0.5);
+}
+@media (max-width: 480px) {
+  .ai-fab-txt { display: none; }
+  .ai-fab { padding: 14px; border-radius: 50%; }
 }

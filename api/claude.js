@@ -90,6 +90,42 @@ module.exports = async function handler(req, res) {
     const tiposProcesarLista = ['procesar_lista', 'detectar_columnas', 'procesar_chunk'];
     const esProcesarLista = tiposProcesarLista.indexOf(tipo) >= 0;
 
+    // expandir_query: usado para expandir abreviaciones en el buscador.
+    // No consume cuota, no requiere plan específico, disponible para todos.
+    if (tipo === 'expandir_query') {
+      // Solo validar que el body sea razonable
+      if (!messages || !Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ error: 'Falta messages' });
+      }
+      // Llamar a Claude sin ninguna restricción de plan
+      const apiBodyEQ = {
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: Math.min(maxTokens, 300),
+        messages: messages
+      };
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify(apiBodyEQ)
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        return res.status(502).json({ error: 'Error IA', detalle: err.error && err.error.message });
+      }
+      const data = await resp.json();
+      // Loguear uso (sin incrementar cuota)
+      const u = data.usage || {};
+      const costo = ((u.input_tokens||0)*1.0 + (u.output_tokens||0)*5.0) / 1_000_000;
+      sb.from('uso_ia').insert({ user_id: userId, tipo: 'expandir_query',
+        input_tokens: u.input_tokens||0, output_tokens: u.output_tokens||0, costo_usd: costo
+      }).then(() => {}).catch(() => {});
+      return res.status(200).json({ content: data.content, stop_reason: data.stop_reason });
+    }
+
     if (esProcesarLista) {
       // Validar límite de listas para plan free: máximo 1 lista en total
       if (plan === 'free') {

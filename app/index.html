@@ -1601,16 +1601,155 @@ function todosLosItems() {
   return out;
 }
 
-function buscarEnListas(q) {
-  if (!q) return [];
-  var palabras = q.toLowerCase().trim().split(/\s+/);
-  return todosLosItems().filter(function(it) {
-    var texto = (it.productoLista + ' ' + it.proveedor).toLowerCase();
-    return palabras.every(function(p) { return texto.indexOf(p) >= 0; });
+// ============================================================
+// ABREVIACIONES — diccionario local + expansión IA
+// ============================================================
+var ABREV_DICT = {
+  // Lácteos
+  'ddl':  ['dulce de leche'],  'dl':   ['dulce de leche'],
+  'lch':  ['leche'],           'lc':   ['leche'],
+  'mnt':  ['manteca'],         'mn':   ['manteca'],
+  'qso':  ['queso'],           'qs':   ['queso'],    'qt':  ['queso'],
+  'qcr':  ['queso crema'],     'qsc':  ['queso crema'],
+  'yo':   ['yogur'],           'yog':  ['yogur'],    'yg':  ['yogur'],
+  'cr':   ['crema'],           'crm':  ['crema'],    'crd': ['crema de leche'],
+  'rct':  ['ricota'],
+  // Aceites y aderezos
+  'ace':  ['aceite'],          'ac':   ['aceite'],
+  'aol':  ['aceite de oliva'], 'ado':  ['aceite de oliva'],
+  'vin':  ['vinagre'],
+  'mz':   ['mayonesa'],        'may':  ['mayonesa'], 'mayo': ['mayonesa'],
+  'mos':  ['mostaza'],         'mst':  ['mostaza'],
+  'kch':  ['ketchup'],         'ket':  ['ketchup'],
+  'st':   ['salsa de tomate'], 'slt':  ['salsa de tomate'],
+  // Harinas y cereales
+  'hh':   ['harina'],          'hr':   ['harina'],   'hrn': ['harina'],
+  'arr':  ['arroz'],           'rz':   ['arroz'],
+  'fid':  ['fideos'],          'fd':   ['fideos'],   'fds': ['fideos'],
+  'av':   ['avena'],           'avn':  ['avena'],
+  'sml':  ['semola'],          'smo':  ['semola'],
+  'pan':  ['pan'],
+  'gal':  ['galletitas'],      'gall': ['galletitas'], 'gllt': ['galletitas'],
+  // Azúcar y dulces
+  'az':   ['azucar'],          'azc':  ['azucar'],
+  'choc': ['chocolate'],       'chco': ['chocolate'],
+  'mrm':  ['mermelada'],       'merm': ['mermelada'],
+  'nut':  ['nutella'],         'nl':   ['nutella'],
+  // Bebidas
+  'gas':  ['gaseosa'],         'gsa':  ['gaseosa'],  'gss': ['gaseosa'],
+  'cer':  ['cerveza', 'cerdo'],
+  'jug':  ['jugo'],            'jg':   ['jugo'],
+  'ag':   ['agua'],
+  'sod':  ['soda'],
+  'caf':  ['cafe'],
+  'yer':  ['yerba'],           'yb':   ['yerba'],    'yrb': ['yerba'],
+  // Carnes y embutidos
+  'pol':  ['pollo'],           'pll':  ['pollo'],    'pch': ['pollo'],
+  'car':  ['carne'],           'carn': ['carne'],
+  'vac':  ['vacuno'],          'vs':   ['vacuno'],
+  'jm':   ['jamon'],           'jam':  ['jamon'],
+  'sal':  ['salame', 'salsa'],
+  'emb':  ['embutidos'],
+  'at':   ['atun'],
+  'pes':  ['pescado'],
+  // Frutas y verduras
+  'tom':  ['tomate'],          'tmt':  ['tomate'],
+  'ceb':  ['cebolla'],
+  'pap':  ['papa'],            'pp':   ['papa'],
+  'zap':  ['zapallo'],         'znh':  ['zanahoria'], 'zah': ['zanahoria'],
+  'spi':  ['espinaca'],
+  'nar':  ['naranja'],         'nrj':  ['naranja'],
+  'lim':  ['limon'],
+  'man':  ['manzana'],         'mnz':  ['manzana'],
+  'ban':  ['banana'],
+  // Limpieza
+  'det':  ['detergente'],      'dtr':  ['detergente'],
+  'jab':  ['jabon'],           'jbn':  ['jabon'],
+  'lav':  ['lavandina'],
+  'srv':  ['servilletas'],
+};
+
+// Cache de expansiones IA por sesión
+var expandIACache = {};
+var expandIATimer = null;
+
+function expandirQueryLocal(q) {
+  var qLower = q.toLowerCase().trim();
+  // Buscar en el diccionario exacto
+  if (ABREV_DICT[qLower]) return ABREV_DICT[qLower].slice();
+  // Buscar si alguna palabra del query es abreviación
+  var palabras = qLower.split(/\s+/);
+  var expansiones = [];
+  palabras.forEach(function(p) {
+    if (ABREV_DICT[p]) {
+      ABREV_DICT[p].forEach(function(e) {
+        if (expansiones.indexOf(e) < 0) expansiones.push(e);
+      });
+    }
   });
+  return expansiones;
 }
 
-function renderBuscarProducto() {
+async function expandirQueryIA(q) {
+  var cacheKey = q.toLowerCase().trim();
+  if (expandIACache[cacheKey] !== undefined) return expandIACache[cacheKey];
+  // Obtener muestra de productos para dar contexto a la IA
+  var muestra = todosLosItems().slice(0, 60).map(function(it) { return it.productoLista; }).join(', ');
+  var prompt = 'El usuario de una app de gestión de proveedores de alimentos buscó: "' + q + '"\n\n' +
+    'Algunos productos disponibles en el sistema: ' + muestra + '\n\n' +
+    'Si la búsqueda parece una abreviación, sigla, o término informal argentino de alimentos, devolvé los posibles productos que está buscando. ' +
+    'Si el término ya es claro, devolvé array vacío.\n\n' +
+    'Respondé ÚNICAMENTE con JSON, sin texto extra:\n{"terminos":["termino1","termino2"]}';
+  try {
+    var resp = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      body: JSON.stringify({ tipo: 'expandir_query', max_tokens: 150, messages: [{ role: 'user', content: prompt }] })
+    });
+    var data = await resp.json();
+    var texto = (data.content && data.content[0] && data.content[0].text || '').replace(/```json|```/g,'').trim();
+    var parsed = JSON.parse(texto);
+    var terminos = (parsed.terminos || []).filter(function(t) { return t && t.length > 0; });
+    expandIACache[cacheKey] = terminos;
+    return terminos;
+  } catch(e) {
+    expandIACache[cacheKey] = [];
+    return [];
+  }
+}
+
+function buscarEnListas(q, terminosExtra) {
+  if (!q) return [];
+  var qLower = q.toLowerCase().trim();
+  // Construir lista de queries: el original + expansiones
+  var queries = [qLower];
+  (terminosExtra || []).forEach(function(t) {
+    var tl = t.toLowerCase().trim();
+    if (tl && queries.indexOf(tl) < 0) queries.push(tl);
+  });
+  var todos = todosLosItems();
+  var vistos = {};
+  var resultados = [];
+  queries.forEach(function(query) {
+    var palabras = query.split(/\s+/);
+    todos.forEach(function(it) {
+      var key = it.itemId;
+      if (vistos[key]) return;
+      var texto = (it.productoLista + ' ' + it.proveedor).toLowerCase();
+      if (palabras.every(function(p) { return texto.indexOf(p) >= 0; })) {
+        vistos[key] = true;
+        resultados.push(it);
+      }
+    });
+  });
+  return resultados;
+}
+
+// Estado de la expansión IA del buscador
+var buscarExpansiones = [];   // términos actuales expandidos
+var buscarQueryActual = '';   // query al que corresponden las expansiones
+
+function renderBuscarProducto(expansionesExtras) {
   var cont = $('buscar-content');
   if (!cont) return;
   var q = ($('buscar-producto').value || '').trim();
@@ -1622,6 +1761,9 @@ function renderBuscarProducto() {
   if (btnVer) btnVer.style.display = totalItems > 0 ? '' : 'none';
 
   if (!q) {
+    buscarExpansiones = [];
+    buscarQueryActual = '';
+    clearTimeout(expandIATimer);
     var total = listas.reduce(function(s, l) { return s + (l.items || []).length; }, 0);
     if (!listas.length) {
       cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin listas cargadas</div><div class="empty-sub">Cargá listas de precios en la pestaña "Listas"</div></div>';
@@ -1631,9 +1773,38 @@ function renderBuscarProducto() {
     return;
   }
 
-  var resultados = buscarEnListas(q);
+  // Si el query cambió, resetear expansiones y disparar búsqueda local + IA
+  if (q !== buscarQueryActual) {
+    buscarQueryActual = q;
+    buscarExpansiones = expandirQueryLocal(q);
+    clearTimeout(expandIATimer);
+    // Lanzar expansión IA con debounce (500ms) para queries cortos ≤6 chars
+    if (q.length <= 6) {
+      expandIATimer = setTimeout(function() {
+        if ($('buscar-producto').value.trim() !== q) return; // query cambió
+        expandirQueryIA(q).then(function(terminos) {
+          if ($('buscar-producto').value.trim() !== q) return;
+          terminos.forEach(function(t) {
+            if (buscarExpansiones.indexOf(t) < 0) buscarExpansiones.push(t);
+          });
+          renderBuscarProducto(buscarExpansiones);
+        });
+      }, 500);
+    }
+  }
+
+  var terminosActivos = expansionesExtras || buscarExpansiones;
+  var resultados = buscarEnListas(q, terminosActivos);
+
   if (!resultados.length) {
-    cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin resultados para "' + escapeHtml(q) + '"</div></div>';
+    var sinResHtml = '<div class="expand-chips-wrap" id="expand-chips"></div>' +
+      '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin resultados para "' + escapeHtml(q) + '"</div>';
+    if (terminosActivos.length === 0 && q.length <= 6) {
+      sinResHtml += '<div class="empty-sub" style="font-size:11px;opacity:0.7;">Buscando interpretaciones...</div>';
+    }
+    sinResHtml += '</div>';
+    cont.innerHTML = sinResHtml;
+    renderExpandChips(terminosActivos);
     return;
   }
 
@@ -1643,6 +1814,7 @@ function renderBuscarProducto() {
     if (!porProv[r.proveedorId]) porProv[r.proveedorId] = { nombre: r.proveedor, tel: r.provTel, items: [] };
     porProv[r.proveedorId].items.push(r);
   });
+  var chipsHtml = '<div class="expand-chips-wrap" id="expand-chips"></div>';
   Object.keys(porProv).forEach(function(pid) {
     porProv[pid].items.sort(function(a, b) { return a.precio - b.precio; });
   });
@@ -1655,7 +1827,7 @@ function renderBuscarProducto() {
   var enPedido = {};
   Object.keys(ped.items || {}).forEach(function(id) { if (ped.items[id].qty) enPedido[id] = ped.items[id].qty; });
 
-  var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">' + resultados.length + ' resultado' + (resultados.length !== 1 ? 's' : '') + ' en ' + provsOrden.length + ' proveedor' + (provsOrden.length !== 1 ? 'es' : '') + '</div>';
+  var html = chipsHtml + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">' + resultados.length + ' resultado' + (resultados.length !== 1 ? 's' : '') + ' en ' + provsOrden.length + ' proveedor' + (provsOrden.length !== 1 ? 'es' : '') + '</div>';
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;">';
 
   provsOrden.forEach(function(pid) {
@@ -1695,6 +1867,21 @@ function renderBuscarProducto() {
   cont.querySelectorAll('button[data-restar]').forEach(function(btn) {
     btn.onclick = function() { cambiarCantidad(btn.getAttribute('data-restar'), -1); };
   });
+
+  renderExpandChips(terminosActivos);
+}
+
+function renderExpandChips(terminos) {
+  var wrap = document.getElementById('expand-chips');
+  if (!wrap) return;
+  if (!terminos || terminos.length === 0) { wrap.innerHTML = ''; return; }
+  var html = '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:10px;">' +
+    '<span style="font-size:11px;color:var(--text-muted);font-family:var(--f-mono);text-transform:uppercase;letter-spacing:0.08em;">Interpretado como:</span>';
+  terminos.forEach(function(t) {
+    html += '<span style="font-size:11px;padding:3px 9px;border-radius:20px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.25);color:var(--accent-bright);">' + escapeHtml(t) + '</span>';
+  });
+  html += '</div>';
+  wrap.innerHTML = html;
 }
 
 function cambiarCantidad(itemId, delta) {

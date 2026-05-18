@@ -3347,13 +3347,23 @@ function cerrarModalStockPedido() {
   pendingPedidoItems = [];
 }
 
+// Limpia el nombre del producto: quita marcas de peso/volumen embebidas para usarlo
+// como nombre de materia prima cuando la IA no devuelve un tipo.
+// "Harina 0000 Cañuelas x25kg" → "Harina 0000 Cañuelas"
+function limpiarNombreProducto(nombre) {
+  return (nombre || '')
+    .replace(/\bx\s*\d+(?:[.,]\d+)?\s*(?:kg|g|gr|gramos?|lts?|litros?|ml|cc|l)\b/gi, '')
+    .replace(/\b\d+(?:[.,]\d+)?\s*(?:kg|g|gr|gramos?|lts?|litros?|ml|cc)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Actualiza el stock de materias primas automáticamente al confirmar un pedido.
-// Usa IA para identificar el TIPO de cada producto (ignorando marca y presentación),
-// de modo que "Harina 0000 Cañuelas" y "Harina 0000 Pureza" sumen a la misma cuenta.
+// Usa IA para identificar el tipo (ignora marca/presentación). Si la IA no normaliza
+// un producto, usa el nombre limpio como fallback — nunca saltea items.
 async function actualizarStockAutomatico(items) {
   if (!items || !items.length) return;
 
-  // Normalizar tipos con IA
   var nombres = items.map(function(it) { return it.productoLista || ''; }).filter(Boolean);
   var tipos = {};
   try { tipos = await normalizarTiposProductoIA(nombres); } catch(e) {}
@@ -3365,26 +3375,28 @@ async function actualizarStockAutomatico(items) {
   items.forEach(function(item, idx) {
     var tipoIA = tipos[item.productoLista] || tipos[(item.productoLista || '').toLowerCase()] || null;
 
-    // Extraer cantidad real en unidad base (g o ml) parseando nombre + unidad del item
     var ext = extraerCantidadBase(item);
     var cantBase = ext.cantBase;
     var unidadBase = ext.unidadBase;
-    if (!cantBase || cantBase <= 0) return;
+    if (cantBase <= 0) return;
 
-    // Buscar materia prima: primero por tipo IA, luego por nombre original
-    var match = tipoIA ? buscarMateriaFuzzy(tipoIA, materias) : null;
-    if (!match) match = buscarMateriaFuzzy(item.productoLista || '', materias);
+    // Nombre con el que buscar y eventualmente crear la materia:
+    // 1° tipo de IA (sin marca), 2° nombre limpio (sin tallas), 3° nombre crudo
+    var nombreMatch = tipoIA || limpiarNombreProducto(item.productoLista) || item.productoLista || '';
+    if (!nombreMatch) return;
+
+    // Buscar materia existente por nombre normalizado, luego por nombre crudo como fallback
+    var match = buscarMateriaFuzzy(nombreMatch, materias);
+    if (!match && tipoIA) match = buscarMateriaFuzzy(limpiarNombreProducto(item.productoLista) || '', materias);
 
     if (match) {
-      // Si la materia existente tiene unidadBase distinta (ej: 'u' creada antes), actualizar
       if (match.unidadBase === 'u' && unidadBase !== 'u') match.unidadBase = unidadBase;
       match.stockActual = (match.stockActual || 0) + cantBase;
       actualizados++;
-    } else if (tipoIA) {
-      // Crear nueva materia prima con el tipo detectado por IA
+    } else {
       materias.push({
         id: 'mat_' + Date.now() + '_' + idx,
-        nombre: tipoIA,
+        nombre: nombreMatch,
         unidadBase: unidadBase,
         stockActual: cantBase,
         stockMinimo: 0
@@ -3392,14 +3404,13 @@ async function actualizarStockAutomatico(items) {
       creados++;
       actualizados++;
     }
-    // Si no hay tipoIA ni match, no crear entradas con nombres sucios de lista de precios
   });
 
   if (actualizados > 0) {
     setMaterias(materias);
     renderProdAlertas();
-    var msg = '📦 Stock actualizado: ' + (actualizados - creados) + ' actualizada' + (actualizados - creados !== 1 ? 's' : '');
-    if (creados > 0) msg += ', ' + creados + ' nueva' + (creados !== 1 ? 's' : '');
+    var msg = '📦 Stock actualizado';
+    if (creados > 0) msg += ' · ' + creados + ' materia' + (creados !== 1 ? 's nuevas' : ' nueva');
     showToast(msg);
   }
 }

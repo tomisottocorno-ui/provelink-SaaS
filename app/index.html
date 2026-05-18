@@ -221,7 +221,7 @@
       <label for="prov-telefono">Teléfono (opcional)</label>
       <div class="phone-input-wrap">
         <span class="phone-prefix">🇦🇷 +54</span>
-        <input type="tel" id="prov-telefono" placeholder="11 1234 5678" class="phone-input" inputmode="numeric">
+        <input type="tel" id="prov-telefono" placeholder="11 1234 5678" class="phone-input" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)">
       </div>
     </div>
 

@@ -1272,6 +1272,28 @@ function formatPrecio(n) {
   return Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function parsearPrecioBase(precio, unidad, nombre) {
+  var texto = (unidad || nombre || '').toLowerCase();
+  var patrones = [
+    { re: /(\d+(?:[.,]\d+)?)\s*(?:gr?|gramos?)\b/, toBase: function(n) { return n/1000; }, base: 'kg' },
+    { re: /(\d+(?:[.,]\d+)?)\s*kg?\b/, toBase: function(n) { return n; }, base: 'kg' },
+    { re: /(\d+(?:[.,]\d+)?)\s*(?:ml|cc)\b/, toBase: function(n) { return n/1000; }, base: 'l' },
+    { re: /(\d+(?:[.,]\d+)?)\s*(?:lts?|litros?|lt)\b/, toBase: function(n) { return n; }, base: 'l' },
+    { re: /(\d+(?:[.,]\d+)?)\s*(?:uds?|un|unid|unidades?)\b/, toBase: function(n) { return n; }, base: 'u' }
+  ];
+  for (var i = 0; i < patrones.length; i++) {
+    var m = texto.match(patrones[i].re);
+    if (m) {
+      var cant = parseFloat(m[1].replace(',', '.'));
+      if (cant > 0) {
+        var base = patrones[i].toBase(cant);
+        if (base > 0) return { precioBase: precio / base, unidadBase: patrones[i].base };
+      }
+    }
+  }
+  return null;
+}
+
 function todosLosItems() {
   var out = [];
   listas.forEach(function(l) {
@@ -1285,6 +1307,7 @@ function todosLosItems() {
         provTel: prov.telefono || '',
         productoLista: it.productoLista,
         precio: it.precio,
+        unidad: it.unidad || '',
         itemId: l.id + '|' + (it.productoLista || '')
       });
     });
@@ -1364,7 +1387,9 @@ function renderBuscarProducto() {
       var enPed = enPedido[it.itemId] || 0;
       var bg = enPed > 0 ? 'background:rgba(96,165,250,0.08);border-color:#60a5fa;' : '';
       html += '<div style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);' + bg + 'display:flex;align-items:center;justify-content:space-between;gap:8px;">';
-      html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + '</div>';
+      var pb = parsearPrecioBase(it.precio, it.unidad, it.productoLista);
+      var pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
+      html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + pbHtml + '</div>';
       html += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">';
       html += '<strong style="font-size:13px;white-space:nowrap;">$' + formatPrecio(it.precio) + '</strong>';
       if (enPed > 0) {

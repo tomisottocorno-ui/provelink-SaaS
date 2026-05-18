@@ -2709,40 +2709,57 @@ function convertirABaseProd(cantidad, unidad) {
   return (parseFloat(cantidad) || 0) * factorConvProd(unidad);
 }
 
-// Extrae la cantidad en unidad base (g o ml) y la unidadBase a partir de un item del pedido.
-// Estrategia: primero mira item.unidad; si no es reconocible, parsea el nombre del producto
-// buscando patrones como "x1kg", "25kg", "500ml", "1L", etc.
-// Ej: qty=2, nombre="Harina 0000 x 25kg", unidad="bolsa" → { cantBase: 50000, unidadBase: 'g' }
-// Ej: qty=1, nombre="Harina 0000 1kg",    unidad="kg"    → { cantBase: 1000,  unidadBase: 'g' }
+// Extrae la cantidad en unidad base (g o ml) a partir de un item del pedido.
+// Maneja:
+//   - item.unidad limpia: "kg", "g", "grs", "l", "ml", etc.
+//   - peso embebido en el nombre: "x500g", "25kg", "1.5L", "500 grs", "500 GRS"
+//   - multiplicador de pack: "Pack x 10 uds", "x12 unidades" → multiplica el peso por unidad
+// Ej: qty=1, "HARINA SYTARI X 500 GRS Pack x 10 uds" → 1 × 500g × 10 = 5000g
+// Ej: qty=2, "Harina 0000 x 25kg"                   → 2 × 25000g = 50000g
 function extraerCantidadBase(item) {
   var qty = parseFloat(item.qty) || 0;
-  var unidad = (item.unidad || '').toLowerCase().trim();
+  var u = (item.unidad || '').toLowerCase().replace(/[^a-z]/g, '');
 
-  // 1. Unidad limpia reconocida directamente
-  if (unidad === 'kg' || unidad === 'kilo' || unidad === 'kilos') return { cantBase: qty * 1000, unidadBase: 'g' };
-  if (unidad === 'g'  || unidad === 'gr'   || unidad === 'gramos') return { cantBase: qty,        unidadBase: 'g' };
-  if (unidad === 'l'  || unidad === 'lts'  || unidad === 'litros' || unidad === 'litro' || unidad === 'lt') return { cantBase: qty * 1000, unidadBase: 'ml' };
-  if (unidad === 'ml' || unidad === 'cc')  return { cantBase: qty, unidadBase: 'ml' };
+  // 1. item.unidad es una unidad física reconocible
+  if (u === 'kg' || u === 'kilo' || u === 'kilos')                          return { cantBase: qty * 1000, unidadBase: 'g'  };
+  if (u === 'g'  || u === 'gr'   || u === 'grs'   || u === 'gramo' || u === 'gramos') return { cantBase: qty,        unidadBase: 'g'  };
+  if (u === 'l'  || u === 'lt'   || u === 'lts'   || u === 'litro' || u === 'litros') return { cantBase: qty * 1000, unidadBase: 'ml' };
+  if (u === 'ml' || u === 'cc')                                              return { cantBase: qty,        unidadBase: 'ml' };
 
-  // 2. Parsear el nombre del producto buscando medida embebida (ej: "x25kg", "1.5L", "500g")
+  // 2. Parsear el nombre del producto
   var nombre = (item.productoLista || '').toLowerCase();
-  var patrones = [
-    { re: /(?:x|×|\s)(\d+(?:[.,]\d+)?)\s*kg\b/,              factor: 1000, base: 'g'  },
-    { re: /(?:x|×|\s)(\d+(?:[.,]\d+)?)\s*(?:gr?|gramos?)\b/, factor: 1,    base: 'g'  },
-    { re: /(?:x|×|\s)(\d+(?:[.,]\d+)?)\s*(?:lts?|litros?|lt|l)\b/, factor: 1000, base: 'ml' },
-    { re: /(?:x|×|\s)(\d+(?:[.,]\d+)?)\s*ml\b/,              factor: 1,    base: 'ml' },
-    // sin prefijo x (ej: "harina 25kg")
-    { re: /(\d+(?:[.,]\d+)?)\s*kg\b/,              factor: 1000, base: 'g'  },
-    { re: /(\d+(?:[.,]\d+)?)\s*(?:gr?|gramos?)\b/, factor: 1,    base: 'g'  },
-    { re: /(\d+(?:[.,]\d+)?)\s*(?:lts?|litros?|lt|l)\b/, factor: 1000, base: 'ml' },
-    { re: /(\d+(?:[.,]\d+)?)\s*ml\b/,              factor: 1,    base: 'ml' },
+
+  // Peso por unidad: buscar patrones como "x500g", "500 grs", "1.5l", "25kg"
+  // Soporta: kg · g · gr · grs · gramo/s · l · lt · lts · litro/s · ml · cc
+  var pesoPatrones = [
+    { re: /(?:x\s*)?(\d+(?:[.,]\d+)?)\s*kg\b/,                             factor: 1000, base: 'g'  },
+    { re: /(?:x\s*)?(\d+(?:[.,]\d+)?)\s*(?:grs?|gr|gramos?)\b/,           factor: 1,    base: 'g'  },
+    { re: /(?:x\s*)?(\d+(?:[.,]\d+)?)\s*(?:lts?|litros?|lt)\b/,           factor: 1000, base: 'ml' },
+    { re: /(?:x\s*)?(\d+(?:[.,]\d+)?)\s*(?:ml|cc)\b/,                     factor: 1,    base: 'ml' },
+    // "l" suelto al final (ej: "1l") — va último para no confundir con otras palabras
+    { re: /(?:x\s*)?(\d+(?:[.,]\d+)?)\s*l\b/,                             factor: 1000, base: 'ml' },
   ];
-  for (var i = 0; i < patrones.length; i++) {
-    var m = nombre.match(patrones[i].re);
-    if (m) {
-      var pesoUnit = parseFloat(m[1].replace(',', '.')) * patrones[i].factor;
-      if (pesoUnit > 0) return { cantBase: qty * pesoUnit, unidadBase: patrones[i].base };
+
+  // Multiplicador de pack: "pack x 10", "x10 uds", "x 12 unidades", "x6"
+  var packRe = /pack\s+x\s*(\d+)|x\s*(\d+)\s*(?:uds?|unidades?|unid)\b|x\s*(\d+)\s*$/;
+
+  var pesoUnit = 0;
+  var unidadBase = 'u';
+
+  for (var i = 0; i < pesoPatrones.length; i++) {
+    var mp = nombre.match(pesoPatrones[i].re);
+    if (mp) {
+      pesoUnit = parseFloat(mp[1].replace(',', '.')) * pesoPatrones[i].factor;
+      unidadBase = pesoPatrones[i].base;
+      break;
     }
+  }
+
+  if (pesoUnit > 0) {
+    var packMult = 1;
+    var mpack = nombre.match(packRe);
+    if (mpack) packMult = parseInt(mpack[1] || mpack[2] || mpack[3]) || 1;
+    return { cantBase: qty * pesoUnit * packMult, unidadBase: unidadBase };
   }
 
   // 3. No se pudo determinar unidad física → tratar como unidades

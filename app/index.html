@@ -2723,6 +2723,31 @@ function fmtStock(valor, unidad) {
   return v + ' ' + unidad;
 }
 
+// Formato dual: muestra unidad grande y pequeña simultáneamente.
+// 5000g → "5 kg / 5000 g" | 500g → "500 g" | 1500ml → "1.5 L / 1500 ml" | 42u → "42 u"
+function fmtStockDual(valor, unidad) {
+  var v = parseFloat(valor) || 0;
+  if (unidad === 'g') {
+    var g = Math.round(v);
+    if (v >= 1000) {
+      var kg = v / 1000;
+      var kgStr = (Number.isInteger(kg) ? kg : parseFloat(kg.toFixed(2))) + ' kg';
+      return kgStr + ' <span class="stock-unit-small">/ ' + g.toLocaleString('es-AR') + ' g</span>';
+    }
+    return g + ' g';
+  }
+  if (unidad === 'ml') {
+    var ml = Math.round(v);
+    if (v >= 1000) {
+      var l = v / 1000;
+      var lStr = (Number.isInteger(l) ? l : parseFloat(l.toFixed(2))) + ' L';
+      return lStr + ' <span class="stock-unit-small">/ ' + ml.toLocaleString('es-AR') + ' ml</span>';
+    }
+    return ml + ' ml';
+  }
+  return (Number.isInteger(v) ? v : parseFloat(v.toFixed(2))) + ' u';
+}
+
 // ——— Lógica de producción ———
 function calcularMaxProduccion(receta) {
   var materias = getMaterias();
@@ -2805,8 +2830,8 @@ function renderProdStock() {
           (bajo ? '<span class="prod-alert-badge">⚠️ Stock bajo</span>' : '') +
         '</div>' +
         '<div class="prod-mat-stock">' +
-          '<span class="prod-stock-val">' + fmtStock(m.stockActual, m.unidadBase) + '</span>' +
-          (m.stockMinimo > 0 ? '<span class="prod-stock-min">mín: ' + fmtStock(m.stockMinimo, m.unidadBase) + '</span>' : '') +
+          '<span class="prod-stock-val">' + fmtStockDual(m.stockActual, m.unidadBase) + '</span>' +
+          (m.stockMinimo > 0 ? '<span class="prod-stock-min">mín: ' + fmtStockDual(m.stockMinimo, m.unidadBase) + '</span>' : '') +
         '</div>' +
         (pct >= 0 ? '<div class="prod-stock-bar"><div class="prod-stock-fill ' + barClass + '" style="width:' + pct + '%"></div></div>' : '') +
       '</div>' +

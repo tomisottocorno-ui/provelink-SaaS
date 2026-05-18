@@ -1949,24 +1949,20 @@ function construirContextoIA() {
     });
   }
   ctx += '\n=== INSTRUCCIONES ===\n';
-  ctx += '- Respondé en español argentino (vos, podés), de forma breve y clara\n';
-  ctx += '- Para buscar: mostrá las 3-5 mejores opciones por precio con proveedor\n';
+  ctx += '- Respondé en español argentino (vos, podés), breve y claro\n';
   ctx += '- Formato de precios: $9.644,07 (punto de miles, coma decimal)\n';
   ctx += '- No inventes datos. Si no sabés, decilo\n';
-  ctx += '\n=== COMPARACIÓN DE PRECIOS — MUY IMPORTANTE ===\n';
-  ctx += 'Antes de comparar precios SIEMPRE convertí a la misma unidad base.\n';
-  ctx += 'Ejemplos de conversión:\n';
-  ctx += '  - "x 500g" → dividí el precio por 0.5 para obtener precio/kg\n';
-  ctx += '  - "x 250g" → dividí por 0.25\n';
-  ctx += '  - "x 5 kg" → dividí por 5\n';
-  ctx += '  - "x 500ml" o "x 0.5 lt" → dividí por 0.5 para precio/litro\n';
-  ctx += '  - "x 2.755 kg" → dividí por 2.755\n';
-  ctx += 'Cuando compares productos similares:\n';
-  ctx += '  1. Detectá la cantidad de cada presentación en el nombre\n';
-  ctx += '  2. Calculá el precio por unidad base (kg o litro)\n';
-  ctx += '  3. Mostrá: nombre | $precio original (presentación) | $X.XXX/kg\n';
-  ctx += '  4. Ordená por precio/kg o precio/litro, no por precio absoluto\n';
-  ctx += 'Nunca compares precios absolutos de diferentes presentaciones sin normalizar.\n';
+  ctx += '\n=== MOSTRAR PRODUCTOS — MUY IMPORTANTE ===\n';
+  ctx += 'Cuando el usuario busca un producto o pide comparar precios:\n';
+  ctx += '  1. Mostrá TODOS los productos que coincidan (no solo los más baratos)\n';
+  ctx += '  2. Para cada uno, detectá la cantidad en el nombre (ej: "x 10 kg", "x 500g", "x 2.755 kg", "x 0.5 lt")\n';
+  ctx += '  3. Calculá el precio por unidad base: precio ÷ cantidad = precio/kg o precio/litro\n';
+  ctx += '     Conversiones: 500g=0.5kg | 250g=0.25kg | 500ml=0.5lt | 100cc=0.1lt\n';
+  ctx += '  4. Formato de cada línea:\n';
+  ctx += '     Nombre del producto  [Proveedor]  →  $precio_total  |  $X.XXX/kg\n';
+  ctx += '  5. Ordená la lista de menor a mayor precio/kg (o precio/litro)\n';
+  ctx += '  6. Al final indicá cuál es el más barato y cuál el más caro por unidad\n';
+  ctx += 'NUNCA compares precios absolutos de distintas presentaciones sin normalizar primero.\n';
   return ctx;
 }
 

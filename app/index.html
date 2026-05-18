@@ -2245,7 +2245,7 @@ function confirmarPedido() {
   ids.forEach(function(itemId) {
     var info = byId[itemId];
     if (!info) return;
-    items.push({ itemId: itemId, productoLista: info.productoLista, qty: ped.items[itemId].qty, proveedorId: info.proveedorId, proveedor: info.proveedor, precio: info.precio, subtotal: info.precio * ped.items[itemId].qty });
+    items.push({ itemId: itemId, productoLista: info.productoLista, qty: ped.items[itemId].qty, unidad: info.unidad || '', proveedorId: info.proveedorId, proveedor: info.proveedor, precio: info.precio, subtotal: info.precio * ped.items[itemId].qty });
   });
 
   var hist = histGet();
@@ -2280,8 +2280,8 @@ function confirmarPedido() {
   renderHistorial();
   cambiarTab('historial');
   showToast('Pedido guardado en historial');
-  // Ofrecer actualizar/crear stock de materias primas al confirmar pedido
-  setTimeout(function() { ofrecerActualizarStockPedido(items); }, 400);
+  // Actualizar stock de materias primas automáticamente al confirmar pedido
+  setTimeout(function() { actualizarStockAutomatico(items); }, 400);
 }
 
 function renderHistorial() {
@@ -3275,6 +3275,57 @@ async function ofrecerActualizarStockPedido(items) {
 function cerrarModalStockPedido() {
   document.getElementById('modal-stock-pedido').classList.remove('open');
   pendingPedidoItems = [];
+}
+
+// Actualiza el stock de materias primas automáticamente al confirmar un pedido.
+// Usa IA para identificar el TIPO de cada producto (ignorando marca y presentación),
+// de modo que "Harina 0000 Cañuelas" y "Harina 0000 Pureza" sumen a la misma cuenta.
+async function actualizarStockAutomatico(items) {
+  if (!items || !items.length) return;
+
+  // Normalizar tipos con IA
+  var nombres = items.map(function(it) { return it.productoLista || ''; }).filter(Boolean);
+  var tipos = {};
+  try { tipos = await normalizarTiposProductoIA(nombres); } catch(e) {}
+
+  var materias = getMaterias();
+  var actualizados = 0;
+  var creados = 0;
+
+  items.forEach(function(item, idx) {
+    var tipoIA = tipos[item.productoLista] || tipos[(item.productoLista || '').toLowerCase()] || null;
+    var cantBase = convertirABaseProd(item.qty, item.unidad || 'u');
+    if (!cantBase || cantBase <= 0) return;
+
+    // Buscar materia prima: primero por tipo IA, luego por nombre original
+    var match = tipoIA ? buscarMateriaFuzzy(tipoIA, materias) : null;
+    if (!match) match = buscarMateriaFuzzy(item.productoLista || '', materias);
+
+    if (match) {
+      match.stockActual = (match.stockActual || 0) + cantBase;
+      actualizados++;
+    } else if (tipoIA) {
+      // Crear nueva materia prima con el tipo detectado por IA
+      materias.push({
+        id: 'mat_' + Date.now() + '_' + idx,
+        nombre: tipoIA,
+        unidadBase: inferirUnidadBase(item.unidad || 'u'),
+        stockActual: cantBase,
+        stockMinimo: 0
+      });
+      creados++;
+      actualizados++;
+    }
+    // Si no hay tipoIA ni match, no crear entradas con nombres sucios de lista de precios
+  });
+
+  if (actualizados > 0) {
+    setMaterias(materias);
+    renderProdAlertas();
+    var msg = '📦 Stock actualizado: ' + (actualizados - creados) + ' actualizada' + (actualizados - creados !== 1 ? 's' : '');
+    if (creados > 0) msg += ', ' + creados + ' nueva' + (creados !== 1 ? 's' : '');
+    showToast(msg);
+  }
 }
 
 // Infiere la unidad base según la unidad del pedido

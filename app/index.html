@@ -43,6 +43,10 @@
         <span class="icon-slot" data-icon="file"></span>
         <span>Historial</span>
       </button>
+      <button class="sidebar-link" data-tab="produccion" onclick="cambiarTab('produccion')" id="side-link-produccion">
+        <span class="icon-slot" data-icon="factory"></span>
+        <span>Producción</span>
+      </button>
     </nav>
     <div class="sidebar-footer">
       <div class="sidebar-user" onclick="toggleMenu()">
@@ -84,6 +88,7 @@
       <button class="tab-btn" data-tab="listas" onclick="cambiarTab('listas')">Listas</button>
       <button class="tab-btn" data-tab="pedido" onclick="cambiarTab('pedido')">Pedido</button>
       <button class="tab-btn" data-tab="historial" onclick="cambiarTab('historial')">Historial</button>
+      <button class="tab-btn" data-tab="produccion" onclick="cambiarTab('produccion')">Producción</button>
     </div>
 
     <!-- ============ TAB: PROVEEDORES ============ -->
@@ -157,6 +162,58 @@
       </div>
       <div id="historial-content">
         <div class="empty"><div class="empty-emoji"></div><div class="empty-title">Cargando...</div></div>
+      </div>
+    </div>
+
+    <!-- ============ TAB: PRODUCCIÓN ============ -->
+    <div class="tab-section" id="tab-produccion">
+      <div class="seccion-titulo">
+        <h2>Producción</h2>
+      </div>
+
+      <!-- Alertas de stock bajo -->
+      <div id="prod-alertas"></div>
+
+      <!-- Sub-tabs -->
+      <div class="prod-subtabs">
+        <button class="prod-subtab active" id="psub-stock" onclick="prodSubtab('stock')">
+          <span style="font-size:16px;">📦</span> Stock
+        </button>
+        <button class="prod-subtab" id="psub-recetas" onclick="prodSubtab('recetas')">
+          <span style="font-size:16px;">📋</span> Recetas
+        </button>
+        <button class="prod-subtab" id="psub-producir" onclick="prodSubtab('producir')">
+          <span style="font-size:16px;">🏭</span> Producir
+        </button>
+      </div>
+
+      <!-- Sub-panel: Stock (materias primas) -->
+      <div id="prod-panel-stock" class="prod-panel active">
+        <div class="seccion-titulo" style="margin-top:0;padding-top:0;">
+          <h3 style="font-size:15px;font-weight:600;margin:0;">Materias primas</h3>
+          <button class="btn primary" onclick="abrirModalMateria()"><span class="icon-slot" data-icon="plus"></span> Nueva</button>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Ingresá las materias primas que comprás a tus proveedores (harina, aceite, levadura, etc.)</p>
+        <div id="prod-stock-lista"></div>
+      </div>
+
+      <!-- Sub-panel: Recetas -->
+      <div id="prod-panel-recetas" class="prod-panel">
+        <div class="seccion-titulo" style="margin-top:0;padding-top:0;">
+          <h3 style="font-size:15px;font-weight:600;margin:0;">Recetas de producción</h3>
+          <button class="btn primary" onclick="abrirModalReceta()"><span class="icon-slot" data-icon="plus"></span> Nueva</button>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Definí qué materias primas y qué cantidad usa cada producto que fabricás.</p>
+        <div id="prod-recetas-lista"></div>
+      </div>
+
+      <!-- Sub-panel: Producir -->
+      <div id="prod-panel-producir" class="prod-panel">
+        <div id="prod-producir-grid"></div>
+        <div id="prod-log-section" style="margin-top:24px;">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;">Últimas producciones</div>
+          <div id="prod-log-lista"></div>
+        </div>
       </div>
     </div>
 
@@ -331,6 +388,75 @@
 
     <div class="modal-actions">
       <button class="btn" onclick="cerrarVerLista()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Materia Prima -->
+<div class="modal-overlay" id="modal-materia">
+  <div class="modal">
+    <h3 id="modal-materia-titulo">Nueva materia prima</h3>
+    <div class="form-row">
+      <label for="mat-nombre">Nombre *</label>
+      <input type="text" id="mat-nombre" placeholder="Ej: Harina 000, Azúcar, Levadura">
+    </div>
+    <div class="form-row">
+      <label for="mat-unidad">Unidad base *</label>
+      <select id="mat-unidad">
+        <option value="g">Gramos (g)</option>
+        <option value="ml">Mililitros (ml)</option>
+        <option value="u">Unidades (u)</option>
+        <option value="latas">Latas</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label for="mat-stock">Stock actual</label>
+      <input type="number" id="mat-stock" placeholder="0" min="0" step="1">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Ingresá en la unidad base seleccionada (ej: 5000 para 5kg de harina)</div>
+    </div>
+    <div class="form-row">
+      <label for="mat-minstock">Stock mínimo (alerta)</label>
+      <input type="number" id="mat-minstock" placeholder="0" min="0" step="1">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Cuando el stock baje de este valor, se mostrará una alerta</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="btn-borrar-materia" onclick="borrarMateria()" style="color:var(--danger);border-color:var(--danger-border);display:none;">Eliminar</button>
+      <button class="btn" onclick="cerrarModalMateria()">Cancelar</button>
+      <button class="btn primary" onclick="guardarMateria()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Receta -->
+<div class="modal-overlay" id="modal-receta">
+  <div class="modal" style="max-width:560px;">
+    <h3 id="modal-receta-titulo">Nueva receta</h3>
+    <div class="form-row">
+      <label for="rec-nombre">Nombre del producto *</label>
+      <input type="text" id="rec-nombre" placeholder="Ej: Pan francés, Medialunas, Facturas">
+    </div>
+    <div class="form-row">
+      <label>Ingredientes <span style="font-size:11px;color:var(--text-muted);text-transform:none;">(cantidad por unidad producida)</span></label>
+      <div id="rec-ingredientes" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;"></div>
+      <button class="btn" type="button" style="font-size:12px;padding:7px 14px;" onclick="agregarIngredienteModal()">+ Agregar ingrediente</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="btn-borrar-receta" onclick="borrarReceta()" style="color:var(--danger);border-color:var(--danger-border);display:none;">Eliminar</button>
+      <button class="btn" onclick="cerrarModalReceta()">Cancelar</button>
+      <button class="btn primary" onclick="guardarReceta()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Actualizar stock desde pedido -->
+<div class="modal-overlay" id="modal-stock-pedido">
+  <div class="modal" style="max-width:520px;">
+    <h3>Actualizar stock de materias primas</h3>
+    <p style="font-size:13px;color:var(--text-muted);margin:0 0 16px;">Seleccioná los ítems del pedido que recibiste y asignales la materia prima correspondiente.</p>
+    <div id="stock-pedido-items" style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto;"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="cerrarModalStockPedido()">Omitir</button>
+      <button class="btn primary" onclick="aplicarStockPedido()">Actualizar stock</button>
     </div>
   </div>
 </div>
@@ -731,6 +857,7 @@ function cambiarTab(tab) {
   if (tab === 'ver-pedido') renderVerPedido();
   if (tab === 'resumen') renderResumen();
   if (tab === 'historial') renderHistorial();
+  if (tab === 'produccion') renderProduccion();
   window.scrollTo(0, 0);
 }
 
@@ -2153,6 +2280,10 @@ function confirmarPedido() {
   renderHistorial();
   cambiarTab('historial');
   showToast('Pedido guardado en historial');
+  // Ofrecer actualizar stock de materias primas si hay alguna definida
+  if (getMaterias().length > 0) {
+    setTimeout(function() { ofrecerActualizarStockPedido(items); }, 400);
+  }
 }
 
 function renderHistorial() {
@@ -2537,6 +2668,558 @@ async function enviarMensajeAI() {
     input.focus();
   }
 }
+</script>
+
+<script>
+// ============================================================================
+// PRODUCCIÓN — Materias primas + Recetas + Panel de producción
+// ============================================================================
+
+var PROD_MAT_KEY = 'pl_materias';   // [{id, nombre, unidadBase, stockActual, stockMinimo}]
+var PROD_REC_KEY = 'pl_recetas';    // [{id, nombre, ingredientes:[{materiaId, cantidad}]}]
+var PROD_LOG_KEY = 'pl_prod_log';   // [{id, recetaId, nombre, unidades, fecha, timestamp}]
+
+var prodMateriaEditId = null;
+var prodRecetaEditId  = null;
+var prodIngCount      = 0;
+var pendingPedidoItems = [];
+
+// ——— Persistencia ———
+function getMaterias() {
+  try { return JSON.parse(localStorage.getItem(PROD_MAT_KEY) || '[]'); } catch(e) { return []; }
+}
+function setMaterias(v) { localStorage.setItem(PROD_MAT_KEY, JSON.stringify(v)); }
+function getRecetas() {
+  try { return JSON.parse(localStorage.getItem(PROD_REC_KEY) || '[]'); } catch(e) { return []; }
+}
+function setRecetas(v) { localStorage.setItem(PROD_REC_KEY, JSON.stringify(v)); }
+function getProdLog() {
+  try { return JSON.parse(localStorage.getItem(PROD_LOG_KEY) || '[]'); } catch(e) { return []; }
+}
+function setProdLog(v) { localStorage.setItem(PROD_LOG_KEY, JSON.stringify(v)); }
+
+// ——— Conversión de unidades ———
+// Retorna factor (cuántas unidades base por 1 unidad de la unidad dada)
+function factorConvProd(unidad) {
+  var u = (unidad || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (u === 'kg' || u === 'kilo' || u === 'kilos') return 1000;
+  if (u === 'l'  || u === 'lts'  || u === 'litros' || u === 'litro' || u === 'lt') return 1000;
+  return 1;
+}
+
+function convertirABaseProd(cantidad, unidad) {
+  return (parseFloat(cantidad) || 0) * factorConvProd(unidad);
+}
+
+// Formato legible: 5000g → 5kg, 1500ml → 1.5L, 42u → 42u
+function fmtStock(valor, unidad) {
+  var v = parseFloat(valor) || 0;
+  if (unidad === 'g' && v >= 1000) {
+    var kg = v / 1000;
+    return (Number.isInteger(kg) ? kg : parseFloat(kg.toFixed(2))) + ' kg';
+  }
+  if (unidad === 'ml' && v >= 1000) {
+    var l = v / 1000;
+    return (Number.isInteger(l) ? l : parseFloat(l.toFixed(2))) + ' L';
+  }
+  return v + ' ' + unidad;
+}
+
+// ——— Lógica de producción ———
+function calcularMaxProduccion(receta) {
+  var materias = getMaterias();
+  if (!receta.ingredientes || !receta.ingredientes.length) return 0;
+  var min = Infinity;
+  receta.ingredientes.forEach(function(ing) {
+    var mat = materias.find(function(m) { return m.id === ing.materiaId; });
+    if (!mat || !ing.cantidad || ing.cantidad <= 0) { min = 0; return; }
+    var posibles = mat.stockActual <= 0 ? 0 : Math.floor(mat.stockActual / ing.cantidad);
+    if (posibles < min) min = posibles;
+  });
+  return min === Infinity ? 0 : min;
+}
+
+function getAlertasStockProd() {
+  return getMaterias().filter(function(m) {
+    return m.stockMinimo > 0 && m.stockActual <= m.stockMinimo;
+  });
+}
+
+// ——— Render principal ———
+function renderProduccion() {
+  renderProdAlertas();
+  // Determinar sub-tab activo
+  var activeSub = document.querySelector('.prod-subtab.active');
+  var subName = activeSub ? activeSub.id.replace('psub-', '') : 'stock';
+  if      (subName === 'stock')   renderProdStock();
+  else if (subName === 'recetas') renderProdRecetas();
+  else                            renderProdProducir();
+}
+
+function prodSubtab(name) {
+  document.querySelectorAll('.prod-subtab').forEach(function(b) {
+    b.classList.toggle('active', b.id === 'psub-' + name);
+  });
+  document.querySelectorAll('.prod-panel').forEach(function(p) {
+    p.classList.toggle('active', p.id === 'prod-panel-' + name);
+  });
+  renderProdAlertas();
+  if      (name === 'stock')   renderProdStock();
+  else if (name === 'recetas') renderProdRecetas();
+  else                         renderProdProducir();
+}
+
+// ——— Alertas de stock bajo ———
+function renderProdAlertas() {
+  var alertas = getAlertasStockProd();
+  var el = document.getElementById('prod-alertas');
+  if (!el) return;
+  if (!alertas.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="prod-alert-bar">' +
+    '<span class="prod-alert-icon">⚠️</span>' +
+    '<strong>Stock bajo:</strong> ' +
+    alertas.map(function(m) {
+      return '<span class="prod-alert-chip" onclick="abrirModalMateria(\'' + m.id + '\')">' +
+        escapeHtml(m.nombre) + ' — ' + fmtStock(m.stockActual, m.unidadBase) + '</span>';
+    }).join('') +
+  '</div>';
+}
+
+// ——— Sub-tab: Stock (materias primas) ———
+function renderProdStock() {
+  var materias = getMaterias();
+  var el = document.getElementById('prod-stock-lista');
+  if (!el) return;
+  if (!materias.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-emoji" style="font-size:40px;">📦</div>' +
+      '<div class="empty-title">Sin materias primas</div>' +
+      '<div class="empty-sub">Agregá las materias primas que usás para fabricar tus productos (harina, azúcar, levadura, etc.)</div></div>';
+    return;
+  }
+  el.innerHTML = materias.map(function(m) {
+    var bajo = m.stockMinimo > 0 && m.stockActual <= m.stockMinimo;
+    // Barra de progreso: llena = 3× el mínimo
+    var pct = m.stockMinimo > 0 ? Math.min(100, Math.round((m.stockActual / (m.stockMinimo * 3)) * 100)) : -1;
+    var barClass = pct <= 33 ? 'crit' : pct <= 66 ? 'warn' : 'ok';
+    return '<div class="prod-mat-card' + (bajo ? ' bajo-stock' : '') + '">' +
+      '<div class="prod-mat-body">' +
+        '<div class="prod-mat-nombre">' + escapeHtml(m.nombre) +
+          (bajo ? '<span class="prod-alert-badge">⚠️ Stock bajo</span>' : '') +
+        '</div>' +
+        '<div class="prod-mat-stock">' +
+          '<span class="prod-stock-val">' + fmtStock(m.stockActual, m.unidadBase) + '</span>' +
+          (m.stockMinimo > 0 ? '<span class="prod-stock-min">mín: ' + fmtStock(m.stockMinimo, m.unidadBase) + '</span>' : '') +
+        '</div>' +
+        (pct >= 0 ? '<div class="prod-stock-bar"><div class="prod-stock-fill ' + barClass + '" style="width:' + pct + '%"></div></div>' : '') +
+      '</div>' +
+      '<div class="prod-mat-actions">' +
+        '<button class="btn-soft" onclick="ajustarStockMateria(\'' + m.id + '\')" title="Ajustar stock">+/−</button>' +
+        '<button class="btn-soft" onclick="abrirModalMateria(\'' + m.id + '\')" title="Editar">✎</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// ——— Sub-tab: Recetas ———
+function renderProdRecetas() {
+  var recetas  = getRecetas();
+  var materias = getMaterias();
+  var el = document.getElementById('prod-recetas-lista');
+  if (!el) return;
+  if (!recetas.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-emoji" style="font-size:40px;">📋</div>' +
+      '<div class="empty-title">Sin recetas</div>' +
+      '<div class="empty-sub">Cargá los productos que fabricás y qué ingredientes usan</div></div>';
+    return;
+  }
+  el.innerHTML = recetas.map(function(r) {
+    var max = calcularMaxProduccion(r);
+    var ingsHtml = (r.ingredientes || []).map(function(ing) {
+      var mat = materias.find(function(m) { return m.id === ing.materiaId; });
+      return '<div class="prod-ing-row">' +
+        '<span>' + (mat ? escapeHtml(mat.nombre) : '<em>Materia eliminada</em>') + '</span>' +
+        '<span class="prod-ing-qty">' + ing.cantidad + ' ' + (mat ? mat.unidadBase : '') + ' / u.</span>' +
+      '</div>';
+    }).join('');
+    return '<div class="prod-rec-card">' +
+      '<div class="prod-rec-head">' +
+        '<div class="prod-rec-nombre">' + escapeHtml(r.nombre) + '</div>' +
+        '<div class="prod-rec-badge' + (max === 0 ? ' cero' : max <= 10 ? ' bajo' : '') + '">' + max + ' u. posibles</div>' +
+      '</div>' +
+      (ingsHtml ? '<div class="prod-rec-ings">' + ingsHtml + '</div>' : '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Sin ingredientes</div>') +
+      '<div class="prod-rec-actions">' +
+        '<button class="btn" style="font-size:12px;padding:6px 14px;" onclick="abrirModalReceta(\'' + r.id + '\')">✎ Editar</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// ——— Sub-tab: Producir ———
+function renderProdProducir() {
+  var recetas  = getRecetas();
+  var materias = getMaterias();
+  var gridEl   = document.getElementById('prod-producir-grid');
+  var logEl    = document.getElementById('prod-log-lista');
+  if (!gridEl) return;
+
+  if (!recetas.length) {
+    gridEl.innerHTML = '<div class="empty"><div class="empty-emoji" style="font-size:40px;">🏭</div>' +
+      '<div class="empty-title">Sin recetas cargadas</div>' +
+      '<div class="empty-sub">Andá a la pestaña <strong>Recetas</strong> y cargá los productos primero</div></div>';
+  } else {
+    gridEl.innerHTML = recetas.map(function(r) {
+      var max  = calcularMaxProduccion(r);
+      var ingsDesglose = (r.ingredientes || []).map(function(ing) {
+        var mat = materias.find(function(m) { return m.id === ing.materiaId; });
+        if (!mat) return '';
+        var posibles = (mat.stockActual <= 0 || !ing.cantidad) ? 0 : Math.floor(mat.stockActual / ing.cantidad);
+        var esLimitante = (posibles === max && max < 20);
+        return '<div class="prod-ing-desglose' + (esLimitante ? ' limitante' : '') + '">' +
+          '<span>' + escapeHtml(mat.nombre) + '</span>' +
+          '<span class="prod-ing-calc">' +
+            fmtStock(mat.stockActual, mat.unidadBase) + ' ÷ ' + ing.cantidad + mat.unidadBase +
+            ' = <strong>' + posibles + '</strong>' +
+          '</span>' +
+        '</div>';
+      }).filter(Boolean).join('');
+
+      return '<div class="prod-producir-card">' +
+        '<div class="prod-prod-head">' +
+          '<div class="prod-prod-nombre">' + escapeHtml(r.nombre) + '</div>' +
+          '<div class="prod-prod-max' + (max === 0 ? ' cero' : max <= 10 ? ' bajo' : '') + '">' +
+            '<span class="prod-max-num">' + max + '</span>' +
+            '<span class="prod-max-lbl">unidades posibles</span>' +
+          '</div>' +
+        '</div>' +
+        (ingsDesglose ? '<div class="prod-ings-desglose">' + ingsDesglose + '</div>' : '') +
+        (max === 0
+          ? '<div class="prod-sin-stock">Sin stock suficiente para producir</div>'
+          : '<div class="prod-producir-form">' +
+              '<input type="number" id="prod-qty-' + r.id + '" class="prod-qty-input" min="1" max="' + max + '" value="1" placeholder="Unidades">' +
+              '<button class="btn primary" onclick="producirUnidades(\'' + r.id + '\')">Producir</button>' +
+            '</div>'
+        ) +
+      '</div>';
+    }).join('');
+  }
+
+  // Render log
+  if (!logEl) return;
+  var log = getProdLog();
+  if (!log.length) {
+    logEl.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:8px 0;">Sin producciones registradas todavía</div>';
+  } else {
+    logEl.innerHTML = '<div class="prod-log-table">' +
+      log.slice(0, 30).map(function(e) {
+        return '<div class="prod-log-row">' +
+          '<span class="prod-log-nombre">' + escapeHtml(e.nombre) + '</span>' +
+          '<span class="prod-log-qty">−' + e.unidades + ' u.</span>' +
+          '<span class="prod-log-fecha">' + e.fecha + '</span>' +
+        '</div>';
+      }).join('') + '</div>';
+  }
+}
+
+// ——— Acción: Producir ———
+function producirUnidades(recetaId) {
+  var input = document.getElementById('prod-qty-' + recetaId);
+  var qty   = parseInt(input ? input.value : 0) || 0;
+  if (qty <= 0) { showToast('Ingresá la cantidad a producir'); return; }
+
+  var receta = getRecetas().find(function(r) { return r.id === recetaId; });
+  if (!receta) return;
+  var max = calcularMaxProduccion(receta);
+  if (qty > max) { showToast('No hay stock suficiente (máx: ' + max + ')'); return; }
+
+  if (!confirm('¿Registrar producción de ' + qty + ' unidad' + (qty !== 1 ? 'es' : '') + ' de "' + receta.nombre + '"?')) return;
+
+  // Deducir stock
+  var materias = getMaterias();
+  (receta.ingredientes || []).forEach(function(ing) {
+    var mat = materias.find(function(m) { return m.id === ing.materiaId; });
+    if (mat) mat.stockActual = Math.max(0, mat.stockActual - ing.cantidad * qty);
+  });
+  setMaterias(materias);
+
+  // Guardar log
+  var log = getProdLog();
+  log.unshift({
+    id: Date.now().toString(),
+    recetaId: recetaId,
+    nombre: receta.nombre,
+    unidades: qty,
+    fecha: new Date().toLocaleDateString('es-AR'),
+    timestamp: Date.now()
+  });
+  if (log.length > 200) log = log.slice(0, 200);
+  setProdLog(log);
+
+  showToast('✅ Producción registrada: ' + qty + ' ' + receta.nombre);
+  renderProduccion();
+}
+
+// ——— Modal: Materia prima ———
+function abrirModalMateria(id) {
+  prodMateriaEditId = id || null;
+  var mat = id ? getMaterias().find(function(m) { return m.id === id; }) : null;
+  var $t = document.getElementById('modal-materia-titulo');
+  if ($t) $t.textContent = id ? 'Editar materia prima' : 'Nueva materia prima';
+  document.getElementById('mat-nombre').value  = mat ? mat.nombre       : '';
+  document.getElementById('mat-unidad').value  = mat ? mat.unidadBase   : 'g';
+  document.getElementById('mat-stock').value   = mat ? mat.stockActual  : '';
+  document.getElementById('mat-minstock').value = mat && mat.stockMinimo > 0 ? mat.stockMinimo : '';
+  var btnBorrar = document.getElementById('btn-borrar-materia');
+  if (btnBorrar) btnBorrar.style.display = id ? '' : 'none';
+  document.getElementById('modal-materia').classList.add('open');
+  setTimeout(function() { document.getElementById('mat-nombre').focus(); }, 100);
+}
+
+function cerrarModalMateria() {
+  document.getElementById('modal-materia').classList.remove('open');
+}
+
+function guardarMateria() {
+  var nombre   = document.getElementById('mat-nombre').value.trim();
+  var unidad   = document.getElementById('mat-unidad').value;
+  var stock    = parseFloat(document.getElementById('mat-stock').value) || 0;
+  var minStock = parseFloat(document.getElementById('mat-minstock').value) || 0;
+  if (!nombre) { document.getElementById('mat-nombre').focus(); return; }
+
+  var materias = getMaterias();
+  if (prodMateriaEditId) {
+    materias = materias.map(function(m) {
+      return m.id === prodMateriaEditId
+        ? { id: m.id, nombre: nombre, unidadBase: unidad, stockActual: stock, stockMinimo: minStock }
+        : m;
+    });
+    showToast('Materia prima actualizada');
+  } else {
+    materias.push({ id: Date.now().toString(), nombre: nombre, unidadBase: unidad, stockActual: stock, stockMinimo: minStock });
+    showToast('Materia prima agregada');
+  }
+  setMaterias(materias);
+  cerrarModalMateria();
+  renderProduccion();
+}
+
+function borrarMateria() {
+  if (!prodMateriaEditId) return;
+  var mat = getMaterias().find(function(m) { return m.id === prodMateriaEditId; });
+  if (!confirm('¿Eliminar "' + (mat ? mat.nombre : '') + '"?\nTambién se quitará de todas las recetas que la usen.')) return;
+  setMaterias(getMaterias().filter(function(m) { return m.id !== prodMateriaEditId; }));
+  // Quitar de recetas
+  setRecetas(getRecetas().map(function(r) {
+    return Object.assign({}, r, {
+      ingredientes: (r.ingredientes || []).filter(function(i) { return i.materiaId !== prodMateriaEditId; })
+    });
+  }));
+  cerrarModalMateria();
+  showToast('Materia prima eliminada');
+  renderProduccion();
+}
+
+function ajustarStockMateria(id) {
+  var mat = getMaterias().find(function(m) { return m.id === id; });
+  if (!mat) return;
+  var nuevoStr = prompt(
+    'Stock de "' + mat.nombre + '"\n' +
+    'Stock actual: ' + fmtStock(mat.stockActual, mat.unidadBase) + '\n\n' +
+    'Nuevo stock (en ' + mat.unidadBase + '):'
+  );
+  if (nuevoStr === null || nuevoStr.trim() === '') return;
+  var nuevo = parseFloat(nuevoStr);
+  if (isNaN(nuevo) || nuevo < 0) { showToast('Valor inválido'); return; }
+  var materias = getMaterias();
+  materias = materias.map(function(m) {
+    return m.id === id ? Object.assign({}, m, { stockActual: nuevo }) : m;
+  });
+  setMaterias(materias);
+  showToast('Stock actualizado: ' + fmtStock(nuevo, mat.unidadBase));
+  renderProduccion();
+}
+
+// ——— Modal: Receta ———
+function abrirModalReceta(id) {
+  prodRecetaEditId = id || null;
+  prodIngCount = 0;
+  var receta = id ? getRecetas().find(function(r) { return r.id === id; }) : null;
+  var $t = document.getElementById('modal-receta-titulo');
+  if ($t) $t.textContent = id ? 'Editar receta' : 'Nueva receta';
+  document.getElementById('rec-nombre').value = receta ? receta.nombre : '';
+  var container = document.getElementById('rec-ingredientes');
+  container.innerHTML = '';
+  if (receta && receta.ingredientes && receta.ingredientes.length) {
+    receta.ingredientes.forEach(function(ing) { agregarIngredienteModal(ing.materiaId, ing.cantidad); });
+  } else {
+    agregarIngredienteModal();
+  }
+  var btnBorrar = document.getElementById('btn-borrar-receta');
+  if (btnBorrar) btnBorrar.style.display = id ? '' : 'none';
+  document.getElementById('modal-receta').classList.add('open');
+  setTimeout(function() { document.getElementById('rec-nombre').focus(); }, 100);
+}
+
+function cerrarModalReceta() {
+  document.getElementById('modal-receta').classList.remove('open');
+}
+
+function agregarIngredienteModal(materiaId, cantidad) {
+  var materias = getMaterias();
+  var idx = prodIngCount++;
+  var div = document.createElement('div');
+  div.className = 'prod-ing-modal-row';
+  div.id = 'ing-row-' + idx;
+  var options = '<option value="">— Materia prima —</option>' +
+    materias.map(function(m) {
+      return '<option value="' + m.id + '"' + (m.id === materiaId ? ' selected' : '') + '>' +
+        escapeHtml(m.nombre) + ' (' + m.unidadBase + ')</option>';
+    }).join('');
+  var unitLabel = '';
+  if (materiaId) {
+    var mat = materias.find(function(m) { return m.id === materiaId; });
+    if (mat) unitLabel = mat.unidadBase;
+  }
+  div.innerHTML =
+    '<select class="ing-mat-sel" id="ing-mat-' + idx + '">' + options + '</select>' +
+    '<input type="number" class="ing-qty-inp" id="ing-qty-' + idx + '" placeholder="Cantidad" min="0.1" step="0.1" value="' + (cantidad || '') + '">' +
+    '<span class="ing-unit-lbl" id="ing-unit-' + idx + '">' + unitLabel + '</span>' +
+    '<button class="btn-icon-sm" type="button" onclick="quitarIngredienteModal(\'' + idx + '\')" title="Quitar">✕</button>';
+  // Actualizar label de unidad al cambiar selección
+  div.querySelector('select').addEventListener('change', function() {
+    var mat2 = getMaterias().find(function(m) { return m.id === this.value; }.bind(this));
+    var lbl = document.getElementById('ing-unit-' + idx);
+    if (lbl) lbl.textContent = mat2 ? mat2.unidadBase : '';
+  });
+  document.getElementById('rec-ingredientes').appendChild(div);
+}
+
+function quitarIngredienteModal(idx) {
+  var row = document.getElementById('ing-row-' + idx);
+  if (row) row.remove();
+}
+
+function guardarReceta() {
+  var nombre = document.getElementById('rec-nombre').value.trim();
+  if (!nombre) { document.getElementById('rec-nombre').focus(); return; }
+
+  var ingredientes = [];
+  document.querySelectorAll('#rec-ingredientes .prod-ing-modal-row').forEach(function(row) {
+    var sel = row.querySelector('select');
+    var qty = row.querySelector('input[type="number"]');
+    var mid = sel ? sel.value : '';
+    var cant = parseFloat(qty ? qty.value : 0);
+    if (mid && !isNaN(cant) && cant > 0) ingredientes.push({ materiaId: mid, cantidad: cant });
+  });
+
+  var recetas = getRecetas();
+  if (prodRecetaEditId) {
+    recetas = recetas.map(function(r) {
+      return r.id === prodRecetaEditId ? { id: r.id, nombre: nombre, ingredientes: ingredientes } : r;
+    });
+    showToast('Receta actualizada');
+  } else {
+    recetas.push({ id: Date.now().toString(), nombre: nombre, ingredientes: ingredientes });
+    showToast('Receta agregada');
+  }
+  setRecetas(recetas);
+  cerrarModalReceta();
+  renderProduccion();
+}
+
+function borrarReceta() {
+  if (!prodRecetaEditId) return;
+  var rec = getRecetas().find(function(r) { return r.id === prodRecetaEditId; });
+  if (!confirm('¿Eliminar la receta "' + (rec ? rec.nombre : '') + '"?')) return;
+  setRecetas(getRecetas().filter(function(r) { return r.id !== prodRecetaEditId; }));
+  cerrarModalReceta();
+  showToast('Receta eliminada');
+  renderProduccion();
+}
+
+// ——— Actualizar stock desde pedido confirmado ———
+function ofrecerActualizarStockPedido(items) {
+  var materias = getMaterias();
+  if (!materias.length || !items || !items.length) return;
+  pendingPedidoItems = items;
+
+  var container = document.getElementById('stock-pedido-items');
+  if (!container) return;
+
+  container.innerHTML = items.map(function(item, idx) {
+    var unidadItem  = (item.unidad || 'u').toLowerCase().replace(/[^a-z]/g, '');
+    var factConv    = factorConvProd(unidadItem);
+    var cantBase    = convertirABaseProd(item.qty, unidadItem);
+    // Auto-match por nombre exacto
+    var nombreNorm  = (item.productoLista || '').toLowerCase().trim();
+    var autoMatch   = materias.find(function(m) {
+      return m.nombre.toLowerCase().trim() === nombreNorm;
+    });
+    var opts = '<option value="">— No actualizar —</option>' +
+      materias.map(function(m) {
+        return '<option value="' + m.id + '"' + (autoMatch && m.id === autoMatch.id ? ' selected' : '') + '>' +
+          escapeHtml(m.nombre) + ' (' + m.unidadBase + ')</option>';
+      }).join('');
+
+    return '<div class="stock-ped-row">' +
+      '<div class="stock-ped-item-info">' +
+        '<div class="stock-ped-nombre">' + escapeHtml(item.productoLista || '—') + '</div>' +
+        '<div class="stock-ped-qty">' + item.qty + ' ' + (item.unidad || '') +
+          (factConv > 1 ? ' → <strong>' + cantBase + (unidadItem === 'kg' ? 'g' : 'ml') + '</strong>' : '') +
+        '</div>' +
+      '</div>' +
+      '<select id="spd-mat-' + idx + '" class="stock-ped-sel">' + opts + '</select>' +
+    '</div>';
+  }).join('');
+
+  document.getElementById('modal-stock-pedido').classList.add('open');
+}
+
+function cerrarModalStockPedido() {
+  document.getElementById('modal-stock-pedido').classList.remove('open');
+  pendingPedidoItems = [];
+}
+
+function aplicarStockPedido() {
+  var materias = getMaterias();
+  var actualizados = 0;
+  pendingPedidoItems.forEach(function(item, idx) {
+    var sel = document.getElementById('spd-mat-' + idx);
+    if (!sel || !sel.value) return;
+    var mat = materias.find(function(m) { return m.id === sel.value; });
+    if (!mat) return;
+    var cantBase = convertirABaseProd(item.qty, item.unidad || 'u');
+    mat.stockActual += cantBase;
+    actualizados++;
+  });
+  setMaterias(materias);
+  cerrarModalStockPedido();
+  if (actualizados > 0) {
+    showToast('✅ Stock actualizado (' + actualizados + ' materia' + (actualizados !== 1 ? 's primas' : ' prima') + ')');
+    var tabProd = document.getElementById('tab-produccion');
+    if (tabProd && tabProd.classList.contains('active')) renderProduccion();
+    renderProdAlertas();
+  } else {
+    showToast('Sin cambios en el stock');
+  }
+}
+
+// Cerrar modales producción al click fuera
+document.getElementById('modal-materia').addEventListener('click', function(e) {
+  if (e.target === this) cerrarModalMateria();
+});
+document.getElementById('modal-receta').addEventListener('click', function(e) {
+  if (e.target === this) cerrarModalReceta();
+});
+document.getElementById('modal-stock-pedido').addEventListener('click', function(e) {
+  if (e.target === this) cerrarModalStockPedido();
+});
+// Enter en campos de texto del modal materia
+document.getElementById('mat-nombre').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') guardarMateria();
+});
+document.getElementById('rec-nombre').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') guardarReceta();
+});
 </script>
 
 <!-- Botón flotante asistente -->

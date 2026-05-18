@@ -158,10 +158,36 @@
     <!-- ============ TAB: HISTORIAL ============ -->
     <div class="tab-section" id="tab-historial">
       <div class="seccion-titulo">
-        <h2>Historial de pedidos</h2>
+        <h2>Historial</h2>
       </div>
-      <div id="historial-content">
-        <div class="empty"><div class="empty-emoji"></div><div class="empty-title">Cargando...</div></div>
+      <div style="display:flex;gap:8px;margin-bottom:20px;">
+        <button class="btn" id="hist-btn-proveedores" onclick="switchHistorialTab('proveedores')" style="flex:1;">📦 Pedidos a Proveedores</button>
+        <button class="btn primary" id="hist-btn-produccion" onclick="switchHistorialTab('produccion')" style="flex:1;">🏭 Pedidos a Producción</button>
+      </div>
+      <div id="hist-panel-proveedores" style="display:none;">
+        <div id="historial-content-prov">
+          <div class="empty"><div class="empty-emoji"></div><div class="empty-title">Cargando...</div></div>
+        </div>
+      </div>
+      <div id="hist-panel-produccion">
+        <div id="historial-content-prod"></div>
+      </div>
+      <!-- Panel de verificación desde historial de producción -->
+      <div id="prod-verif-hist-panel" style="display:none;margin-top:16px;">
+        <div class="seccion-titulo" style="margin-top:0;">
+          <div>
+            <h3 style="font-size:15px;font-weight:600;margin:0;">Verificar producción</h3>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" id="prod-verif-hist-fecha"></div>
+          </div>
+          <div id="prod-verif-hist-btns" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+        </div>
+        <div class="prod-verif-legend">
+          <span><span class="pv-dot ok"></span> Completo</span>
+          <span><span class="pv-dot falta"></span> Faltante</span>
+          <span><span class="pv-dot sin"></span> Sin verificar</span>
+        </div>
+        <div id="prod-verif-hist-banner"></div>
+        <div id="prod-verif-hist-lista"></div>
       </div>
     </div>
 
@@ -201,7 +227,11 @@
       <div id="prod-panel-recetas" class="prod-panel">
         <div class="seccion-titulo" style="margin-top:0;padding-top:0;">
           <h3 style="font-size:15px;font-weight:600;margin:0;">Productos y Recetas</h3>
-          <button class="btn primary" onclick="abrirModalReceta()"><span class="icon-slot" data-icon="plus"></span> Nuevo producto</button>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="abrirModalProdCat()">+ Categoría</button>
+            <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="abrirModalProdSubcat()">+ Subcategoría</button>
+            <button class="btn primary" onclick="abrirModalReceta()"><span class="icon-slot" data-icon="plus"></span> Nuevo producto</button>
+          </div>
         </div>
         <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Definí tus productos con su receta: qué ingredientes usan y en qué cantidad (en g o ml por unidad producida).</p>
         <div id="prod-recetas-lista"></div>
@@ -214,28 +244,19 @@
           <div class="seccion-titulo" style="margin-top:0;padding-top:0;">
             <h3 style="font-size:15px;font-weight:600;margin:0;">Armar pedido a producción</h3>
           </div>
-          <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Indicá cuántas unidades querés producir de cada producto. Solo aparecen los que tienen receta cargada.</p>
+          <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Indicá cuántas unidades querés producir de cada producto y el stock actual. Solo aparecen los que tienen receta cargada.</p>
           <div id="prod-armar-lista"></div>
           <div style="margin-top:20px;text-align:center;" id="prod-armar-footer">
             <button class="btn primary" style="padding:12px 32px;font-size:15px;" onclick="confirmarPedidoProduccion()">✓ Confirmar pedido a producción</button>
           </div>
         </div>
-        <!-- Estado 2: Verificar producción -->
-        <div id="prod-verificar-pedido" style="display:none;">
+        <!-- Estado 2: Ver pedido -->
+        <div id="prod-ver-pedido" style="display:none;">
           <div class="seccion-titulo" style="margin-top:0;padding-top:0;">
-            <h3 style="font-size:15px;font-weight:600;margin:0;" id="prod-verif-titulo">Verificar producción</h3>
-            <button class="btn" onclick="editarPedidoProduccion()">✎ Editar pedido</button>
+            <h3 style="font-size:15px;font-weight:600;margin:0;" id="prod-ver-titulo">Pedido generado</h3>
+            <div id="prod-ver-acciones" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
           </div>
-          <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Ingresá lo que realmente se produjo y marcá el estado de cada producto.</p>
-          <div class="prod-verif-legend">
-            <span><span class="pv-dot ok"></span> Completo</span>
-            <span><span class="pv-dot falta"></span> Faltante</span>
-            <span><span class="pv-dot sin"></span> Sin verificar</span>
-          </div>
-          <div id="prod-verif-lista"></div>
-          <div style="margin-top:20px;text-align:center;">
-            <button class="btn primary" style="padding:12px 32px;font-size:15px;" onclick="registrarProduccion()">✅ Registrar producción y descontar stock</button>
-          </div>
+          <div id="prod-ver-content"></div>
         </div>
         <!-- Log de producciones -->
         <div id="prod-log-section" style="margin-top:28px;">
@@ -464,6 +485,14 @@
       <input type="text" id="rec-nombre" placeholder="Ej: Pan francés, Medialunas, Facturas">
     </div>
     <div class="form-row">
+      <label>Categoría <span style="font-size:11px;color:var(--text-muted);text-transform:none;">(opcional)</span></label>
+      <select id="rec-cat" onchange="actualizarSubcatsProdModal()"><option value="">Sin categoría</option></select>
+    </div>
+    <div class="form-row">
+      <label>Subcategoría <span style="font-size:11px;color:var(--text-muted);text-transform:none;">(opcional)</span></label>
+      <select id="rec-subcat"><option value="">Sin subcategoría</option></select>
+    </div>
+    <div class="form-row">
       <label>Ingredientes <span style="font-size:11px;color:var(--text-muted);text-transform:none;">— cantidad por unidad producida, en g o ml</span></label>
       <div id="rec-ingredientes" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;"></div>
       <button class="btn" type="button" style="font-size:12px;padding:7px 14px;" onclick="agregarIngredienteModal()">+ Agregar ingrediente</button>
@@ -472,6 +501,32 @@
       <button class="btn" id="btn-borrar-receta" onclick="borrarReceta()" style="color:var(--danger);border-color:var(--danger-border);display:none;">Eliminar</button>
       <button class="btn" onclick="cerrarModalReceta()">Cancelar</button>
       <button class="btn primary" onclick="guardarReceta()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-prod-cat">
+  <div class="modal" style="max-width:400px;">
+    <h3 id="modal-prod-cat-titulo">Nueva categoría</h3>
+    <div class="form-row"><label>Nombre</label><input type="text" id="prod-cat-nombre" placeholder="Ej: Panadería, Pastelería"></div>
+    <div class="form-row"><label>Color</label><input type="color" id="prod-cat-color" value="#3b82f6" style="width:70px;height:36px;padding:2px;cursor:pointer;border-radius:8px;border:1px solid var(--border);"></div>
+    <div class="modal-actions">
+      <button class="btn" id="btn-borrar-prod-cat" onclick="borrarProdCat()" style="color:var(--danger);border-color:var(--danger-border);display:none;">Eliminar</button>
+      <button class="btn" onclick="cerrarModalProdCat()">Cancelar</button>
+      <button class="btn primary" onclick="guardarProdCat()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-prod-subcat">
+  <div class="modal" style="max-width:400px;">
+    <h3 id="modal-prod-subcat-titulo">Nueva subcategoría</h3>
+    <div class="form-row"><label>Nombre</label><input type="text" id="prod-subcat-nombre" placeholder="Ej: Galletitas, Budines"></div>
+    <div class="form-row"><label>Categoría</label><select id="prod-subcat-cat"></select></div>
+    <div class="modal-actions">
+      <button class="btn" id="btn-borrar-prod-subcat" onclick="borrarProdSubcat()" style="color:var(--danger);border-color:var(--danger-border);display:none;">Eliminar</button>
+      <button class="btn" onclick="cerrarModalProdSubcat()">Cancelar</button>
+      <button class="btn primary" onclick="guardarProdSubcat()">Guardar</button>
     </div>
   </div>
 </div>
@@ -2312,8 +2367,33 @@ function confirmarPedido() {
   setTimeout(function() { actualizarStockAutomatico(items); }, 400);
 }
 
+function switchHistorialTab(tab) {
+  historialTabActual = tab;
+  var ppanel   = document.getElementById('hist-panel-proveedores');
+  var prodpanel= document.getElementById('hist-panel-produccion');
+  var btnProv  = document.getElementById('hist-btn-proveedores');
+  var btnProd  = document.getElementById('hist-btn-produccion');
+  if (tab === 'proveedores') {
+    if (ppanel)   ppanel.style.display   = '';
+    if (prodpanel)prodpanel.style.display = 'none';
+    if (btnProv)  btnProv.className  = 'btn primary';
+    if (btnProd)  btnProd.className  = 'btn';
+    renderHistorialProveedores();
+  } else {
+    if (ppanel)   ppanel.style.display   = 'none';
+    if (prodpanel)prodpanel.style.display = '';
+    if (btnProv)  btnProv.className  = 'btn';
+    if (btnProd)  btnProd.className  = 'btn primary';
+    renderHistorialProduccion();
+  }
+}
+
 function renderHistorial() {
-  var cont = $('historial-content');
+  switchHistorialTab(historialTabActual);
+}
+
+function renderHistorialProveedores() {
+  var cont = $('historial-content-prov');
   if (!cont) return;
   var hist = histGet();
   if (!hist.length) {
@@ -2375,6 +2455,240 @@ function renderHistorial() {
       else if (act === 'wa-prov') abrirWhatsAppHist(btn.getAttribute('data-hist'), btn.getAttribute('data-prov'));
     };
   });
+}
+
+function renderHistorialProduccion() {
+  var el = document.getElementById('historial-content-prod');
+  if (!el) return;
+  var hist = getProdHist();
+  if (!hist.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-emoji" style="font-size:40px;">🏭</div>' +
+      '<div class="empty-title">Sin pedidos a producción</div>' +
+      '<div class="empty-sub">Los pedidos enviados a producción aparecen acá para verificarlos</div></div>';
+    return;
+  }
+  var html = '';
+  hist.forEach(function(h) {
+    var vp = getProdVerifPedido(h.id);
+    var estadoBadge = '';
+    if (vp.estado === 'bloqueado') estadoBadge = '<span style="font-size:11px;font-weight:600;color:var(--danger);background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.25);padding:2px 8px;border-radius:99px;">Bloqueado</span>';
+    else if (vp.estado === 'confirmado') estadoBadge = '<span style="font-size:11px;font-weight:600;color:var(--emerald);background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.3);padding:2px 8px;border-radius:99px;">Confirmado</span>';
+    else estadoBadge = '<span style="font-size:11px;font-weight:600;color:var(--text-muted);background:var(--bg-elev2);border:1px solid var(--border);padding:2px 8px;border-radius:99px;">Pendiente</span>';
+
+    html += '<div class="prod-hist-card">';
+    html += '<div class="prod-hist-header">';
+    html += '<div><div class="prod-hist-fecha">' + escapeHtml(h.fecha) + '</div>';
+    html += '<div class="prod-hist-meta">' + h.items.length + ' producto' + (h.items.length !== 1 ? 's' : '') + (h.editCount ? ' · Editado ' + h.editCount + '/5' : '') + '</div></div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;">' + estadoBadge + '</div>';
+    html += '</div>';
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+    if (vp.estado === 'libre' || vp.estado === 'editando2') {
+      html += '<button onclick="abrirVerifProdHist(\'' + h.id + '\')" style="background:var(--accent);color:white;border:none;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">✓ Verificar</button>';
+    } else if (vp.estado === 'confirmado') {
+      html += '<button onclick="abrirVerifProdHist(\'' + h.id + '\')" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;">Ver</button>';
+      html += '<button onclick="abrirEdicionVerifProdHist(\'' + h.id + '\')" style="background:transparent;border:1px solid var(--warn);color:var(--warn);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;">✎ Editar verificación</button>';
+    } else {
+      html += '<button onclick="abrirVerifProdHist(\'' + h.id + '\')" style="background:transparent;border:1px solid var(--border-hi);color:var(--text-muted);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;">Ver</button>';
+    }
+    html += '<button onclick="imprimirPedidoProdHist(\'' + h.id + '\')" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;">🖨 Imprimir</button>';
+    html += '<button onclick="borrarPedidoProdHist(\'' + h.id + '\')" style="background:transparent;border:1px solid var(--danger-border);color:var(--danger);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;">Eliminar</button>';
+    html += '</div></div>';
+  });
+  el.innerHTML = html;
+}
+
+function borrarPedidoProdHist(histId) {
+  if (!confirm('¿Eliminar este pedido del historial de producción?')) return;
+  setProdHist(getProdHist().filter(function(x) { return x.id !== histId; }));
+  renderHistorialProduccion();
+  showToast('Pedido eliminado');
+}
+
+function abrirVerifProdHist(histId) {
+  prodVerifHistActual = histId;
+  var h = getProdHist().find(function(x) { return x.id === histId; });
+  if (!h) return;
+  var fechaEl = document.getElementById('prod-verif-hist-fecha');
+  if (fechaEl) fechaEl.textContent = h.fecha;
+  var panel = document.getElementById('prod-verif-hist-panel');
+  var prodPanel = document.getElementById('hist-panel-produccion');
+  if (panel) panel.style.display = '';
+  if (prodPanel) prodPanel.style.display = 'none';
+  renderVerifProdHistContent();
+}
+
+function volverAlHistorialProduccion() {
+  prodVerifHistActual = null;
+  var panel = document.getElementById('prod-verif-hist-panel');
+  var prodPanel = document.getElementById('hist-panel-produccion');
+  if (panel) panel.style.display = 'none';
+  if (prodPanel) prodPanel.style.display = '';
+  renderHistorialProduccion();
+}
+
+function renderVerifProdHistContent() {
+  if (!prodVerifHistActual) return;
+  var h  = getProdHist().find(function(x) { return x.id === prodVerifHistActual; });
+  if (!h) return;
+  var vp = getProdVerifPedido(prodVerifHistActual);
+  var estado = vp.estado || 'libre';
+  var editable = (estado === 'libre' || estado === 'editando2');
+  var bloqueado = (estado === 'bloqueado');
+
+  // Render btns
+  var btnsEl = document.getElementById('prod-verif-hist-btns');
+  if (btnsEl) {
+    var html = '<button class="btn" onclick="volverAlHistorialProduccion()">← Volver</button>';
+    if (!bloqueado) {
+      html += '<button class="btn primary" onclick="confirmarVerifProdHist()">' +
+        (estado === 'editando2' ? '✅ Confirmar y bloquear' : '✅ Confirmar verificación') + '</button>';
+    }
+    btnsEl.innerHTML = html;
+  }
+
+  // Banner
+  var bannerEl = document.getElementById('prod-verif-hist-banner');
+  if (bannerEl) {
+    if (bloqueado) {
+      bannerEl.innerHTML = '<div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--danger);margin-bottom:12px;">Verificación bloqueada — no se puede editar más</div>';
+    } else if (estado === 'confirmado') {
+      bannerEl.innerHTML = '<div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--emerald);margin-bottom:12px;">Verificación confirmada. Podés editar una vez más antes de bloquear.</div>';
+    } else {
+      bannerEl.innerHTML = '';
+    }
+  }
+
+  // Items list
+  var listaEl = document.getElementById('prod-verif-hist-lista');
+  if (!listaEl) return;
+  var listaHtml = '';
+  h.items.forEach(function(item, idx) {
+    var saved = (vp.data || {})[item.recetaId] || {};
+    var realizado = saved.realizado !== undefined ? saved.realizado : '';
+    var estadoItem = saved.estado || 'sin';
+    var ec = estadoItem === 'ok' ? 'ok' : estadoItem === 'falta' ? 'falta' : 'sin';
+    var ei = estadoItem === 'ok' ? '✓' : estadoItem === 'falta' ? '✕' : '·';
+    listaHtml += '<div class="prod-verif-row" id="pvhrow-' + idx + '">';
+    listaHtml += '<div class="pv-nombre">' + escapeHtml(item.nombre) + '</div>';
+    listaHtml += '<div class="pv-pedido">Pedido: <strong>' + item.qty + ' u.</strong>';
+    if (item.stock !== '' && item.stock !== undefined) listaHtml += ' · Stock: ' + item.stock;
+    if (item.critico) {
+      var cv = validarCriticoProd(item.critico);
+      listaHtml += ' · <span class="crit-badge ' + cv.clase + '">' + cv.texto + '</span>';
+    }
+    listaHtml += '</div>';
+    if (editable) {
+      listaHtml += '<div class="pv-inputs">' +
+        '<input type="number" class="pv-inp" id="pvh-real-' + idx + '" min="0" placeholder="Producido" value="' + escapeHtml(String(realizado)) + '" ' +
+          'oninput="actualizarVerifProdHist(' + idx + ', \'' + item.recetaId + '\', this.value)">' +
+        '<button class="pv-estado-btn ' + ec + '" id="pvhbtn-' + idx + '" onclick="toggleVerifProdHist(' + idx + ', \'' + item.recetaId + '\')">' + ei + '</button>' +
+      '</div>';
+    } else {
+      listaHtml += '<div class="pv-inputs">' +
+        '<span style="font-size:13px;color:var(--text-muted);">' + (realizado !== '' ? realizado + ' u.' : '—') + '</span>' +
+        '<span class="pv-estado-btn ' + ec + '" style="cursor:default;">' + ei + '</span>' +
+      '</div>';
+    }
+    listaHtml += '</div>';
+  });
+  listaEl.innerHTML = listaHtml;
+}
+
+function actualizarVerifProdHist(idx, recetaId, valor) {
+  var vp = getProdVerifPedido(prodVerifHistActual);
+  if (!vp.data) vp.data = {};
+  if (!vp.data[recetaId]) vp.data[recetaId] = {};
+  vp.data[recetaId].realizado = valor;
+  var h = getProdHist().find(function(x) { return x.id === prodVerifHistActual; });
+  var item = h ? h.items.find(function(i) { return i.recetaId === recetaId; }) : null;
+  var num = parseFloat(valor);
+  var nuevoEstado;
+  if (!isNaN(num) && item && num >= item.qty) nuevoEstado = 'ok';
+  else if (!isNaN(num) && num >= 0) nuevoEstado = 'falta';
+  else nuevoEstado = 'sin';
+  vp.data[recetaId].estado = nuevoEstado;
+  setProdVerifPedido(prodVerifHistActual, vp);
+  var btn = document.getElementById('pvhbtn-' + idx);
+  if (btn) {
+    btn.className = 'pv-estado-btn ' + nuevoEstado;
+    btn.textContent = nuevoEstado === 'ok' ? '✓' : nuevoEstado === 'falta' ? '✕' : '·';
+  }
+}
+
+function toggleVerifProdHist(idx, recetaId) {
+  var vp = getProdVerifPedido(prodVerifHistActual);
+  if (!vp.data) vp.data = {};
+  if (!vp.data[recetaId]) vp.data[recetaId] = {};
+  var ciclo = { sin: 'ok', ok: 'falta', falta: 'sin' };
+  var actual = vp.data[recetaId].estado || 'sin';
+  vp.data[recetaId].estado = ciclo[actual] || 'sin';
+  setProdVerifPedido(prodVerifHistActual, vp);
+  var btn = document.getElementById('pvhbtn-' + idx);
+  if (btn) {
+    btn.className = 'pv-estado-btn ' + vp.data[recetaId].estado;
+    btn.textContent = vp.data[recetaId].estado === 'ok' ? '✓' : vp.data[recetaId].estado === 'falta' ? '✕' : '·';
+  }
+}
+
+function confirmarVerifProdHist() {
+  var vp = getProdVerifPedido(prodVerifHistActual);
+  var nuevoEstado = (vp.estado === 'editando2') ? 'bloqueado' : 'confirmado';
+  if (nuevoEstado === 'bloqueado') {
+    // Deduct stock from materias primas
+    var h = getProdHist().find(function(x) { return x.id === prodVerifHistActual; });
+    if (h) {
+      var recetas  = getRecetas();
+      var materias = getMaterias();
+      var log      = getProdLog();
+      h.items.forEach(function(item) {
+        var producido = parseFloat(((vp.data || {})[item.recetaId] || {}).realizado);
+        if (isNaN(producido) || producido <= 0) return;
+        var receta = recetas.find(function(r) { return r.id === item.recetaId; });
+        if (!receta) return;
+        (receta.ingredientes || []).forEach(function(ing) {
+          var mat = materias.find(function(m) { return m.id === ing.materiaId; });
+          if (mat) mat.stockActual = Math.max(0, mat.stockActual - ing.cantidad * producido);
+        });
+        log.unshift({ id: Date.now().toString() + Math.random().toString(36).slice(2,5),
+          recetaId: item.recetaId, nombre: item.nombre,
+          unidades: producido, fecha: new Date().toLocaleDateString('es-AR'), timestamp: Date.now() });
+      });
+      setMaterias(materias);
+      if (log.length > 200) log = log.slice(0, 200);
+      setProdLog(log);
+      renderProdAlertas();
+    }
+  }
+  vp.estado = nuevoEstado;
+  setProdVerifPedido(prodVerifHistActual, vp);
+  showToast(nuevoEstado === 'bloqueado' ? 'Verificación bloqueada — stock actualizado' : 'Verificación confirmada');
+  volverAlHistorialProduccion();
+}
+
+function abrirEdicionVerifProdHist(histId) {
+  var vp = getProdVerifPedido(histId);
+  if (vp.estado !== 'confirmado') { showToast('Solo se puede editar una vez después de confirmar'); return; }
+  vp.estado = 'editando2';
+  setProdVerifPedido(histId, vp);
+  abrirVerifProdHist(histId);
+}
+
+function imprimirPedidoProdHist(histId) {
+  var h = getProdHist().find(function(x) { return x.id === histId; });
+  if (!h) return;
+  var cats = getProdCats();
+  var bodyHtml = '<h1 style="font-family:Georgia,serif;margin-bottom:4px;">Pedido a Producción</h1>';
+  bodyHtml += '<p style="color:#888;font-size:13px;margin-bottom:20px;">' + escapeHtml(h.fecha) + ' · ' + h.items.length + ' productos</p>';
+  bodyHtml += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+  bodyHtml += '<thead><tr style="background:#f5f5f5;"><th style="text-align:left;padding:8px 10px;border-bottom:2px solid #ddd;">Producto</th><th style="padding:8px 10px;border-bottom:2px solid #ddd;text-align:center;">Stock</th><th style="padding:8px 10px;border-bottom:2px solid #ddd;text-align:center;">Cód.</th><th style="padding:8px 10px;border-bottom:2px solid #ddd;text-align:right;">Pedir</th></tr></thead><tbody>';
+  h.items.forEach(function(item) {
+    bodyHtml += '<tr><td style="padding:8px 10px;border-bottom:1px solid #eee;">' + escapeHtml(item.nombre) + '</td>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:center;">' + (item.stock !== '' && item.stock !== undefined ? item.stock : '—') + '</td>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:center;">' + (item.critico || '—') + '</td>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">' + item.qty + ' u.</td></tr>';
+  });
+  bodyHtml += '</tbody></table>';
+  abrirPrintOverlay(bodyHtml);
 }
 
 function verDetalleHistorial(id) {
@@ -2455,7 +2769,7 @@ function borrarPedidoHist(histId) {
   if (!confirm('¿Eliminar este pedido del historial?')) return;
   var hist = histGet().filter(function(x) { return x.id !== histId; });
   histSet(hist);
-  renderHistorial();
+  renderHistorialProveedores();
   showToast('Pedido eliminado');
 }
 
@@ -2701,14 +3015,22 @@ async function enviarMensajeAI() {
 // PRODUCCIÓN — Materias primas + Recetas + Panel de producción
 // ============================================================================
 
-var PROD_MAT_KEY = 'pl_materias';   // [{id, nombre, unidadBase, stockActual, stockMinimo}]
-var PROD_REC_KEY = 'pl_recetas';    // [{id, nombre, ingredientes:[{materiaId, cantidad}]}]
-var PROD_LOG_KEY = 'pl_prod_log';   // [{id, recetaId, nombre, unidades, fecha, timestamp}]
+var PROD_MAT_KEY    = 'pl_materias';      // [{id, nombre, unidadBase, stockActual, stockMinimo}]
+var PROD_REC_KEY    = 'pl_recetas';       // [{id, nombre, catId, subcatId, ingredientes:[{materiaId, cantidad}]}]
+var PROD_LOG_KEY    = 'pl_prod_log';      // [{id, recetaId, nombre, unidades, fecha, timestamp}]
+var PROD_CATS_KEY   = 'pl_prod_cats';     // [{id, nombre, color}]
+var PROD_SUBCATS_KEY= 'pl_prod_subcats';  // [{id, nombre, catId}]
+var PROD_HIST_KEY   = 'pl_prod_hist';     // [{id, fecha, timestamp, items, editCount}]
+var PROD_VERIF_HIST_KEY = 'pl_prod_verif_hist'; // {histId: {data, estado, editCount}}
 
-var prodMateriaEditId = null;
-var prodRecetaEditId  = null;
-var prodIngCount      = 0;
+var prodMateriaEditId  = null;
+var prodRecetaEditId   = null;
+var prodIngCount       = 0;
 var pendingPedidoItems = [];
+var prodCatEditId      = null;
+var prodSubcatEditId   = null;
+var prodVerifHistActual = null;
+var historialTabActual  = 'produccion';
 
 // ——— Persistencia ———
 function getMaterias() {
@@ -2723,6 +3045,40 @@ function getProdLog() {
   try { return JSON.parse(localStorage.getItem(PROD_LOG_KEY) || '[]'); } catch(e) { return []; }
 }
 function setProdLog(v) { localStorage.setItem(PROD_LOG_KEY, JSON.stringify(v)); }
+
+function getProdCats()    { try { return JSON.parse(localStorage.getItem(PROD_CATS_KEY)    || '[]'); } catch(e) { return []; } }
+function setProdCats(v)   { localStorage.setItem(PROD_CATS_KEY, JSON.stringify(v)); }
+function getProdSubcats() { try { return JSON.parse(localStorage.getItem(PROD_SUBCATS_KEY) || '[]'); } catch(e) { return []; } }
+function setProdSubcats(v){ localStorage.setItem(PROD_SUBCATS_KEY, JSON.stringify(v)); }
+function getProdHist()    { try { return JSON.parse(localStorage.getItem(PROD_HIST_KEY)    || '[]'); } catch(e) { return []; } }
+function setProdHist(v)   { localStorage.setItem(PROD_HIST_KEY, JSON.stringify(v)); }
+function getProdVerifHist()  { try { return JSON.parse(localStorage.getItem(PROD_VERIF_HIST_KEY) || '{}'); } catch(e) { return {}; } }
+function setProdVerifHist(v) { localStorage.setItem(PROD_VERIF_HIST_KEY, JSON.stringify(v)); }
+function getProdVerifPedido(histId) { var all = getProdVerifHist(); return all[histId] || { data: {}, estado: 'libre', editCount: 0 }; }
+function setProdVerifPedido(histId, v) { var all = getProdVerifHist(); all[histId] = v; setProdVerifHist(all); }
+
+// ——— Día del año (Julian day 1–365) ———
+function diaDelAnio() {
+  var now = new Date();
+  var start = new Date(now.getFullYear(), 0, 0);
+  var diff = now - start;
+  var oneDay = 1000 * 60 * 60 * 24;
+  return Math.floor(diff / oneDay);
+}
+
+// ——— Validar código crítico ———
+function validarCriticoProd(cod) {
+  var hoy = diaDelAnio();
+  var c = parseInt(cod);
+  if (isNaN(c) || c < 1 || c > 365) return { clase: 'crit-nd', texto: '?' };
+  var diff = hoy - c;
+  if (diff < 0) diff += 365;
+  if (diff <= 0) return { clase: 'crit-ok',   texto: 'Hoy' };
+  if (diff === 1) return { clase: 'crit-ok',   texto: '1d'  };
+  if (diff === 2) return { clase: 'crit-ok',   texto: '2d'  };
+  if (diff <= 5)  return { clase: 'crit-warn',  texto: diff + 'd !' };
+  return { clase: 'crit-venc', texto: diff + 'd X' };
+}
 
 // ——— Conversión de unidades ———
 // Retorna factor (cuántas unidades base por 1 unidad de la unidad dada)
@@ -2925,6 +3281,8 @@ function renderProdStock() {
 function renderProdRecetas() {
   var recetas  = getRecetas();
   var materias = getMaterias();
+  var cats     = getProdCats();
+  var subcats  = getProdSubcats();
   var el = document.getElementById('prod-recetas-lista');
   if (!el) return;
   if (!recetas.length) {
@@ -2933,7 +3291,8 @@ function renderProdRecetas() {
       '<div class="empty-sub">Cargá los productos que fabricás y qué ingredientes usan</div></div>';
     return;
   }
-  el.innerHTML = recetas.map(function(r) {
+
+  function recetaCard(r) {
     var max = calcularMaxProduccion(r);
     var ingsHtml = (r.ingredientes || []).map(function(ing) {
       var mat = materias.find(function(m) { return m.id === ing.materiaId; });
@@ -2952,7 +3311,50 @@ function renderProdRecetas() {
         '<button class="btn" style="font-size:12px;padding:6px 14px;" onclick="abrirModalReceta(\'' + r.id + '\')">✎ Editar</button>' +
       '</div>' +
     '</div>';
-  }).join('');
+  }
+
+  // Group by catId → subcatId
+  var grupos = {}; // { catId: { subcatId: [receta] } }
+  recetas.forEach(function(r) {
+    var cid = r.catId || '';
+    var sid = r.subcatId || '';
+    if (!grupos[cid]) grupos[cid] = {};
+    if (!grupos[cid][sid]) grupos[cid][sid] = [];
+    grupos[cid][sid].push(r);
+  });
+
+  var html = '';
+  // First render categorized groups
+  cats.forEach(function(cat) {
+    if (!grupos[cat.id]) return;
+    var color = cat.color || '#3b82f6';
+    html += '<div class="prod-cat-header"><span class="prod-cat-tag" style="background:' + color + ';">' + escapeHtml(cat.nombre) + '</span></div>';
+    var subcatGrupo = grupos[cat.id];
+    // Subcategories within this cat
+    var subcatsDeEsta = subcats.filter(function(s) { return s.catId === cat.id; });
+    subcatsDeEsta.forEach(function(subcat) {
+      if (!subcatGrupo[subcat.id]) return;
+      html += '<div class="prod-subcat-header"><span class="prod-subcat-title">' + escapeHtml(subcat.nombre) + '</span></div>';
+      subcatGrupo[subcat.id].forEach(function(r) { html += recetaCard(r); });
+    });
+    // Recipes in this cat with no subcat
+    if (subcatGrupo['']) {
+      subcatGrupo[''].forEach(function(r) { html += recetaCard(r); });
+    }
+  });
+  // Sin categoría group
+  if (grupos['']) {
+    if (cats.length) html += '<div class="prod-cat-header"><span class="prod-cat-tag" style="background:#6b7280;">Sin categoría</span></div>';
+    var sinCatGrupo = grupos[''];
+    Object.keys(sinCatGrupo).forEach(function(sid) {
+      if (sid) {
+        var sub = subcats.find(function(s) { return s.id === sid; });
+        if (sub) html += '<div class="prod-subcat-header"><span class="prod-subcat-title">' + escapeHtml(sub.nombre) + '</span></div>';
+      }
+      sinCatGrupo[sid].forEach(function(r) { html += recetaCard(r); });
+    });
+  }
+  el.innerHTML = html;
 }
 
 // ——— Sub-tab: Hacer pedido a producción ———
@@ -2963,8 +3365,8 @@ function setPedidoProd(v) { localStorage.setItem(PROD_ORDEN_KEY, JSON.stringify(
 
 function renderProdProducir() {
   var orden = getPedidoProd();
-  if (orden && orden.items && orden.items.length) {
-    renderVerifProduccion(orden);
+  if (orden && orden.estado === 'ver') {
+    renderVerPedidoProd(orden);
   } else {
     renderArmarPedidoProd();
   }
@@ -2974,10 +3376,11 @@ function renderProdProducir() {
 // ——— Estado 1: Armar pedido ———
 function renderArmarPedidoProd() {
   document.getElementById('prod-armar-pedido').style.display = '';
-  document.getElementById('prod-verificar-pedido').style.display = 'none';
+  document.getElementById('prod-ver-pedido').style.display = 'none';
 
   var recetas  = getRecetas();
-  var materias = getMaterias();
+  var cats     = getProdCats();
+  var subcats  = getProdSubcats();
   var listaEl  = document.getElementById('prod-armar-lista');
   if (!listaEl) return;
 
@@ -2990,158 +3393,271 @@ function renderArmarPedidoProd() {
   }
   document.getElementById('prod-armar-footer').style.display = '';
 
-  listaEl.innerHTML = recetas.map(function(r) {
-    var max = calcularMaxProduccion(r);
-    var ingsHtml = (r.ingredientes || []).map(function(ing) {
-      var mat = materias.find(function(m) { return m.id === ing.materiaId; });
-      if (!mat) return '';
-      var posibles = (mat.stockActual <= 0 || !ing.cantidad) ? 0 : Math.floor(mat.stockActual / ing.cantidad);
-      var esLimitante = posibles === max && max < 999;
-      return '<div class="prod-ing-desglose' + (esLimitante ? ' limitante' : '') + '">' +
-        '<span>' + escapeHtml(mat.nombre) + '</span>' +
-        '<span class="prod-ing-calc">' +
-          fmtStock(mat.stockActual, mat.unidadBase) + ' ÷ ' + ing.cantidad + ' ' + mat.unidadBase +
-          ' = <strong>' + posibles + '</strong>' +
-        '</span>' +
-      '</div>';
-    }).filter(Boolean).join('');
+  // Restore previously typed values from a saved (armar) orden
+  var savedOrden = getPedidoProd();
+  var savedItems = {};
+  if (savedOrden && savedOrden.estado !== 'ver') {
+    (savedOrden.items || []).forEach(function(it) {
+      savedItems[it.recetaId] = it;
+    });
+  }
 
-    return '<div class="prod-armar-card">' +
-      '<div class="prod-armar-head">' +
-        '<div class="prod-armar-nombre">' + escapeHtml(r.nombre) + '</div>' +
-        '<div class="prod-armar-max' + (max === 0 ? ' cero' : max <= 5 ? ' bajo' : '') + '">' +
-          'Máx: <strong>' + max + '</strong> u.' +
-        '</div>' +
+  // Column header
+  var colHeader = '<div class="prod-order-col-header">' +
+    '<span class="prod-order-col-lbl" style="flex:1;">Producto</span>' +
+    '<span class="prod-order-col-lbl" style="width:66px;text-align:center;">Stock</span>' +
+    '<span class="prod-order-col-lbl" style="width:60px;text-align:center;">Cód.</span>' +
+    '<span class="prod-order-col-lbl" style="width:80px;text-align:center;">Pedir</span>' +
+  '</div>';
+
+  function recetaRow(r) {
+    var saved = savedItems[r.id] || {};
+    var stockVal = saved.stock !== undefined ? saved.stock : '';
+    var critVal  = saved.critico !== undefined ? saved.critico : '';
+    var qtyVal   = saved.qty || '';
+    var critBadge = '';
+    if (critVal !== '' && critVal !== undefined) {
+      var cv = validarCriticoProd(critVal);
+      critBadge = '<span class="crit-badge ' + cv.clase + '" id="crit-badge-' + r.id + '">' + cv.texto + '</span>';
+    } else {
+      critBadge = '<span class="crit-badge crit-nd" id="crit-badge-' + r.id + '">—</span>';
+    }
+    return '<div class="prod-order-row">' +
+      '<span class="prod-order-nombre">' + escapeHtml(r.nombre) + '</span>' +
+      '<input type="number" class="prod-stock-inp" id="prod-stock-' + r.id + '" min="0" placeholder="—" value="' + escapeHtml(String(stockVal)) + '" ' +
+        'oninput="actualizarCritBadgeProd(\'' + r.id + '\')">' +
+      '<div style="display:flex;flex-direction:column;align-items:center;gap:3px;">' +
+        '<input type="number" class="prod-crit-inp" id="prod-crit-' + r.id + '" min="1" max="365" placeholder="1-365" value="' + escapeHtml(String(critVal)) + '" ' +
+          'oninput="actualizarCritBadgeProd(\'' + r.id + '\')">' +
+        critBadge +
       '</div>' +
-      (ingsHtml ? '<div class="prod-ings-desglose">' + ingsHtml + '</div>' : '') +
-      '<div class="prod-armar-form">' +
-        '<label style="font-size:12px;color:var(--text-muted);">¿Cuántas unidades?</label>' +
-        '<div style="display:flex;align-items:center;gap:8px;">' +
-          '<input type="number" id="prod-qty-' + r.id + '" class="prod-qty-input" min="0" max="' + max + '" value="" placeholder="0"' + (max === 0 ? ' disabled' : '') + '>' +
-          '<span style="font-size:12px;color:var(--text-muted);">/ ' + max + ' posibles</span>' +
-        '</div>' +
-      '</div>' +
+      '<input type="number" id="prod-qty-' + r.id + '" class="prod-qty-input" min="0" value="' + escapeHtml(String(qtyVal)) + '" placeholder="0">' +
     '</div>';
-  }).join('');
+  }
+
+  // Group by cat/subcat
+  var grupos = {};
+  recetas.forEach(function(r) {
+    var cid = r.catId || '';
+    var sid = r.subcatId || '';
+    if (!grupos[cid]) grupos[cid] = {};
+    if (!grupos[cid][sid]) grupos[cid][sid] = [];
+    grupos[cid][sid].push(r);
+  });
+
+  var html = colHeader;
+
+  cats.forEach(function(cat) {
+    if (!grupos[cat.id]) return;
+    var color = cat.color || '#3b82f6';
+    html += '<div class="prod-cat-header" style="margin-top:12px;"><span class="prod-cat-tag" style="background:' + color + ';">' + escapeHtml(cat.nombre) + '</span></div>';
+    var subcatGrupo = grupos[cat.id];
+    var subcatsDeEsta = subcats.filter(function(s) { return s.catId === cat.id; });
+    subcatsDeEsta.forEach(function(subcat) {
+      if (!subcatGrupo[subcat.id]) return;
+      html += '<div class="prod-subcat-header"><span class="prod-subcat-title">' + escapeHtml(subcat.nombre) + '</span></div>';
+      subcatGrupo[subcat.id].forEach(function(r) { html += recetaRow(r); });
+    });
+    if (subcatGrupo['']) {
+      subcatGrupo[''].forEach(function(r) { html += recetaRow(r); });
+    }
+  });
+
+  if (grupos['']) {
+    if (cats.length) html += '<div class="prod-cat-header" style="margin-top:12px;"><span class="prod-cat-tag" style="background:#6b7280;">Sin categoría</span></div>';
+    var sinCatGrupo = grupos[''];
+    Object.keys(sinCatGrupo).forEach(function(sid) {
+      if (sid) {
+        var sub = subcats.find(function(s) { return s.id === sid; });
+        if (sub) html += '<div class="prod-subcat-header"><span class="prod-subcat-title">' + escapeHtml(sub.nombre) + '</span></div>';
+      }
+      sinCatGrupo[sid].forEach(function(r) { html += recetaRow(r); });
+    });
+  }
+
+  listaEl.innerHTML = html;
+}
+
+function actualizarCritBadgeProd(recetaId) {
+  var critInp = document.getElementById('prod-crit-' + recetaId);
+  var badge   = document.getElementById('crit-badge-' + recetaId);
+  if (!badge) return;
+  var val = critInp ? critInp.value.trim() : '';
+  if (!val) { badge.className = 'crit-badge crit-nd'; badge.textContent = '—'; return; }
+  var cv = validarCriticoProd(val);
+  badge.className = 'crit-badge ' + cv.clase;
+  badge.textContent = cv.texto;
 }
 
 function confirmarPedidoProduccion() {
   var recetas = getRecetas();
   var items = [];
+  var error = null;
   recetas.forEach(function(r) {
-    var inp = document.getElementById('prod-qty-' + r.id);
-    var qty = parseInt(inp ? inp.value : 0) || 0;
-    if (qty > 0) {
-      var max = calcularMaxProduccion(r);
-      if (qty > max) { showToast('No hay stock para ' + qty + ' u. de "' + r.nombre + '" (máx: ' + max + ')'); return; }
-      items.push({ recetaId: r.id, nombre: r.nombre, qty: qty, producido: '', estado: 'sin' });
+    if (error) return;
+    var inp   = document.getElementById('prod-qty-' + r.id);
+    var stockInp = document.getElementById('prod-stock-' + r.id);
+    var critInp  = document.getElementById('prod-crit-' + r.id);
+    var qty   = parseInt(inp ? inp.value : 0) || 0;
+    if (qty <= 0) return;
+    var stock  = stockInp && stockInp.value.trim() !== '' ? parseFloat(stockInp.value) : '';
+    var critico = critInp && critInp.value.trim() !== '' ? parseInt(critInp.value) : '';
+    // Validate: if stock > 0, critico is required
+    if (stock !== '' && parseFloat(stock) > 0 && (critico === '' || isNaN(critico))) {
+      error = '"' + r.nombre + '" tiene stock pero falta el código crítico.';
+      return;
     }
+    // Validate critico range if provided
+    if (critico !== '' && !isNaN(critico) && (critico < 1 || critico > 365)) {
+      error = 'Código crítico de "' + r.nombre + '" debe estar entre 1 y 365.';
+      return;
+    }
+    items.push({
+      recetaId: r.id, nombre: r.nombre,
+      catId: r.catId || '', subcatId: r.subcatId || '',
+      qty: qty,
+      stock: stock !== '' ? parseFloat(stock) : '',
+      critico: critico !== '' && !isNaN(critico) ? critico : '',
+      producido: '', estado: 'sin'
+    });
   });
+  if (error) { showToast(error); return; }
   if (!items.length) { showToast('Ingresá al menos una cantidad'); return; }
   var orden = {
     fecha: new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
     timestamp: Date.now(),
+    editCount: 0,
+    estado: 'ver',
     items: items
   };
   setPedidoProd(orden);
-  renderVerifProduccion(orden);
+  renderVerPedidoProd(orden);
 }
 
-// ——— Estado 2: Verificar producción ———
-function renderVerifProduccion(orden) {
+// ——— Estado 2: Ver pedido ———
+function renderVerPedidoProd(orden) {
   document.getElementById('prod-armar-pedido').style.display = 'none';
-  document.getElementById('prod-verificar-pedido').style.display = '';
-  var tit = document.getElementById('prod-verif-titulo');
-  if (tit) tit.textContent = 'Verificar producción — ' + orden.fecha;
+  document.getElementById('prod-ver-pedido').style.display = '';
+  var tit = document.getElementById('prod-ver-titulo');
+  if (tit) tit.textContent = 'Pedido — ' + orden.fecha;
 
-  var listaEl = document.getElementById('prod-verif-lista');
-  if (!listaEl) return;
-
-  listaEl.innerHTML = orden.items.map(function(item, idx) {
-    var ec = item.estado === 'ok' ? 'ok' : item.estado === 'falta' ? 'falta' : 'sin';
-    var ei = item.estado === 'ok' ? '✓' : item.estado === 'falta' ? '✕' : '·';
-    return '<div class="prod-verif-row" id="pvrow-' + idx + '">' +
-      '<div class="pv-nombre">' + escapeHtml(item.nombre) + '</div>' +
-      '<div class="pv-pedido">Pedido: <strong>' + item.qty + ' u.</strong></div>' +
-      '<div class="pv-inputs">' +
-        '<input type="number" class="pv-inp" id="pv-real-' + idx + '" min="0" max="' + item.qty + '" ' +
-          'placeholder="Producido" value="' + (item.producido !== '' ? item.producido : '') + '" ' +
-          'oninput="actualizarVerifProd(' + idx + ', this.value)">' +
-        '<button class="pv-estado-btn ' + ec + '" id="pvbtn-' + idx + '" onclick="toggleVerifProd(' + idx + ')">' + ei + '</button>' +
-      '</div>' +
-    '</div>';
-  }).join('');
-}
-
-function actualizarVerifProd(idx, valor) {
-  var orden = getPedidoProd();
-  if (!orden || !orden.items[idx]) return;
-  orden.items[idx].producido = valor;
-  var num = parseFloat(valor);
-  if (!isNaN(num) && num >= orden.items[idx].qty) orden.items[idx].estado = 'ok';
-  else if (!isNaN(num) && num >= 0) orden.items[idx].estado = 'falta';
-  else orden.items[idx].estado = 'sin';
-  setPedidoProd(orden);
-  var btn = document.getElementById('pvbtn-' + idx);
-  if (btn) {
-    btn.className = 'pv-estado-btn ' + orden.items[idx].estado;
-    btn.textContent = orden.items[idx].estado === 'ok' ? '✓' : orden.items[idx].estado === 'falta' ? '✕' : '·';
+  var accsEl = document.getElementById('prod-ver-acciones');
+  if (accsEl) {
+    var editCount = orden.editCount || 0;
+    var editDis = editCount >= 5 ? ' disabled' : '';
+    accsEl.innerHTML =
+      '<button class="btn"' + editDis + ' onclick="volverAEditarProdForm()" title="Editar pedido">✎ Editar (' + editCount + '/5)</button>' +
+      '<button class="btn" onclick="imprimirPedidoProd()">🖨 Imprimir</button>' +
+      '<button class="btn primary" onclick="enviarPedidoAProdHistorial()">→ Enviar a producción</button>';
   }
-}
 
-function toggleVerifProd(idx) {
-  var orden = getPedidoProd();
-  if (!orden || !orden.items[idx]) return;
-  var ciclo = { sin: 'ok', ok: 'falta', falta: 'sin' };
-  orden.items[idx].estado = ciclo[orden.items[idx].estado] || 'sin';
-  setPedidoProd(orden);
-  var btn = document.getElementById('pvbtn-' + idx);
-  if (btn) {
-    btn.className = 'pv-estado-btn ' + orden.items[idx].estado;
-    btn.textContent = orden.items[idx].estado === 'ok' ? '✓' : orden.items[idx].estado === 'falta' ? '✕' : '·';
-  }
-}
+  var cats    = getProdCats();
+  var subcats = getProdSubcats();
 
-function editarPedidoProduccion() {
-  if (!confirm('¿Volver a editar el pedido? Se perderán los datos de verificación.')) return;
-  setPedidoProd(null);
-  renderArmarPedidoProd();
-}
-
-function registrarProduccion() {
-  var orden = getPedidoProd();
-  if (!orden || !orden.items.length) return;
-  var alguno = orden.items.some(function(it) { return it.estado !== 'sin'; });
-  if (!alguno) { showToast('Marcá al menos un producto como producido'); return; }
-  if (!confirm('¿Registrar la producción y descontar el stock de materias primas?')) return;
-
-  var recetas  = getRecetas();
-  var materias = getMaterias();
-  var log      = getProdLog();
-
+  // Group items by cat → subcat
+  var grupos = {};
   orden.items.forEach(function(item) {
-    var producido = parseFloat(item.producido);
-    var qty = isNaN(producido) ? (item.estado === 'ok' ? item.qty : 0) : producido;
-    if (qty <= 0) return;
-    var receta = recetas.find(function(r) { return r.id === item.recetaId; });
-    if (!receta) return;
-    (receta.ingredientes || []).forEach(function(ing) {
-      var mat = materias.find(function(m) { return m.id === ing.materiaId; });
-      if (mat) mat.stockActual = Math.max(0, mat.stockActual - ing.cantidad * qty);
-    });
-    log.unshift({ id: Date.now().toString() + Math.random().toString(36).slice(2,5),
-      recetaId: item.recetaId, nombre: item.nombre,
-      unidades: qty, fecha: new Date().toLocaleDateString('es-AR'), timestamp: Date.now() });
+    var cid = item.catId || '';
+    var sid = item.subcatId || '';
+    if (!grupos[cid]) grupos[cid] = {};
+    if (!grupos[cid][sid]) grupos[cid][sid] = [];
+    grupos[cid][sid].push(item);
   });
 
-  setMaterias(materias);
-  if (log.length > 200) log = log.slice(0, 200);
-  setProdLog(log);
-  setPedidoProd(null);
-  showToast('✅ Producción registrada — stock actualizado');
+  function itemRow(item) {
+    var critBadge = '';
+    if (item.critico !== '' && item.critico !== undefined) {
+      var cv = validarCriticoProd(item.critico);
+      critBadge = ' <span class="crit-badge ' + cv.clase + '">' + cv.texto + '</span>';
+    }
+    return '<div class="prod-ver-item">' +
+      '<span>' + escapeHtml(item.nombre) + critBadge + '</span>' +
+      '<div style="display:flex;align-items:center;gap:10px;">' +
+        (item.stock !== '' ? '<span style="font-size:12px;color:var(--text-muted);">Stock: ' + item.stock + '</span>' : '') +
+        '<span class="prod-ver-qty">' + item.qty + ' u.</span>' +
+      '</div>' +
+    '</div>';
+  }
+
+  var html = '';
+
+  function renderGrupo(grupo) {
+    var subcatIds = Object.keys(grupo);
+    subcatIds.forEach(function(sid) {
+      if (sid) {
+        var sub = subcats.find(function(s) { return s.id === sid; });
+        if (sub) html += '<div class="prod-subcat-header"><span class="prod-subcat-title">' + escapeHtml(sub.nombre) + '</span></div>';
+      }
+      grupo[sid].forEach(function(item) { html += itemRow(item); });
+    });
+  }
+
+  cats.forEach(function(cat) {
+    if (!grupos[cat.id]) return;
+    var color = cat.color || '#3b82f6';
+    html += '<div class="prod-ver-card">';
+    html += '<div class="prod-ver-card-header"><span class="prod-cat-tag" style="background:' + color + ';">' + escapeHtml(cat.nombre) + '</span></div>';
+    renderGrupo(grupos[cat.id]);
+    html += '</div>';
+  });
+
+  if (grupos['']) {
+    html += '<div class="prod-ver-card">';
+    if (cats.length) html += '<div class="prod-ver-card-header"><span class="prod-cat-tag" style="background:#6b7280;">Sin categoría</span></div>';
+    renderGrupo(grupos['']);
+    html += '</div>';
+  }
+
+  var contentEl = document.getElementById('prod-ver-content');
+  if (contentEl) contentEl.innerHTML = html || '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">Sin items</div>';
+}
+
+function volverAEditarProdForm() {
+  var orden = getPedidoProd();
+  if (!orden) return;
+  if ((orden.editCount || 0) >= 5) { showToast('Límite de ediciones alcanzado (5/5)'); return; }
+  if (!confirm('¿Volver a editar el pedido?')) return;
+  orden.editCount = (orden.editCount || 0) + 1;
+  orden.estado = 'armar';
+  setPedidoProd(orden);
   renderArmarPedidoProd();
-  renderProdLog();
-  renderProdAlertas();
+}
+
+function imprimirPedidoProd() {
+  var orden = getPedidoProd();
+  if (!orden) return;
+  var bodyHtml = '<h1 style="font-family:Georgia,serif;margin-bottom:4px;">Pedido a Producción</h1>';
+  bodyHtml += '<p style="color:#888;font-size:13px;margin-bottom:20px;">' + escapeHtml(orden.fecha) + ' · ' + orden.items.length + ' productos</p>';
+  bodyHtml += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+  bodyHtml += '<thead><tr style="background:#f5f5f5;"><th style="text-align:left;padding:8px 10px;border-bottom:2px solid #ddd;">Producto</th><th style="padding:8px 10px;border-bottom:2px solid #ddd;text-align:center;">Stock</th><th style="padding:8px 10px;border-bottom:2px solid #ddd;text-align:center;">Cód.</th><th style="padding:8px 10px;border-bottom:2px solid #ddd;text-align:right;">Pedir</th></tr></thead><tbody>';
+  orden.items.forEach(function(item) {
+    bodyHtml += '<tr><td style="padding:8px 10px;border-bottom:1px solid #eee;">' + escapeHtml(item.nombre) + '</td>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:center;">' + (item.stock !== '' && item.stock !== undefined ? item.stock : '—') + '</td>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:center;">' + (item.critico || '—') + '</td>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">' + item.qty + ' u.</td></tr>';
+  });
+  bodyHtml += '</tbody></table>';
+  abrirPrintOverlay(bodyHtml);
+}
+
+function enviarPedidoAProdHistorial() {
+  var orden = getPedidoProd();
+  if (!orden) return;
+  if (!confirm('¿Enviar pedido a producción? Quedará en el historial para verificar.')) return;
+  var hist = getProdHist();
+  hist.unshift({
+    id: Date.now().toString(),
+    fecha: orden.fecha,
+    timestamp: Date.now(),
+    items: orden.items,
+    editCount: orden.editCount || 0
+  });
+  if (hist.length > 50) hist = hist.slice(0, 50);
+  setProdHist(hist);
+  setPedidoProd(null);
+  showToast('Pedido enviado a producción');
+  cambiarTab('historial');
+  setTimeout(function() { switchHistorialTab('produccion'); }, 100);
 }
 
 function renderProdLog() {
@@ -3243,6 +3759,17 @@ function ajustarStockMateria(id) {
 }
 
 // ——— Modal: Receta ———
+function actualizarSubcatsProdModal() {
+  var catId = document.getElementById('rec-cat').value;
+  var subcats = getProdSubcats();
+  var sel = document.getElementById('rec-subcat');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Sin subcategoría</option>' +
+    subcats.filter(function(s) { return s.catId === catId; }).map(function(s) {
+      return '<option value="' + s.id + '">' + escapeHtml(s.nombre) + '</option>';
+    }).join('');
+}
+
 function abrirModalReceta(id) {
   prodRecetaEditId = id || null;
   prodIngCount = 0;
@@ -3250,6 +3777,27 @@ function abrirModalReceta(id) {
   var $t = document.getElementById('modal-receta-titulo');
   if ($t) $t.textContent = id ? 'Editar producto' : 'Nuevo producto';
   document.getElementById('rec-nombre').value = receta ? receta.nombre : '';
+
+  // Populate cat select
+  var cats = getProdCats();
+  var catSel = document.getElementById('rec-cat');
+  if (catSel) {
+    catSel.innerHTML = '<option value="">Sin categoría</option>' +
+      cats.map(function(c) {
+        return '<option value="' + c.id + '"' + (receta && receta.catId === c.id ? ' selected' : '') + '>' + escapeHtml(c.nombre) + '</option>';
+      }).join('');
+  }
+  // Populate subcat select based on selected cat
+  var subcats = getProdSubcats();
+  var subcatSel = document.getElementById('rec-subcat');
+  var selCatId = receta ? (receta.catId || '') : '';
+  if (subcatSel) {
+    subcatSel.innerHTML = '<option value="">Sin subcategoría</option>' +
+      subcats.filter(function(s) { return s.catId === selCatId; }).map(function(s) {
+        return '<option value="' + s.id + '"' + (receta && receta.subcatId === s.id ? ' selected' : '') + '>' + escapeHtml(s.nombre) + '</option>';
+      }).join('');
+  }
+
   var container = document.getElementById('rec-ingredientes');
   container.innerHTML = '';
   if (!getMaterias().length) {
@@ -3316,6 +3864,9 @@ function guardarReceta() {
   var nombre = document.getElementById('rec-nombre').value.trim();
   if (!nombre) { document.getElementById('rec-nombre').focus(); return; }
 
+  var catId    = (document.getElementById('rec-cat')    || {}).value || '';
+  var subcatId = (document.getElementById('rec-subcat') || {}).value || '';
+
   var ingredientes = [];
   document.querySelectorAll('#rec-ingredientes .prod-ing-modal-row').forEach(function(row) {
     var sel = row.querySelector('select');
@@ -3328,11 +3879,13 @@ function guardarReceta() {
   var recetas = getRecetas();
   if (prodRecetaEditId) {
     recetas = recetas.map(function(r) {
-      return r.id === prodRecetaEditId ? { id: r.id, nombre: nombre, ingredientes: ingredientes } : r;
+      return r.id === prodRecetaEditId
+        ? { id: r.id, nombre: nombre, catId: catId, subcatId: subcatId, ingredientes: ingredientes }
+        : r;
     });
     showToast('Receta actualizada');
   } else {
-    recetas.push({ id: Date.now().toString(), nombre: nombre, ingredientes: ingredientes });
+    recetas.push({ id: Date.now().toString(), nombre: nombre, catId: catId, subcatId: subcatId, ingredientes: ingredientes });
     showToast('Receta agregada');
   }
   setRecetas(recetas);
@@ -3348,6 +3901,114 @@ function borrarReceta() {
   cerrarModalReceta();
   showToast('Receta eliminada');
   renderProduccion();
+}
+
+// ——— Modales: Categorías de producción ———
+function abrirModalProdCat(id) {
+  prodCatEditId = id || null;
+  var cat = id ? getProdCats().find(function(c) { return c.id === id; }) : null;
+  var tit = document.getElementById('modal-prod-cat-titulo');
+  if (tit) tit.textContent = id ? 'Editar categoría' : 'Nueva categoría';
+  var inp = document.getElementById('prod-cat-nombre');
+  if (inp) inp.value = cat ? cat.nombre : '';
+  var col = document.getElementById('prod-cat-color');
+  if (col) col.value = cat ? (cat.color || '#3b82f6') : '#3b82f6';
+  var btnBorrar = document.getElementById('btn-borrar-prod-cat');
+  if (btnBorrar) btnBorrar.style.display = id ? '' : 'none';
+  document.getElementById('modal-prod-cat').classList.add('open');
+  setTimeout(function() { if (inp) inp.focus(); }, 100);
+}
+
+function cerrarModalProdCat() {
+  document.getElementById('modal-prod-cat').classList.remove('open');
+}
+
+function guardarProdCat() {
+  var nombre = (document.getElementById('prod-cat-nombre') || {}).value.trim();
+  if (!nombre) { document.getElementById('prod-cat-nombre').focus(); return; }
+  var color = (document.getElementById('prod-cat-color') || {}).value || '#3b82f6';
+  var cats = getProdCats();
+  if (prodCatEditId) {
+    cats = cats.map(function(c) { return c.id === prodCatEditId ? { id: c.id, nombre: nombre, color: color } : c; });
+    showToast('Categoría actualizada');
+  } else {
+    cats.push({ id: Date.now().toString(), nombre: nombre, color: color });
+    showToast('Categoría agregada');
+  }
+  setProdCats(cats);
+  cerrarModalProdCat();
+  renderProdRecetas();
+}
+
+function borrarProdCat() {
+  if (!prodCatEditId) return;
+  var cat = getProdCats().find(function(c) { return c.id === prodCatEditId; });
+  if (!confirm('¿Eliminar la categoría "' + (cat ? cat.nombre : '') + '"? Los productos quedarán sin categoría.')) return;
+  setProdCats(getProdCats().filter(function(c) { return c.id !== prodCatEditId; }));
+  // Clear catId from recipes
+  setRecetas(getRecetas().map(function(r) {
+    return r.catId === prodCatEditId ? Object.assign({}, r, { catId: '', subcatId: '' }) : r;
+  }));
+  cerrarModalProdCat();
+  showToast('Categoría eliminada');
+  renderProdRecetas();
+}
+
+// ——— Modales: Subcategorías de producción ———
+function abrirModalProdSubcat(id) {
+  prodSubcatEditId = id || null;
+  var sub = id ? getProdSubcats().find(function(s) { return s.id === id; }) : null;
+  var tit = document.getElementById('modal-prod-subcat-titulo');
+  if (tit) tit.textContent = id ? 'Editar subcategoría' : 'Nueva subcategoría';
+  var inp = document.getElementById('prod-subcat-nombre');
+  if (inp) inp.value = sub ? sub.nombre : '';
+  // Populate cat select
+  var cats = getProdCats();
+  var catSel = document.getElementById('prod-subcat-cat');
+  if (catSel) {
+    catSel.innerHTML = '<option value="">Sin categoría</option>' +
+      cats.map(function(c) {
+        return '<option value="' + c.id + '"' + (sub && sub.catId === c.id ? ' selected' : '') + '>' + escapeHtml(c.nombre) + '</option>';
+      }).join('');
+  }
+  var btnBorrar = document.getElementById('btn-borrar-prod-subcat');
+  if (btnBorrar) btnBorrar.style.display = id ? '' : 'none';
+  document.getElementById('modal-prod-subcat').classList.add('open');
+  setTimeout(function() { if (inp) inp.focus(); }, 100);
+}
+
+function cerrarModalProdSubcat() {
+  document.getElementById('modal-prod-subcat').classList.remove('open');
+}
+
+function guardarProdSubcat() {
+  var nombre = (document.getElementById('prod-subcat-nombre') || {}).value.trim();
+  if (!nombre) { document.getElementById('prod-subcat-nombre').focus(); return; }
+  var catId = (document.getElementById('prod-subcat-cat') || {}).value || '';
+  var subs = getProdSubcats();
+  if (prodSubcatEditId) {
+    subs = subs.map(function(s) { return s.id === prodSubcatEditId ? { id: s.id, nombre: nombre, catId: catId } : s; });
+    showToast('Subcategoría actualizada');
+  } else {
+    subs.push({ id: Date.now().toString(), nombre: nombre, catId: catId });
+    showToast('Subcategoría agregada');
+  }
+  setProdSubcats(subs);
+  cerrarModalProdSubcat();
+  renderProdRecetas();
+}
+
+function borrarProdSubcat() {
+  if (!prodSubcatEditId) return;
+  var sub = getProdSubcats().find(function(s) { return s.id === prodSubcatEditId; });
+  if (!confirm('¿Eliminar la subcategoría "' + (sub ? sub.nombre : '') + '"? Los productos quedarán sin subcategoría.')) return;
+  setProdSubcats(getProdSubcats().filter(function(s) { return s.id !== prodSubcatEditId; }));
+  setRecetas(getRecetas().map(function(r) {
+    return r.subcatId === prodSubcatEditId ? Object.assign({}, r, { subcatId: '' }) : r;
+  }));
+  cerrarModalProdSubcat();
+  showToast('Subcategoría eliminada');
+  renderProdRecetas();
 }
 
 // ——— Actualizar stock desde pedido confirmado ———

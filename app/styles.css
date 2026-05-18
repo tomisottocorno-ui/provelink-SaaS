@@ -1807,3 +1807,177 @@ h3 { font-size: 18px; }
   .stock-ped-row { flex-direction: column; align-items: flex-start; }
   .stock-ped-sel { width: 100%; }
 }
+
+/* ——— Código crítico badges ——— */
+.crit-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 7px;
+  border-radius: 99px;
+  white-space: nowrap;
+  min-width: 40px;
+  text-align: center;
+  display: inline-block;
+}
+.crit-ok   { background: rgba(16,185,129,0.12); color: var(--emerald); border: 1px solid rgba(16,185,129,0.3); }
+.crit-warn { background: rgba(245,158,11,0.12);  color: var(--warn);   border: 1px solid rgba(245,158,11,0.3); }
+.crit-venc { background: rgba(239,68,68,0.10);   color: var(--danger); border: 1px solid rgba(239,68,68,0.25); }
+.crit-nd   { background: var(--bg-elev2); color: var(--text-muted); border: 1px solid var(--border); }
+
+/* ——— Stock input in order form ——— */
+.prod-stock-inp {
+  width: 66px;
+  text-align: center;
+  padding: 7px 4px;
+  border: 1.5px dashed var(--border-hi);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev2);
+  color: var(--text);
+  font-size: 14px;
+  font-family: var(--f-sans);
+  flex-shrink: 0;
+}
+.prod-stock-inp:focus {
+  outline: none;
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--bg-elev3);
+}
+
+/* ——— Critico input in order form ——— */
+.prod-crit-inp {
+  width: 60px;
+  text-align: center;
+  padding: 7px 4px;
+  border: 1.5px solid var(--border-hi);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--f-sans);
+  flex-shrink: 0;
+}
+.prod-crit-inp:focus { outline: none; border-color: var(--accent); }
+.prod-crit-inp.invalid { border-color: var(--danger); }
+
+/* ——— Production category headers ——— */
+.prod-cat-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 6px;
+  margin-top: 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.prod-cat-header:first-child { margin-top: 0; }
+.prod-cat-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 99px;
+  color: white;
+}
+.prod-cat-nombre { font-size: 14px; font-weight: 600; color: var(--text); }
+.prod-subcat-header {
+  padding: 6px 0 4px;
+  margin-top: 6px;
+  border-bottom: 2px solid var(--border);
+}
+.prod-subcat-header:first-child { margin-top: 0; }
+.prod-subcat-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* ——— Prod order form — column header ——— */
+.prod-order-col-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.prod-order-col-lbl {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ——— Prod order row ——— */
+.prod-order-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.prod-order-row:last-child { border-bottom: none; }
+.prod-order-nombre {
+  flex: 1;
+  font-size: 14px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ——— Ver pedido state ——— */
+.prod-ver-section { margin-bottom: 16px; }
+.prod-ver-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.prod-ver-card-header {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.prod-ver-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+.prod-ver-item:last-child { border-bottom: none; }
+.prod-ver-qty { font-weight: 600; color: var(--text); }
+
+/* ——— Historial sub-tabs ——— */
+.hist-subtab-btns { display: flex; gap: 8px; margin-bottom: 20px; }
+.hist-subtab-btns .btn { flex: 1; justify-content: center; }
+
+/* ——— Prod hist card ——— */
+.prod-hist-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.prod-hist-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.prod-hist-fecha { font-size: 15px; font-weight: 600; color: var(--text); }
+.prod-hist-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.prod-hist-body { display: none; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+.prod-hist-body.open { display: block; }

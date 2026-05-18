@@ -1718,6 +1718,15 @@ async function expandirQueryIA(q) {
   }
 }
 
+function itemMatcheaQuery(texto, query) {
+  // 1) La frase completa como substring: "dulce de leche" en "dulce de leche sancor"
+  if (texto.indexOf(query) >= 0) return true;
+  // 2) Palabras largas (>2 chars) todas presentes: evita falsos positivos con "de", "el", etc.
+  var palabras = query.split(/\s+/).filter(function(p) { return p.length > 2; });
+  if (palabras.length > 0 && palabras.every(function(p) { return texto.indexOf(p) >= 0; })) return true;
+  return false;
+}
+
 function buscarEnListas(q, terminosExtra) {
   if (!q) return [];
   var qLower = q.toLowerCase().trim();
@@ -1731,12 +1740,11 @@ function buscarEnListas(q, terminosExtra) {
   var vistos = {};
   var resultados = [];
   queries.forEach(function(query) {
-    var palabras = query.split(/\s+/);
     todos.forEach(function(it) {
       var key = it.itemId;
       if (vistos[key]) return;
       var texto = (it.productoLista + ' ' + it.proveedor).toLowerCase();
-      if (palabras.every(function(p) { return texto.indexOf(p) >= 0; })) {
+      if (itemMatcheaQuery(texto, query)) {
         vistos[key] = true;
         resultados.push(it);
       }
@@ -1784,16 +1792,20 @@ function renderBuscarProducto(expansionesExtras) {
         if ($('buscar-producto').value.trim() !== q) return; // query cambió
         expandirQueryIA(q).then(function(terminos) {
           if ($('buscar-producto').value.trim() !== q) return;
+          var nuevos = 0;
           terminos.forEach(function(t) {
-            if (buscarExpansiones.indexOf(t) < 0) buscarExpansiones.push(t);
+            if (buscarExpansiones.indexOf(t) < 0) { buscarExpansiones.push(t); nuevos++; }
           });
-          renderBuscarProducto(buscarExpansiones);
+          // Solo re-renderizar si la IA agregó términos que no teníamos
+          if (nuevos > 0) renderBuscarProducto(null);
         });
       }, 500);
     }
   }
 
-  var terminosActivos = expansionesExtras || buscarExpansiones;
+  // IMPORTANTE: no usar || porque [] es truthy en JS.
+  // Si no nos pasaron expansiones desde afuera, usar las del diccionario local.
+  var terminosActivos = (expansionesExtras != null) ? expansionesExtras : buscarExpansiones;
   var resultados = buscarEnListas(q, terminosActivos);
 
   if (!resultados.length) {

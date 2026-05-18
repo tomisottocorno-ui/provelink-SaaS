@@ -2432,6 +2432,16 @@ function quitarEscribiendo() {
 
 function construirContextoIA() {
   var ctx = 'Sos un asistente de ProveLink que ayuda al usuario a buscar productos, comparar precios entre proveedores y gestionar pedidos.\n\n';
+
+  // Agregar diccionario de abreviaciones al contexto
+  ctx += '=== ABREVIACIONES CONOCIDAS ===\n';
+  ctx += 'Cuando el usuario use una abreviación, expandila automáticamente:\n';
+  var abrevLineas = [];
+  Object.keys(ABREV_DICT).forEach(function(k) {
+    abrevLineas.push(k + ' = ' + ABREV_DICT[k].join(' / '));
+  });
+  ctx += abrevLineas.join(', ') + '\n\n';
+  ctx += 'Ejemplo: si pregunta por "ddl", buscá "dulce de leche". Si pregunta por "fid", buscá "fideos".\n\n';
   ctx += '=== PROVEEDORES (' + proveedores.length + ') ===\n';
   proveedores.forEach(function(p) {
     ctx += '- ' + p.nombre + (p.telefono ? ' | tel: ' + p.telefono : '') + '\n';

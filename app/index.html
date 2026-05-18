@@ -219,7 +219,10 @@
 
     <div class="form-row">
       <label for="prov-telefono">Teléfono (opcional)</label>
-      <input type="tel" id="prov-telefono" placeholder="Ej: 11 1234 5678">
+      <div class="phone-input-wrap">
+        <span class="phone-prefix">🇦🇷 +54</span>
+        <input type="tel" id="prov-telefono" placeholder="11 1234 5678" class="phone-input" inputmode="numeric">
+      </div>
     </div>
 
     <div class="modal-actions">
@@ -604,6 +607,7 @@ function abrirModalProv() {
   $('prov-telefono').value = '';
   $('prov-logo-input').value = '';
   resetLogoPreview('', null);
+
   $('modal-prov').classList.add('open');
   setTimeout(function() { $('prov-nombre').focus(); }, 100);
 }
@@ -617,7 +621,9 @@ function editarProveedor(id) {
   logoQuitado = false;
   $('modal-prov-titulo').textContent = 'Editar proveedor';
   $('prov-nombre').value = p.nombre || '';
-  $('prov-telefono').value = p.telefono || '';
+  // Mostrar solo la parte sin +54 para edición
+  var telEdit = (p.telefono || '').replace(/^\+54\s?/, '').trim();
+  $('prov-telefono').value = telEdit;
   $('prov-logo-input').value = '';
   resetLogoPreview(p.nombre, p.logo_url);
   $('modal-prov').classList.add('open');
@@ -632,7 +638,8 @@ function cerrarModalProv() {
 
 async function guardarProveedor() {
   var nombre = $('prov-nombre').value.trim();
-  var tel = $('prov-telefono').value.trim();
+  var telRaw = $('prov-telefono').value.replace(/\D/g, '').trim();
+  var tel = telRaw ? ('+54' + telRaw) : '';
   if (!nombre) {
     showToast('El nombre es obligatorio', 'error');
     return;

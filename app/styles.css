@@ -597,6 +597,49 @@ h3 { font-size: 18px; }
 }
 
 /* ============================================================
+   PHONE INPUT con prefijo de país
+   ============================================================ */
+.phone-input-wrap {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  transition: border-color 0.2s var(--ease-out), box-shadow 0.2s;
+}
+.phone-input-wrap:focus-within {
+  border-color: var(--accent);
+  background: rgba(59, 130, 246, 0.04);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+.phone-prefix {
+  padding: 10px 12px 10px 13px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border-right: 1px solid var(--border-hi);
+  white-space: nowrap;
+  user-select: none;
+  flex-shrink: 0;
+  letter-spacing: 0.01em;
+}
+.phone-input {
+  flex: 1;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  padding: 10px 13px !important;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text);
+  box-shadow: none !important;
+  min-width: 0;
+}
+.phone-input::placeholder { color: var(--text-dim); }
+
+/* ============================================================
    BADGES
    ============================================================ */
 .badge {

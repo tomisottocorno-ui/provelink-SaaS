@@ -1374,13 +1374,10 @@ function renderBuscarProducto() {
 
   provsOrden.forEach(function(pid) {
     var prov = porProv[pid];
-    var esMasBarato = prov.items[0].precio === minGlobal;
-    var border = esMasBarato ? 'var(--success)' : 'var(--border-hi)';
-    html += '<div style="background:var(--bg-elev);border:2px solid ' + border + ';border-radius:12px;padding:14px;">';
+    html += '<div style="background:var(--bg-elev);border:2px solid var(--border-hi);border-radius:12px;padding:14px;">';
     html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);">';
     html += '<div><div style="font-weight:600;font-size:15px;">' + escapeHtml(prov.nombre) + '</div>';
     html += '<div style="font-size:11px;color:var(--text-muted);">' + prov.items.length + ' resultado' + (prov.items.length !== 1 ? 's' : '') + '</div></div>';
-    if (esMasBarato) html += '<span style="background:var(--success-soft);color:var(--success);font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;border:1px solid var(--success-border);">+ barato</span>';
     html += '</div>';
     html += '<div style="display:flex;flex-direction:column;gap:6px;">';
     prov.items.forEach(function(it) {
@@ -1391,7 +1388,7 @@ function renderBuscarProducto() {
       var pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
       html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + pbHtml + '</div>';
       html += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">';
-      html += '<strong style="font-size:13px;white-space:nowrap;">$' + formatPrecio(it.precio) + '</strong>';
+      html += '<strong style="font-size:13px;white-space:nowrap;color:#4ade80;">$' + formatPrecio(it.precio) + '</strong>';
       if (enPed > 0) {
         html += '<button class="btn" data-restar="' + it.itemId + '" style="padding:2px 7px;font-size:12px;">−</button>';
         html += '<span style="font-size:13px;font-weight:700;min-width:20px;text-align:center;">' + enPed + '</span>';

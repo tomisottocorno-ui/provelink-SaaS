@@ -195,6 +195,23 @@
   <div class="modal">
     <h3 id="modal-prov-titulo">Nuevo proveedor</h3>
 
+    <!-- Logo -->
+    <div class="form-row">
+      <label>Logo (opcional)</label>
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div id="prov-logo-preview" onclick="document.getElementById('prov-logo-input').click()"
+          style="width:66px;height:66px;border-radius:var(--r-md);background:var(--bg-elev2);border:2px dashed var(--border-hi);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:var(--text-muted);flex-shrink:0;cursor:pointer;background-size:cover;background-position:center;transition:border-color 0.2s;"
+          title="Subir logo">
+        </div>
+        <div style="flex:1;min-width:0;">
+          <button class="btn" type="button" style="font-size:12px;padding:7px 12px;" onclick="document.getElementById('prov-logo-input').click()">Subir imagen</button>
+          <button class="btn" type="button" id="btn-quitar-logo" style="font-size:12px;padding:7px 12px;margin-left:6px;display:none;" onclick="quitarLogoProveedor()">Quitar</button>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">JPG, PNG o WEBP · Máx 2 MB</div>
+        </div>
+      </div>
+      <input type="file" id="prov-logo-input" accept="image/jpeg,image/png,image/webp,image/gif" style="display:none;" onchange="seleccionarLogoProveedor(event)">
+    </div>
+
     <div class="form-row">
       <label for="prov-nombre">Nombre *</label>
       <input type="text" id="prov-nombre" placeholder="Ej: Distribuidora La Estrella">
@@ -208,6 +225,58 @@
     <div class="modal-actions">
       <button class="btn" onclick="cerrarModalProv()">Cancelar</button>
       <button class="btn primary" id="btn-guardar-prov" onclick="guardarProveedor()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Configuración -->
+<div class="modal-overlay" id="modal-config">
+  <div class="modal">
+    <h3>Configuración</h3>
+
+    <div class="form-row">
+      <label>Email</label>
+      <input type="email" id="config-email-display" disabled style="opacity:0.55;cursor:default;">
+    </div>
+
+    <div class="form-row">
+      <label for="config-nombre">Nombre del negocio</label>
+      <input type="text" id="config-nombre" placeholder="Ej: Almacén El Sol">
+    </div>
+
+    <div class="form-row">
+      <label for="config-telefono">Teléfono</label>
+      <input type="tel" id="config-telefono" placeholder="Ej: 11 1234 5678">
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn" onclick="cerrarConfig()">Cancelar</button>
+      <button class="btn primary" id="btn-guardar-config" onclick="guardarConfig()">Guardar</button>
+    </div>
+
+    <div style="margin-top:22px;padding-top:16px;border-top:1px solid var(--border);">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);margin-bottom:10px;">Seguridad</div>
+      <button class="btn" type="button" onclick="cambiarPassword()" style="width:100%;justify-content:flex-start;gap:8px;"><span class="icon-slot" data-icon="settings"></span> Cambiar contraseña</button>
+    </div>
+
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--danger);margin-bottom:10px;">Zona de peligro</div>
+      <button class="btn" type="button" onclick="eliminarCuenta()" style="width:100%;justify-content:flex-start;gap:8px;color:var(--danger);border-color:var(--danger-border);"><span class="icon-slot" data-icon="trash"></span> Eliminar mi cuenta</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Planes -->
+<div class="modal-overlay modal-lg" id="modal-planes">
+  <div class="modal">
+    <h3>Elegí tu plan</h3>
+    <p style="font-size:13px;color:var(--text-muted);margin:6px 0 20px;">Cambiá cuando quieras · Sin permanencia.</p>
+    <div id="planes-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:20px;"></div>
+    <div style="padding:12px 16px;background:var(--bg-elev2);border-radius:var(--r-md);font-size:12px;color:var(--text-muted);text-align:center;line-height:1.6;">
+      ¿Dudas? Escribinos a <a href="mailto:soporte@provelink.app" style="color:var(--accent-bright);">soporte@provelink.app</a>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="cerrarPlanes()">Cerrar</button>
     </div>
   </div>
 </div>
@@ -283,6 +352,9 @@ var sesion = null;
 var profile = null;
 var proveedores = [];
 var provEditandoId = null;
+var logoFile = null;       // archivo File seleccionado para logo
+var logoActualUrl = null;  // URL del logo actual (modo edición)
+var logoQuitado = false;   // usuario quitó el logo explícitamente
 var listas = [];
 var listaEditandoId = null;  // id del proveedor cuya lista estamos editando
 var filasPreview = [];  // [{productoLista, precio}, ...] del preview de la nueva lista
@@ -456,17 +528,82 @@ function renderProveedores() {
   cont.innerHTML = html;
 }
 
+function resetLogoPreview(nombre, logoUrl) {
+  var preview = $('prov-logo-preview');
+  if (logoUrl) {
+    preview.style.backgroundImage = 'url("' + logoUrl + '")';
+    preview.style.backgroundSize  = 'cover';
+    preview.style.backgroundPosition = 'center';
+    preview.textContent = '';
+    $('btn-quitar-logo').style.display = '';
+  } else {
+    preview.style.backgroundImage = '';
+    preview.textContent = (nombre || '?').charAt(0).toUpperCase();
+    $('btn-quitar-logo').style.display = 'none';
+  }
+}
+
+function seleccionarLogoProveedor(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) {
+    showToast('La imagen es muy grande (máx 2 MB)', 'error');
+    event.target.value = '';
+    return;
+  }
+  logoFile = file;
+  logoQuitado = false;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var preview = $('prov-logo-preview');
+    preview.style.backgroundImage = 'url("' + e.target.result + '")';
+    preview.style.backgroundSize  = 'cover';
+    preview.style.backgroundPosition = 'center';
+    preview.textContent = '';
+    $('btn-quitar-logo').style.display = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+function quitarLogoProveedor() {
+  logoFile = null;
+  logoQuitado = true;
+  var inicial = ($('prov-nombre').value || '?').charAt(0).toUpperCase();
+  var preview = $('prov-logo-preview');
+  preview.style.backgroundImage = '';
+  preview.textContent = inicial;
+  $('btn-quitar-logo').style.display = 'none';
+  $('prov-logo-input').value = '';
+}
+
+async function subirLogoAStorage(file, proveedorId) {
+  var ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  var path = sesion.user.id + '/' + proveedorId + '.' + ext;
+  var { error } = await supabase.storage
+    .from('provider-logos')
+    .upload(path, file, { upsert: true, contentType: file.type });
+  if (error) throw error;
+  var { data: urlData } = supabase.storage
+    .from('provider-logos')
+    .getPublicUrl(path);
+  return urlData.publicUrl;
+}
+
 function abrirModalProv() {
-  // Validar límite del plan
   var limite = LIMITES[profile.plan || 'free'].proveedores;
   if (proveedores.length >= limite) {
     showToast('Llegaste al límite de tu plan. Mejorá para agregar más.', 'error');
     return;
   }
   provEditandoId = null;
+  logoFile = null;
+  logoActualUrl = null;
+  logoQuitado = false;
   $('modal-prov-titulo').textContent = 'Nuevo proveedor';
   $('prov-nombre').value = '';
   $('prov-telefono').value = '';
+  $('prov-logo-input').value = '';
+  resetLogoPreview('', null);
   $('modal-prov').classList.add('open');
   setTimeout(function() { $('prov-nombre').focus(); }, 100);
 }
@@ -475,14 +612,22 @@ function editarProveedor(id) {
   var p = proveedores.find(function(x) { return x.id === id; });
   if (!p) return;
   provEditandoId = id;
+  logoFile = null;
+  logoActualUrl = p.logo_url || null;
+  logoQuitado = false;
   $('modal-prov-titulo').textContent = 'Editar proveedor';
   $('prov-nombre').value = p.nombre || '';
   $('prov-telefono').value = p.telefono || '';
+  $('prov-logo-input').value = '';
+  resetLogoPreview(p.nombre, p.logo_url);
   $('modal-prov').classList.add('open');
 }
 
 function cerrarModalProv() {
   $('modal-prov').classList.remove('open');
+  logoFile = null;
+  logoActualUrl = null;
+  logoQuitado = false;
 }
 
 async function guardarProveedor() {
@@ -497,19 +642,42 @@ async function guardarProveedor() {
   btn.textContent = 'Guardando...';
   try {
     if (provEditandoId) {
-      // Update
+      // UPDATE
+      var updateData = { nombre: nombre, telefono: tel || null, actualizado: new Date().toISOString() };
+      if (logoQuitado) {
+        updateData.logo_url = null;
+      } else if (logoFile) {
+        btn.textContent = 'Subiendo logo...';
+        var urlAct = await subirLogoAStorage(logoFile, provEditandoId);
+        updateData.logo_url = urlAct;
+      }
       var { error } = await supabase
         .from('proveedores')
-        .update({ nombre: nombre, telefono: tel || null, actualizado: new Date().toISOString() })
+        .update(updateData)
         .eq('id', provEditandoId);
       if (error) throw error;
       showToast('Proveedor actualizado', 'success');
     } else {
-      // Insert
-      var { error } = await supabase
+      // INSERT: crear primero, luego subir logo con el id real
+      var { data: inserted, error: insError } = await supabase
         .from('proveedores')
-        .insert({ user_id: sesion.user.id, nombre: nombre, telefono: tel || null });
-      if (error) throw error;
+        .insert({ user_id: sesion.user.id, nombre: nombre, telefono: tel || null })
+        .select()
+        .single();
+      if (insError) throw insError;
+      if (logoFile) {
+        btn.textContent = 'Subiendo logo...';
+        try {
+          var urlNew = await subirLogoAStorage(logoFile, inserted.id);
+          await supabase.from('proveedores').update({ logo_url: urlNew }).eq('id', inserted.id);
+        } catch(logoErr) {
+          console.error('Logo upload error:', logoErr);
+          showToast('Proveedor guardado · Logo falló: ' + (logoErr.message || ''), 'warn');
+          cerrarModalProv();
+          await cargarProveedores();
+          return;
+        }
+      }
       showToast('Proveedor agregado', 'success');
     }
     cerrarModalProv();
@@ -1245,13 +1413,121 @@ function escapeHtmlAttr(s) {
 }
 
 // ============================================================
-// PLACEHOLDERS para features futuras
+// CONFIGURACIÓN
 // ============================================================
-function abrirPlanes() {
-  showToast('Página de planes próximamente');
-}
 function abrirConfig() {
-  showToast('Configuración próximamente');
+  $('config-email-display').value = (sesion && sesion.user && sesion.user.email) || '';
+  $('config-nombre').value = profile.nombre_negocio || '';
+  $('config-telefono').value = profile.telefono || '';
+  $('modal-config').classList.add('open');
+  $('menu').classList.remove('open');
+  setTimeout(function() { $('config-nombre').focus(); }, 100);
+}
+
+function cerrarConfig() {
+  $('modal-config').classList.remove('open');
+}
+
+async function guardarConfig() {
+  var nombre = $('config-nombre').value.trim();
+  var tel = $('config-telefono').value.trim();
+  var btn = $('btn-guardar-config');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+  try {
+    var { error } = await supabase
+      .from('profiles')
+      .update({ nombre_negocio: nombre || null, telefono: tel || null, actualizado: new Date().toISOString() })
+      .eq('id', sesion.user.id);
+    if (error) throw error;
+    profile.nombre_negocio = nombre || null;
+    profile.telefono = tel || null;
+    renderHeader();
+    cerrarConfig();
+    showToast('Configuración guardada', 'success');
+  } catch(e) {
+    console.error('guardarConfig', e);
+    showToast('Error: ' + (e.message || ''), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Guardar';
+  }
+}
+
+async function cambiarPassword() {
+  var nueva = prompt('Nueva contraseña (mínimo 6 caracteres):');
+  if (!nueva) return;
+  if (nueva.length < 6) { showToast('Mínimo 6 caracteres', 'error'); return; }
+  var conf = prompt('Confirmá la nueva contraseña:');
+  if (nueva !== conf) { showToast('Las contraseñas no coinciden', 'error'); return; }
+  try {
+    var { error } = await supabase.auth.updateUser({ password: nueva });
+    if (error) throw error;
+    showToast('Contraseña actualizada', 'success');
+  } catch(e) {
+    showToast('Error: ' + (e.message || ''), 'error');
+  }
+}
+
+async function eliminarCuenta() {
+  var email = (sesion && sesion.user && sesion.user.email) || '';
+  var conf = prompt('Para eliminar tu cuenta escribí tu email: ' + email);
+  if (!conf || conf.trim().toLowerCase() !== email.toLowerCase()) {
+    showToast('Email incorrecto. Cuenta NO eliminada.', 'error');
+    return;
+  }
+  // En producción esto llamaría un endpoint con service_role.
+  // Por ahora pedimos contactar soporte.
+  showToast('Enviá un mail a soporte@provelink.app para eliminar tu cuenta.', 'warn');
+}
+
+// ============================================================
+// PLANES
+// ============================================================
+var PLANES_INFO = [
+  { id: 'free',     nombre: 'Free',    precio: 'Gratis',       color: 'var(--emerald)', features: ['3 proveedores','1 lista de precios','Sin asistente IA'] },
+  { id: 'pro',      nombre: 'Pro',     precio: '$20 USD/mes',  color: 'var(--accent)',  features: ['Proveedores ilimitados','Listas ilimitadas','150 consultas IA/mes'] },
+  { id: 'business', nombre: 'Max',     precio: '$100 USD/mes', color: 'var(--gold)',    features: ['Todo de Pro','500 consultas IA/mes','Prioridad en soporte'] }
+];
+
+function abrirPlanes() {
+  renderPlanesGrid();
+  $('modal-planes').classList.add('open');
+  $('menu').classList.remove('open');
+}
+
+function cerrarPlanes() {
+  $('modal-planes').classList.remove('open');
+}
+
+function renderPlanesGrid() {
+  var planActual = (profile && profile.plan) || 'free';
+  var userEmail = (sesion && sesion.user && sesion.user.email) || '';
+  var html = '';
+  PLANES_INFO.forEach(function(p) {
+    var esCurrent = p.id === planActual;
+    var borderStyle = esCurrent ? '2px solid ' + p.color : '1px solid var(--border-hi)';
+    var bgStyle = esCurrent ? 'background:rgba(255,255,255,0.03);' : '';
+    html += '<div style="border:' + borderStyle + ';border-radius:var(--r-lg);padding:18px;' + bgStyle + 'position:relative;display:flex;flex-direction:column;gap:0;">';
+    if (esCurrent) {
+      html += '<div style="position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:' + p.color + ';color:#fff;font-size:10px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;text-transform:uppercase;letter-spacing:0.06em;">Plan actual</div>';
+    }
+    html += '<div style="font-size:22px;font-weight:800;color:' + p.color + ';letter-spacing:-0.03em;">' + p.nombre + '</div>';
+    html += '<div style="font-size:14px;font-weight:600;margin:4px 0 14px;color:var(--text);">' + p.precio + '</div>';
+    html += '<ul style="list-style:none;padding:0;margin:0 0 16px;display:flex;flex-direction:column;gap:6px;">';
+    p.features.forEach(function(f) {
+      html += '<li style="font-size:12px;color:var(--text-muted);display:flex;align-items:flex-start;gap:7px;"><span style="color:' + p.color + ';flex-shrink:0;font-size:13px;line-height:1.3;">✓</span>' + escapeHtml(f) + '</li>';
+    });
+    html += '</ul>';
+    if (!esCurrent) {
+      var waMsg = encodeURIComponent('Hola! Quiero activar el plan ' + p.nombre + ' de ProveLink. Mi email es: ' + userEmail);
+      html += '<a href="https://wa.me/5491112345678?text=' + waMsg + '" target="_blank" rel="noopener" style="display:block;text-align:center;padding:10px 14px;border-radius:var(--r-md);background:' + p.color + ';color:#fff;font-size:13px;font-weight:700;text-decoration:none;margin-top:auto;">Mejorar a ' + p.nombre + '</a>';
+    } else if (planActual !== 'free') {
+      html += '<a href="mailto:soporte@provelink.app?subject=Cancelar+plan+' + encodeURIComponent(p.nombre) + '&body=' + encodeURIComponent('Hola, quiero cancelar mi plan ' + p.nombre + '. Mi email es: ' + userEmail) + '" style="display:block;text-align:center;padding:8px 14px;border-radius:var(--r-md);border:1px solid var(--border-hi);color:var(--text-muted);font-size:12px;text-decoration:none;margin-top:auto;">Cancelar plan</a>';
+    }
+    html += '</div>';
+  });
+  $('planes-grid').innerHTML = html;
 }
 
 // ============================================================
@@ -1887,6 +2163,8 @@ document.addEventListener('keydown', function(e) {
     if ($('modal-prov').classList.contains('open')) cerrarModalProv();
     if ($('modal-lista').classList.contains('open')) cerrarModalLista();
     if ($('modal-ver-lista').classList.contains('open')) cerrarVerLista();
+    if ($('modal-config').classList.contains('open')) cerrarConfig();
+    if ($('modal-planes').classList.contains('open')) cerrarPlanes();
     cerrarAsistente();
   }
 });

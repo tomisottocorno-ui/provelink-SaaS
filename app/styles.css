@@ -695,6 +695,18 @@ h3 { font-size: 18px; }
   flex-shrink: 0;
   background-size: cover;
   background-position: center;
+  overflow: hidden;
+}
+
+/* Logo upload preview in modal */
+#prov-logo-preview:hover {
+  border-color: var(--accent) !important;
+}
+#prov-logo-preview:empty::after {
+  content: '+';
+  font-size: 24px;
+  font-weight: 300;
+  color: var(--text-muted);
 }
 .prov-info { flex: 1; min-width: 0; }
 .prov-nombre {

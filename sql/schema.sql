@@ -241,3 +241,48 @@ begin
   end case;
 end;
 $$;
+
+
+-- ============================================================================
+-- STORAGE — Logos de proveedores
+-- IMPORTANTE: Ejecutar DESPUÉS de crear el bucket en el Dashboard de Supabase.
+--
+-- Pasos en el Dashboard:
+--   1. Storage → New Bucket → nombre: "provider-logos" → Public: ON → Create
+--   2. Luego ejecutar las políticas de abajo en el SQL Editor
+-- ============================================================================
+
+-- Permitir a usuarios autenticados subir logos a su propia carpeta (user_id/)
+drop policy if exists "Provider logos: upload own" on storage.objects;
+create policy "Provider logos: upload own"
+  on storage.objects for insert
+  with check (
+    bucket_id = 'provider-logos'
+    AND auth.role() = 'authenticated'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- Permitir actualizar (re-upload con upsert)
+drop policy if exists "Provider logos: update own" on storage.objects;
+create policy "Provider logos: update own"
+  on storage.objects for update
+  using (
+    bucket_id = 'provider-logos'
+    AND auth.role() = 'authenticated'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- Permitir borrar logos propios
+drop policy if exists "Provider logos: delete own" on storage.objects;
+create policy "Provider logos: delete own"
+  on storage.objects for delete
+  using (
+    bucket_id = 'provider-logos'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- Lectura pública (el bucket ya es público, pero la política lo hace explícito)
+drop policy if exists "Provider logos: public read" on storage.objects;
+create policy "Provider logos: public read"
+  on storage.objects for select
+  using (bucket_id = 'provider-logos');

@@ -908,6 +908,7 @@ h3 { font-size: 18px; }
   padding: 28px 24px;
   max-height: 92vh;
   overflow-y: auto;
+  overflow-x: hidden;
   backdrop-filter: blur(32px) saturate(1.3);
   -webkit-backdrop-filter: blur(32px) saturate(1.3);
   box-shadow: 0 -24px 80px rgba(0, 0, 0, 0.6);
@@ -1565,7 +1566,7 @@ h3 { font-size: 18px; }
 }
 .prod-ing-modal-row select, .ing-mat-sel {
   flex: 1;
-  min-width: 0;
+  min-width: 150px;
   padding: 8px 10px;
   background: var(--bg-elev2);
   border: 1px solid var(--border-hi);
@@ -1604,6 +1605,16 @@ h3 { font-size: 18px; }
   font-family: var(--f-sans);
 }
 .btn-icon-sm:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-border); }
+.prod-no-mat-warn {
+  padding: 12px 14px;
+  background: rgba(245,158,11,0.08);
+  border: 1px solid rgba(245,158,11,0.25);
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  color: var(--warn);
+  text-align: center;
+}
+.prod-no-mat-warn strong { color: var(--warn); }
 
 /* Stock desde pedido */
 .stock-ped-row {

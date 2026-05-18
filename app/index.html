@@ -451,9 +451,8 @@
 <!-- Modal: Actualizar stock desde pedido -->
 <div class="modal-overlay" id="modal-stock-pedido">
   <div class="modal" style="max-width:540px;">
-    <h3>Recibiste este pedido?</h3>
-    <p style="font-size:13px;color:var(--text-muted);margin:0 0 4px;">La IA detecta el tipo de producto (ignorando marca y presentación) y lo asigna a tu materia prima.</p>
-    <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Ej: <em>Harina 0000 Pureza 25kg</em> y <em>Harina 0000 Cañuelas</em> → ambas suman a "<strong>Harina 0000</strong>".</p>
+    <h3>¿Recibiste este pedido?</h3>
+    <p style="font-size:13px;color:var(--text-muted);margin:0 0 16px;">La IA detecta el tipo de producto e ignora marca y presentación. Las materias que no existan se crean automáticamente al actualizar.</p>
     <div id="stock-pedido-items" style="display:flex;flex-direction:column;gap:8px;max-height:380px;overflow-y:auto;padding-right:2px;"></div>
     <div class="modal-actions">
       <button class="btn" onclick="cerrarModalStockPedido()">Omitir</button>
@@ -2281,10 +2280,8 @@ function confirmarPedido() {
   renderHistorial();
   cambiarTab('historial');
   showToast('Pedido guardado en historial');
-  // Ofrecer actualizar stock de materias primas si hay alguna definida
-  if (getMaterias().length > 0) {
-    setTimeout(function() { ofrecerActualizarStockPedido(items); }, 400);
-  }
+  // Ofrecer actualizar/crear stock de materias primas al confirmar pedido
+  setTimeout(function() { ofrecerActualizarStockPedido(items); }, 400);
 }
 
 function renderHistorial() {
@@ -3050,7 +3047,9 @@ function abrirModalReceta(id) {
   document.getElementById('rec-nombre').value = receta ? receta.nombre : '';
   var container = document.getElementById('rec-ingredientes');
   container.innerHTML = '';
-  if (receta && receta.ingredientes && receta.ingredientes.length) {
+  if (!getMaterias().length) {
+    container.innerHTML = '<div class="prod-no-mat-warn">⚠️ Primero cargá materias primas en la pestaña <strong>Stock</strong>.</div>';
+  } else if (receta && receta.ingredientes && receta.ingredientes.length) {
     receta.ingredientes.forEach(function(ing) { agregarIngredienteModal(ing.materiaId, ing.cantidad); });
   } else {
     agregarIngredienteModal();
@@ -3206,16 +3205,29 @@ function renderStockPedRow(item, idx, tipoIA, autoMatch) {
   var unidadItem = (item.unidad || 'u').toLowerCase().replace(/[^a-z]/g, '');
   var factConv   = factorConvProd(unidadItem);
   var cantBase   = convertirABaseProd(item.qty, unidadItem);
+
+  // Determinar selección automática:
+  // autoMatch → seleccionar materia existente
+  // tipoIA sin match → seleccionar __nueva__ (se crea al guardar)
+  // ninguno → sin selección
+  var selectedId = autoMatch ? autoMatch.id : (tipoIA ? '__nueva__' : '');
+
   var opts = '<option value="">— No actualizar —</option>' +
     materias.map(function(m) {
-      return '<option value="' + m.id + '"' + (autoMatch && m.id === autoMatch.id ? ' selected' : '') + '>' +
+      return '<option value="' + m.id + '"' + (selectedId === m.id ? ' selected' : '') + '>' +
         escapeHtml(m.nombre) + ' (' + m.unidadBase + ')</option>';
     }).join('') +
-    '<option value="__nueva__">+ Crear materia prima…</option>';
+    '<option value="__nueva__"' + (selectedId === '__nueva__' ? ' selected' : '') + '>' +
+      '+ Crear "' + escapeHtml(tipoIA || 'nueva materia') + '"</option>';
+
   var tipoLabel = '';
-  if (tipoIA && tipoIA !== (item.productoLista || '')) {
-    tipoLabel = '<span class="spd-tipo-ia">🤖 tipo detectado: ' + escapeHtml(tipoIA) + '</span>';
+  if (tipoIA) {
+    var labelTxt = autoMatch
+      ? ('🤖 ' + escapeHtml(tipoIA))
+      : ('🤖 nueva: ' + escapeHtml(tipoIA));
+    tipoLabel = '<span class="spd-tipo-ia">' + labelTxt + '</span>';
   }
+
   return '<div class="stock-ped-row" id="spd-row-' + idx + '">' +
     '<div class="stock-ped-item-info">' +
       '<div class="stock-ped-nombre">' + escapeHtml(item.productoLista || '—') + tipoLabel + '</div>' +
@@ -3223,66 +3235,41 @@ function renderStockPedRow(item, idx, tipoIA, autoMatch) {
         (factConv > 1 ? ' → <strong>' + cantBase + (unidadItem === 'kg' ? 'g' : 'ml') + '</strong>' : '') +
       '</div>' +
     '</div>' +
-    '<select id="spd-mat-' + idx + '" class="stock-ped-sel" onchange="onSpdSelChange(' + idx + ',this)">' + opts + '</select>' +
+    '<select id="spd-mat-' + idx + '" class="stock-ped-sel" data-tipo-ia="' + escapeHtml(tipoIA || '') + '">' + opts + '</select>' +
   '</div>';
 }
 
-// Cuando el usuario elige "+ Crear materia prima..." en el dropdown
-function onSpdSelChange(idx, sel) {
-  if (sel.value !== '__nueva__') return;
-  var item     = pendingPedidoItems[idx];
-  var tipoIA   = (sel.getAttribute('data-tipo-ia') || '');
-  var nombre   = tipoIA || (item && item.productoLista) || '';
-  sel.value = ''; // resetear
-  cerrarModalStockPedido();
-  abrirModalMateria(null, nombre);
-}
-
 async function ofrecerActualizarStockPedido(items) {
-  var materias = getMaterias();
-  if (!materias.length || !items || !items.length) return;
+  if (!items || !items.length) return;
   pendingPedidoItems = items;
   var container = document.getElementById('stock-pedido-items');
   if (!container) return;
 
-  // Render inmediato con matching exacto por nombre
-  container.innerHTML = items.map(function(item, idx) {
-    var nombreNorm = (item.productoLista || '').toLowerCase().trim();
-    var autoMatch  = materias.find(function(m) { return m.nombre.toLowerCase().trim() === nombreNorm; });
-    return renderStockPedRow(item, idx, null, autoMatch);
-  }).join('');
+  // Mostrar modal inmediatamente con estado de carga
+  container.innerHTML = '<div style="text-align:center;padding:20px 0;color:var(--text-muted);font-size:13px;">🤖 Detectando tipos de productos…</div>';
   document.getElementById('modal-stock-pedido').classList.add('open');
 
-  // En background: llamar a la IA para detectar tipos y mejorar el matching
+  // Esperar normalización IA antes de renderizar las filas
   var nombres = items.map(function(it) { return it.productoLista || ''; }).filter(Boolean);
-  normalizarTiposProductoIA(nombres).then(function(tipos) {
-    if (!tipos || !Object.keys(tipos).length) return;
-    items.forEach(function(item, idx) {
-      // Buscar tipo IA para este item (clave exacta o lowercase)
-      var tipoIA = tipos[item.productoLista] || tipos[(item.productoLista || '').toLowerCase()] || null;
-      if (!tipoIA) return;
-      // Buscar materia fuzzy con el tipo normalizado
-      var autoMatch = buscarMateriaFuzzy(tipoIA, getMaterias());
-      // Solo actualizar la fila si el usuario aún no seleccionó nada
-      var sel = document.getElementById('spd-mat-' + idx);
-      if (!sel) return;
-      var seleccionActual = sel.value;
-      var newHtml = renderStockPedRow(item, idx, tipoIA, autoMatch);
-      var row = document.getElementById('spd-row-' + idx);
-      if (!row) return;
-      // Reemplazar fila con el tipo IA y el nuevo match
-      var tmp = document.createElement('div');
-      tmp.innerHTML = newHtml;
-      row.parentNode.replaceChild(tmp.firstChild, row);
-      // Si el usuario ya había seleccionado algo, restaurar su selección
-      var newSel = document.getElementById('spd-mat-' + idx);
-      if (newSel && seleccionActual && seleccionActual !== '' && seleccionActual !== '__nueva__') {
-        newSel.value = seleccionActual;
-      }
-      // Guardar tipo IA en el select para usarlo al crear materia prima
-      if (newSel && tipoIA) newSel.setAttribute('data-tipo-ia', tipoIA);
-    });
-  });
+  var tipos = {};
+  try { tipos = await normalizarTiposProductoIA(nombres); } catch(e) {}
+
+  var materias = getMaterias();
+
+  // Renderizar filas con resultado IA: match existente o auto-crear si detectó tipo
+  container.innerHTML = items.map(function(item, idx) {
+    var tipoIA = tipos[item.productoLista] || tipos[(item.productoLista || '').toLowerCase()] || null;
+    var autoMatch = null;
+    if (tipoIA) {
+      autoMatch = buscarMateriaFuzzy(tipoIA, materias);
+    }
+    // Fallback: matching exacto por nombre si la IA no detectó nada
+    if (!autoMatch && !tipoIA) {
+      var nombreNorm = (item.productoLista || '').toLowerCase().trim();
+      autoMatch = materias.find(function(m) { return m.nombre.toLowerCase().trim() === nombreNorm; }) || null;
+    }
+    return renderStockPedRow(item, idx, tipoIA, autoMatch);
+  }).join('');
 }
 
 function cerrarModalStockPedido() {
@@ -3290,22 +3277,54 @@ function cerrarModalStockPedido() {
   pendingPedidoItems = [];
 }
 
+// Infiere la unidad base según la unidad del pedido
+function inferirUnidadBase(unidad) {
+  var u = (unidad || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (u === 'kg' || u === 'kilo' || u === 'kilos') return 'g';
+  if (u === 'l' || u === 'lts' || u === 'litros' || u === 'litro' || u === 'lt') return 'ml';
+  if (u === 'g' || u === 'ml') return u;
+  return 'u';
+}
+
 function aplicarStockPedido() {
   var materias = getMaterias();
   var actualizados = 0;
+  var creados = 0;
+
   pendingPedidoItems.forEach(function(item, idx) {
     var sel = document.getElementById('spd-mat-' + idx);
-    if (!sel || !sel.value || sel.value === '__nueva__') return;
-    var mat = materias.find(function(m) { return m.id === sel.value; });
-    if (!mat) return;
+    if (!sel || !sel.value) return;
+
     var cantBase = convertirABaseProd(item.qty, item.unidad || 'u');
-    mat.stockActual += cantBase;
-    actualizados++;
+
+    if (sel.value === '__nueva__') {
+      // Crear nueva materia prima automáticamente con el tipo detectado por IA
+      var tipoIA = sel.getAttribute('data-tipo-ia') || item.productoLista || 'Sin nombre';
+      var unidadBase = inferirUnidadBase(item.unidad || 'u');
+      materias.push({
+        id: 'mat_' + Date.now() + '_' + idx,
+        nombre: tipoIA,
+        unidadBase: unidadBase,
+        stockActual: cantBase,
+        stockMinimo: 0
+      });
+      creados++;
+      actualizados++;
+    } else {
+      var mat = materias.find(function(m) { return m.id === sel.value; });
+      if (!mat) return;
+      mat.stockActual += cantBase;
+      actualizados++;
+    }
   });
+
   setMaterias(materias);
   cerrarModalStockPedido();
+
   if (actualizados > 0) {
-    showToast('✅ Stock actualizado (' + actualizados + ' materia' + (actualizados !== 1 ? 's primas' : ' prima') + ')');
+    var msg = '✅ Stock actualizado';
+    if (creados > 0) msg += ' · ' + creados + ' materia' + (creados !== 1 ? 's nuevas' : ' prima nueva') + ' creada' + (creados !== 1 ? 's' : '');
+    showToast(msg);
     var tabProd = document.getElementById('tab-produccion');
     if (tabProd && tabProd.classList.contains('active')) renderProduccion();
     renderProdAlertas();

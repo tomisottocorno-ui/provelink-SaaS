@@ -183,7 +183,7 @@
           <span style="font-size:16px;">📋</span> Productos y Recetas
         </button>
         <button class="prod-subtab" id="psub-producir" onclick="prodSubtab('producir')">
-          <span style="font-size:16px;">🏭</span> Producir
+          <span style="font-size:16px;">🏭</span> Hacer pedido a producción
         </button>
       </div>
 
@@ -207,11 +207,39 @@
         <div id="prod-recetas-lista"></div>
       </div>
 
-      <!-- Sub-panel: Producir -->
+      <!-- Sub-panel: Hacer pedido a producción -->
       <div id="prod-panel-producir" class="prod-panel">
-        <div id="prod-producir-grid"></div>
-        <div id="prod-log-section" style="margin-top:24px;">
-          <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;">Últimas producciones</div>
+        <!-- Estado 1: Armar pedido -->
+        <div id="prod-armar-pedido">
+          <div class="seccion-titulo" style="margin-top:0;padding-top:0;">
+            <h3 style="font-size:15px;font-weight:600;margin:0;">Armar pedido a producción</h3>
+          </div>
+          <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Indicá cuántas unidades querés producir de cada producto. Solo aparecen los que tienen receta cargada.</p>
+          <div id="prod-armar-lista"></div>
+          <div style="margin-top:20px;text-align:center;" id="prod-armar-footer">
+            <button class="btn primary" style="padding:12px 32px;font-size:15px;" onclick="confirmarPedidoProduccion()">✓ Confirmar pedido a producción</button>
+          </div>
+        </div>
+        <!-- Estado 2: Verificar producción -->
+        <div id="prod-verificar-pedido" style="display:none;">
+          <div class="seccion-titulo" style="margin-top:0;padding-top:0;">
+            <h3 style="font-size:15px;font-weight:600;margin:0;" id="prod-verif-titulo">Verificar producción</h3>
+            <button class="btn" onclick="editarPedidoProduccion()">✎ Editar pedido</button>
+          </div>
+          <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Ingresá lo que realmente se produjo y marcá el estado de cada producto.</p>
+          <div class="prod-verif-legend">
+            <span><span class="pv-dot ok"></span> Completo</span>
+            <span><span class="pv-dot falta"></span> Faltante</span>
+            <span><span class="pv-dot sin"></span> Sin verificar</span>
+          </div>
+          <div id="prod-verif-lista"></div>
+          <div style="margin-top:20px;text-align:center;">
+            <button class="btn primary" style="padding:12px 32px;font-size:15px;" onclick="registrarProduccion()">✅ Registrar producción y descontar stock</button>
+          </div>
+        </div>
+        <!-- Log de producciones -->
+        <div id="prod-log-section" style="margin-top:28px;">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px;">Últimas producciones registradas</div>
           <div id="prod-log-lista"></div>
         </div>
       </div>
@@ -2927,108 +2955,210 @@ function renderProdRecetas() {
   }).join('');
 }
 
-// ——— Sub-tab: Producir ———
+// ——— Sub-tab: Hacer pedido a producción ———
+var PROD_ORDEN_KEY = 'pl_orden_prod'; // orden de producción activa
+
+function getPedidoProd()  { try { return JSON.parse(localStorage.getItem(PROD_ORDEN_KEY) || 'null'); } catch(e) { return null; } }
+function setPedidoProd(v) { localStorage.setItem(PROD_ORDEN_KEY, JSON.stringify(v)); }
+
 function renderProdProducir() {
+  var orden = getPedidoProd();
+  if (orden && orden.items && orden.items.length) {
+    renderVerifProduccion(orden);
+  } else {
+    renderArmarPedidoProd();
+  }
+  renderProdLog();
+}
+
+// ——— Estado 1: Armar pedido ———
+function renderArmarPedidoProd() {
+  document.getElementById('prod-armar-pedido').style.display = '';
+  document.getElementById('prod-verificar-pedido').style.display = 'none';
+
   var recetas  = getRecetas();
   var materias = getMaterias();
-  var gridEl   = document.getElementById('prod-producir-grid');
-  var logEl    = document.getElementById('prod-log-lista');
-  if (!gridEl) return;
+  var listaEl  = document.getElementById('prod-armar-lista');
+  if (!listaEl) return;
 
   if (!recetas.length) {
-    gridEl.innerHTML = '<div class="empty"><div class="empty-emoji" style="font-size:40px;">🏭</div>' +
-      '<div class="empty-title">Sin recetas cargadas</div>' +
-      '<div class="empty-sub">Andá a la pestaña <strong>Recetas</strong> y cargá los productos primero</div></div>';
-  } else {
-    gridEl.innerHTML = recetas.map(function(r) {
-      var max  = calcularMaxProduccion(r);
-      var ingsDesglose = (r.ingredientes || []).map(function(ing) {
-        var mat = materias.find(function(m) { return m.id === ing.materiaId; });
-        if (!mat) return '';
-        var posibles = (mat.stockActual <= 0 || !ing.cantidad) ? 0 : Math.floor(mat.stockActual / ing.cantidad);
-        var esLimitante = (posibles === max && max < 20);
-        return '<div class="prod-ing-desglose' + (esLimitante ? ' limitante' : '') + '">' +
-          '<span>' + escapeHtml(mat.nombre) + '</span>' +
-          '<span class="prod-ing-calc">' +
-            fmtStock(mat.stockActual, mat.unidadBase) + ' ÷ ' + ing.cantidad + mat.unidadBase +
-            ' = <strong>' + posibles + '</strong>' +
-          '</span>' +
-        '</div>';
-      }).filter(Boolean).join('');
-
-      return '<div class="prod-producir-card">' +
-        '<div class="prod-prod-head">' +
-          '<div class="prod-prod-nombre">' + escapeHtml(r.nombre) + '</div>' +
-          '<div class="prod-prod-max' + (max === 0 ? ' cero' : max <= 10 ? ' bajo' : '') + '">' +
-            '<span class="prod-max-num">' + max + '</span>' +
-            '<span class="prod-max-lbl">unidades posibles</span>' +
-          '</div>' +
-        '</div>' +
-        (ingsDesglose ? '<div class="prod-ings-desglose">' + ingsDesglose + '</div>' : '') +
-        (max === 0
-          ? '<div class="prod-sin-stock">Sin stock suficiente para producir</div>'
-          : '<div class="prod-producir-form">' +
-              '<input type="number" id="prod-qty-' + r.id + '" class="prod-qty-input" min="1" max="' + max + '" value="1" placeholder="Unidades">' +
-              '<button class="btn primary" onclick="producirUnidades(\'' + r.id + '\')">Producir</button>' +
-            '</div>'
-        ) +
-      '</div>';
-    }).join('');
+    listaEl.innerHTML = '<div class="empty"><div class="empty-emoji" style="font-size:40px;">🏭</div>' +
+      '<div class="empty-title">Sin productos cargados</div>' +
+      '<div class="empty-sub">Andá a <strong>Productos y Recetas</strong> y cargá los productos primero.</div></div>';
+    document.getElementById('prod-armar-footer').style.display = 'none';
+    return;
   }
+  document.getElementById('prod-armar-footer').style.display = '';
 
-  // Render log
-  if (!logEl) return;
-  var log = getProdLog();
-  if (!log.length) {
-    logEl.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:8px 0;">Sin producciones registradas todavía</div>';
-  } else {
-    logEl.innerHTML = '<div class="prod-log-table">' +
-      log.slice(0, 30).map(function(e) {
-        return '<div class="prod-log-row">' +
-          '<span class="prod-log-nombre">' + escapeHtml(e.nombre) + '</span>' +
-          '<span class="prod-log-qty">−' + e.unidades + ' u.</span>' +
-          '<span class="prod-log-fecha">' + e.fecha + '</span>' +
-        '</div>';
-      }).join('') + '</div>';
+  listaEl.innerHTML = recetas.map(function(r) {
+    var max = calcularMaxProduccion(r);
+    var ingsHtml = (r.ingredientes || []).map(function(ing) {
+      var mat = materias.find(function(m) { return m.id === ing.materiaId; });
+      if (!mat) return '';
+      var posibles = (mat.stockActual <= 0 || !ing.cantidad) ? 0 : Math.floor(mat.stockActual / ing.cantidad);
+      var esLimitante = posibles === max && max < 999;
+      return '<div class="prod-ing-desglose' + (esLimitante ? ' limitante' : '') + '">' +
+        '<span>' + escapeHtml(mat.nombre) + '</span>' +
+        '<span class="prod-ing-calc">' +
+          fmtStock(mat.stockActual, mat.unidadBase) + ' ÷ ' + ing.cantidad + ' ' + mat.unidadBase +
+          ' = <strong>' + posibles + '</strong>' +
+        '</span>' +
+      '</div>';
+    }).filter(Boolean).join('');
+
+    return '<div class="prod-armar-card">' +
+      '<div class="prod-armar-head">' +
+        '<div class="prod-armar-nombre">' + escapeHtml(r.nombre) + '</div>' +
+        '<div class="prod-armar-max' + (max === 0 ? ' cero' : max <= 5 ? ' bajo' : '') + '">' +
+          'Máx: <strong>' + max + '</strong> u.' +
+        '</div>' +
+      '</div>' +
+      (ingsHtml ? '<div class="prod-ings-desglose">' + ingsHtml + '</div>' : '') +
+      '<div class="prod-armar-form">' +
+        '<label style="font-size:12px;color:var(--text-muted);">¿Cuántas unidades?</label>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<input type="number" id="prod-qty-' + r.id + '" class="prod-qty-input" min="0" max="' + max + '" value="" placeholder="0"' + (max === 0 ? ' disabled' : '') + '>' +
+          '<span style="font-size:12px;color:var(--text-muted);">/ ' + max + ' posibles</span>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function confirmarPedidoProduccion() {
+  var recetas = getRecetas();
+  var items = [];
+  recetas.forEach(function(r) {
+    var inp = document.getElementById('prod-qty-' + r.id);
+    var qty = parseInt(inp ? inp.value : 0) || 0;
+    if (qty > 0) {
+      var max = calcularMaxProduccion(r);
+      if (qty > max) { showToast('No hay stock para ' + qty + ' u. de "' + r.nombre + '" (máx: ' + max + ')'); return; }
+      items.push({ recetaId: r.id, nombre: r.nombre, qty: qty, producido: '', estado: 'sin' });
+    }
+  });
+  if (!items.length) { showToast('Ingresá al menos una cantidad'); return; }
+  var orden = {
+    fecha: new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+    timestamp: Date.now(),
+    items: items
+  };
+  setPedidoProd(orden);
+  renderVerifProduccion(orden);
+}
+
+// ——— Estado 2: Verificar producción ———
+function renderVerifProduccion(orden) {
+  document.getElementById('prod-armar-pedido').style.display = 'none';
+  document.getElementById('prod-verificar-pedido').style.display = '';
+  var tit = document.getElementById('prod-verif-titulo');
+  if (tit) tit.textContent = 'Verificar producción — ' + orden.fecha;
+
+  var listaEl = document.getElementById('prod-verif-lista');
+  if (!listaEl) return;
+
+  listaEl.innerHTML = orden.items.map(function(item, idx) {
+    var ec = item.estado === 'ok' ? 'ok' : item.estado === 'falta' ? 'falta' : 'sin';
+    var ei = item.estado === 'ok' ? '✓' : item.estado === 'falta' ? '✕' : '·';
+    return '<div class="prod-verif-row" id="pvrow-' + idx + '">' +
+      '<div class="pv-nombre">' + escapeHtml(item.nombre) + '</div>' +
+      '<div class="pv-pedido">Pedido: <strong>' + item.qty + ' u.</strong></div>' +
+      '<div class="pv-inputs">' +
+        '<input type="number" class="pv-inp" id="pv-real-' + idx + '" min="0" max="' + item.qty + '" ' +
+          'placeholder="Producido" value="' + (item.producido !== '' ? item.producido : '') + '" ' +
+          'oninput="actualizarVerifProd(' + idx + ', this.value)">' +
+        '<button class="pv-estado-btn ' + ec + '" id="pvbtn-' + idx + '" onclick="toggleVerifProd(' + idx + ')">' + ei + '</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function actualizarVerifProd(idx, valor) {
+  var orden = getPedidoProd();
+  if (!orden || !orden.items[idx]) return;
+  orden.items[idx].producido = valor;
+  var num = parseFloat(valor);
+  if (!isNaN(num) && num >= orden.items[idx].qty) orden.items[idx].estado = 'ok';
+  else if (!isNaN(num) && num >= 0) orden.items[idx].estado = 'falta';
+  else orden.items[idx].estado = 'sin';
+  setPedidoProd(orden);
+  var btn = document.getElementById('pvbtn-' + idx);
+  if (btn) {
+    btn.className = 'pv-estado-btn ' + orden.items[idx].estado;
+    btn.textContent = orden.items[idx].estado === 'ok' ? '✓' : orden.items[idx].estado === 'falta' ? '✕' : '·';
   }
 }
 
-// ——— Acción: Producir ———
-function producirUnidades(recetaId) {
-  var input = document.getElementById('prod-qty-' + recetaId);
-  var qty   = parseInt(input ? input.value : 0) || 0;
-  if (qty <= 0) { showToast('Ingresá la cantidad a producir'); return; }
+function toggleVerifProd(idx) {
+  var orden = getPedidoProd();
+  if (!orden || !orden.items[idx]) return;
+  var ciclo = { sin: 'ok', ok: 'falta', falta: 'sin' };
+  orden.items[idx].estado = ciclo[orden.items[idx].estado] || 'sin';
+  setPedidoProd(orden);
+  var btn = document.getElementById('pvbtn-' + idx);
+  if (btn) {
+    btn.className = 'pv-estado-btn ' + orden.items[idx].estado;
+    btn.textContent = orden.items[idx].estado === 'ok' ? '✓' : orden.items[idx].estado === 'falta' ? '✕' : '·';
+  }
+}
 
-  var receta = getRecetas().find(function(r) { return r.id === recetaId; });
-  if (!receta) return;
-  var max = calcularMaxProduccion(receta);
-  if (qty > max) { showToast('No hay stock suficiente (máx: ' + max + ')'); return; }
+function editarPedidoProduccion() {
+  if (!confirm('¿Volver a editar el pedido? Se perderán los datos de verificación.')) return;
+  setPedidoProd(null);
+  renderArmarPedidoProd();
+}
 
-  if (!confirm('¿Registrar producción de ' + qty + ' unidad' + (qty !== 1 ? 'es' : '') + ' de "' + receta.nombre + '"?')) return;
+function registrarProduccion() {
+  var orden = getPedidoProd();
+  if (!orden || !orden.items.length) return;
+  var alguno = orden.items.some(function(it) { return it.estado !== 'sin'; });
+  if (!alguno) { showToast('Marcá al menos un producto como producido'); return; }
+  if (!confirm('¿Registrar la producción y descontar el stock de materias primas?')) return;
 
-  // Deducir stock
+  var recetas  = getRecetas();
   var materias = getMaterias();
-  (receta.ingredientes || []).forEach(function(ing) {
-    var mat = materias.find(function(m) { return m.id === ing.materiaId; });
-    if (mat) mat.stockActual = Math.max(0, mat.stockActual - ing.cantidad * qty);
-  });
-  setMaterias(materias);
+  var log      = getProdLog();
 
-  // Guardar log
-  var log = getProdLog();
-  log.unshift({
-    id: Date.now().toString(),
-    recetaId: recetaId,
-    nombre: receta.nombre,
-    unidades: qty,
-    fecha: new Date().toLocaleDateString('es-AR'),
-    timestamp: Date.now()
+  orden.items.forEach(function(item) {
+    var producido = parseFloat(item.producido);
+    var qty = isNaN(producido) ? (item.estado === 'ok' ? item.qty : 0) : producido;
+    if (qty <= 0) return;
+    var receta = recetas.find(function(r) { return r.id === item.recetaId; });
+    if (!receta) return;
+    (receta.ingredientes || []).forEach(function(ing) {
+      var mat = materias.find(function(m) { return m.id === ing.materiaId; });
+      if (mat) mat.stockActual = Math.max(0, mat.stockActual - ing.cantidad * qty);
+    });
+    log.unshift({ id: Date.now().toString() + Math.random().toString(36).slice(2,5),
+      recetaId: item.recetaId, nombre: item.nombre,
+      unidades: qty, fecha: new Date().toLocaleDateString('es-AR'), timestamp: Date.now() });
   });
+
+  setMaterias(materias);
   if (log.length > 200) log = log.slice(0, 200);
   setProdLog(log);
+  setPedidoProd(null);
+  showToast('✅ Producción registrada — stock actualizado');
+  renderArmarPedidoProd();
+  renderProdLog();
+  renderProdAlertas();
+}
 
-  showToast('✅ Producción registrada: ' + qty + ' ' + receta.nombre);
-  renderProduccion();
+function renderProdLog() {
+  var el = document.getElementById('prod-log-lista');
+  if (!el) return;
+  var log = getProdLog();
+  if (!log.length) {
+    el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:16px 0;">Sin producciones registradas</div>';
+    return;
+  }
+  el.innerHTML = log.slice(0, 30).map(function(entry) {
+    return '<div class="prod-log-row">' +
+      '<span class="prod-log-nombre">' + (entry.nombre || '—') + '</span>' +
+      '<span class="prod-log-qty">' + (entry.unidades || 0) + ' u</span>' +
+      '<span class="prod-log-fecha">' + (entry.fecha || '') + '</span>' +
+    '</div>';
+  }).join('');
 }
 
 // ——— Modal: Materia prima ———

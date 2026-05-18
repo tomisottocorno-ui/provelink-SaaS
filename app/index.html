@@ -450,13 +450,14 @@
 
 <!-- Modal: Actualizar stock desde pedido -->
 <div class="modal-overlay" id="modal-stock-pedido">
-  <div class="modal" style="max-width:520px;">
-    <h3>Actualizar stock de materias primas</h3>
-    <p style="font-size:13px;color:var(--text-muted);margin:0 0 16px;">Seleccioná los ítems del pedido que recibiste y asignales la materia prima correspondiente.</p>
-    <div id="stock-pedido-items" style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto;"></div>
+  <div class="modal" style="max-width:540px;">
+    <h3>Recibiste este pedido?</h3>
+    <p style="font-size:13px;color:var(--text-muted);margin:0 0 4px;">La IA detecta el tipo de producto (ignorando marca y presentación) y lo asigna a tu materia prima.</p>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Ej: <em>Harina 0000 Pureza 25kg</em> y <em>Harina 0000 Cañuelas</em> → ambas suman a "<strong>Harina 0000</strong>".</p>
+    <div id="stock-pedido-items" style="display:flex;flex-direction:column;gap:8px;max-height:380px;overflow-y:auto;padding-right:2px;"></div>
     <div class="modal-actions">
       <button class="btn" onclick="cerrarModalStockPedido()">Omitir</button>
-      <button class="btn primary" onclick="aplicarStockPedido()">Actualizar stock</button>
+      <button class="btn primary" onclick="aplicarStockPedido()">✅ Actualizar stock</button>
     </div>
   </div>
 </div>
@@ -2959,14 +2960,15 @@ function producirUnidades(recetaId) {
 }
 
 // ——— Modal: Materia prima ———
-function abrirModalMateria(id) {
+// nombreDefault: pre-rellena el campo nombre (usado al crear desde el modal de pedido)
+function abrirModalMateria(id, nombreDefault) {
   prodMateriaEditId = id || null;
   var mat = id ? getMaterias().find(function(m) { return m.id === id; }) : null;
   var $t = document.getElementById('modal-materia-titulo');
   if ($t) $t.textContent = id ? 'Editar materia prima' : 'Nueva materia prima';
-  document.getElementById('mat-nombre').value  = mat ? mat.nombre       : '';
-  document.getElementById('mat-unidad').value  = mat ? mat.unidadBase   : 'g';
-  document.getElementById('mat-stock').value   = mat ? mat.stockActual  : '';
+  document.getElementById('mat-nombre').value   = mat ? mat.nombre : (nombreDefault || '');
+  document.getElementById('mat-unidad').value   = mat ? mat.unidadBase   : 'g';
+  document.getElementById('mat-stock').value    = mat ? mat.stockActual  : '';
   document.getElementById('mat-minstock').value = mat && mat.stockMinimo > 0 ? mat.stockMinimo : '';
   var btnBorrar = document.getElementById('btn-borrar-materia');
   if (btnBorrar) btnBorrar.style.display = id ? '' : 'none';
@@ -3137,41 +3139,150 @@ function borrarReceta() {
 }
 
 // ——— Actualizar stock desde pedido confirmado ———
-function ofrecerActualizarStockPedido(items) {
+
+// Llama a la IA para detectar el TIPO de producto (sin marca ni presentación).
+// Devuelve { "nombre original": "tipo normalizado", ... }
+async function normalizarTiposProductoIA(nombres) {
+  if (!nombres || !nombres.length) return {};
+  try {
+    var sd = await supabase.auth.getSession();
+    var token = sd.data && sd.data.session && sd.data.session.access_token;
+    if (!token) return {};
+    var lista = nombres.slice(0, 30).map(function(n, i) { return (i + 1) + '. ' + n; }).join('\n');
+    var resp = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({
+        tipo: 'expandir_query',
+        max_tokens: 500,
+        messages: [{
+          role: 'user',
+          content:
+            'Para cada ítem de esta lista de precios de proveedor, extraé el TIPO de producto ' +
+            '(sin marca, sin tamaño/presentación).\n' +
+            'Reglas clave:\n' +
+            '- Ignorá marcas: Cañuelas, Pureza, Hellman\'s, Natura, La Serenísima, Molinos, etc.\n' +
+            '- Ignorá presentaciones: kg, g, ml, L, x6, caja, bolsa, sachet, etc.\n' +
+            '- Conservá el tipo/grado SI es relevante para diferenciarlo: ' +
+            '  "0000" vs "000" son harinas distintas; "leudante" vs "integral" son distintas; ' +
+            '  "descremada" vs "entera" son distintas; "light" vs normal son distintas.\n' +
+            '- Hellman\'s mayonesa = Natura mayonesa = "Mayonesa" (mismo producto, distinta marca).\n' +
+            '- Harina 0000 Pureza = Harina 0000 Cañuelas = "Harina 0000" (mismo tipo).\n' +
+            '- Harina 000 ≠ Harina 0000 (son tipos distintos, conservalos diferentes).\n\n' +
+            'Respondé ÚNICAMENTE con JSON válido: {"nombre original": "tipo", ...}\n\n' +
+            'Ítems:\n' + lista
+        }]
+      })
+    });
+    if (!resp.ok) return {};
+    var data = await resp.json();
+    var texto = (data.content && data.content[0] && data.content[0].text) || '';
+    var match = texto.match(/\{[\s\S]*?\}/);
+    if (!match) return {};
+    return JSON.parse(match[0]);
+  } catch(e) {
+    console.warn('[normalizarTiposProductoIA]', e);
+    return {};
+  }
+}
+
+// Busca materia prima por nombre con tolerancia: exacto → contiene → contenido por
+function buscarMateriaFuzzy(nombreBuscado, materias) {
+  var norm = function(s) { return (s || '').toLowerCase().replace(/\s+/g, ' ').trim(); };
+  var nb = norm(nombreBuscado);
+  if (!nb) return null;
+  var exact = materias.find(function(m) { return norm(m.nombre) === nb; });
+  if (exact) return exact;
+  var contains = materias.find(function(m) {
+    var mn = norm(m.nombre);
+    return mn.indexOf(nb) >= 0 || nb.indexOf(mn) >= 0;
+  });
+  return contains || null;
+}
+
+// Genera el HTML de una fila del modal stock-pedido
+function renderStockPedRow(item, idx, tipoIA, autoMatch) {
+  var materias = getMaterias();
+  var unidadItem = (item.unidad || 'u').toLowerCase().replace(/[^a-z]/g, '');
+  var factConv   = factorConvProd(unidadItem);
+  var cantBase   = convertirABaseProd(item.qty, unidadItem);
+  var opts = '<option value="">— No actualizar —</option>' +
+    materias.map(function(m) {
+      return '<option value="' + m.id + '"' + (autoMatch && m.id === autoMatch.id ? ' selected' : '') + '>' +
+        escapeHtml(m.nombre) + ' (' + m.unidadBase + ')</option>';
+    }).join('') +
+    '<option value="__nueva__">+ Crear materia prima…</option>';
+  var tipoLabel = '';
+  if (tipoIA && tipoIA !== (item.productoLista || '')) {
+    tipoLabel = '<span class="spd-tipo-ia">🤖 tipo detectado: ' + escapeHtml(tipoIA) + '</span>';
+  }
+  return '<div class="stock-ped-row" id="spd-row-' + idx + '">' +
+    '<div class="stock-ped-item-info">' +
+      '<div class="stock-ped-nombre">' + escapeHtml(item.productoLista || '—') + tipoLabel + '</div>' +
+      '<div class="stock-ped-qty">' + item.qty + ' ' + (item.unidad || '') +
+        (factConv > 1 ? ' → <strong>' + cantBase + (unidadItem === 'kg' ? 'g' : 'ml') + '</strong>' : '') +
+      '</div>' +
+    '</div>' +
+    '<select id="spd-mat-' + idx + '" class="stock-ped-sel" onchange="onSpdSelChange(' + idx + ',this)">' + opts + '</select>' +
+  '</div>';
+}
+
+// Cuando el usuario elige "+ Crear materia prima..." en el dropdown
+function onSpdSelChange(idx, sel) {
+  if (sel.value !== '__nueva__') return;
+  var item     = pendingPedidoItems[idx];
+  var tipoIA   = (sel.getAttribute('data-tipo-ia') || '');
+  var nombre   = tipoIA || (item && item.productoLista) || '';
+  sel.value = ''; // resetear
+  cerrarModalStockPedido();
+  abrirModalMateria(null, nombre);
+}
+
+async function ofrecerActualizarStockPedido(items) {
   var materias = getMaterias();
   if (!materias.length || !items || !items.length) return;
   pendingPedidoItems = items;
-
   var container = document.getElementById('stock-pedido-items');
   if (!container) return;
 
+  // Render inmediato con matching exacto por nombre
   container.innerHTML = items.map(function(item, idx) {
-    var unidadItem  = (item.unidad || 'u').toLowerCase().replace(/[^a-z]/g, '');
-    var factConv    = factorConvProd(unidadItem);
-    var cantBase    = convertirABaseProd(item.qty, unidadItem);
-    // Auto-match por nombre exacto
-    var nombreNorm  = (item.productoLista || '').toLowerCase().trim();
-    var autoMatch   = materias.find(function(m) {
-      return m.nombre.toLowerCase().trim() === nombreNorm;
-    });
-    var opts = '<option value="">— No actualizar —</option>' +
-      materias.map(function(m) {
-        return '<option value="' + m.id + '"' + (autoMatch && m.id === autoMatch.id ? ' selected' : '') + '>' +
-          escapeHtml(m.nombre) + ' (' + m.unidadBase + ')</option>';
-      }).join('');
-
-    return '<div class="stock-ped-row">' +
-      '<div class="stock-ped-item-info">' +
-        '<div class="stock-ped-nombre">' + escapeHtml(item.productoLista || '—') + '</div>' +
-        '<div class="stock-ped-qty">' + item.qty + ' ' + (item.unidad || '') +
-          (factConv > 1 ? ' → <strong>' + cantBase + (unidadItem === 'kg' ? 'g' : 'ml') + '</strong>' : '') +
-        '</div>' +
-      '</div>' +
-      '<select id="spd-mat-' + idx + '" class="stock-ped-sel">' + opts + '</select>' +
-    '</div>';
+    var nombreNorm = (item.productoLista || '').toLowerCase().trim();
+    var autoMatch  = materias.find(function(m) { return m.nombre.toLowerCase().trim() === nombreNorm; });
+    return renderStockPedRow(item, idx, null, autoMatch);
   }).join('');
-
   document.getElementById('modal-stock-pedido').classList.add('open');
+
+  // En background: llamar a la IA para detectar tipos y mejorar el matching
+  var nombres = items.map(function(it) { return it.productoLista || ''; }).filter(Boolean);
+  normalizarTiposProductoIA(nombres).then(function(tipos) {
+    if (!tipos || !Object.keys(tipos).length) return;
+    items.forEach(function(item, idx) {
+      // Buscar tipo IA para este item (clave exacta o lowercase)
+      var tipoIA = tipos[item.productoLista] || tipos[(item.productoLista || '').toLowerCase()] || null;
+      if (!tipoIA) return;
+      // Buscar materia fuzzy con el tipo normalizado
+      var autoMatch = buscarMateriaFuzzy(tipoIA, getMaterias());
+      // Solo actualizar la fila si el usuario aún no seleccionó nada
+      var sel = document.getElementById('spd-mat-' + idx);
+      if (!sel) return;
+      var seleccionActual = sel.value;
+      var newHtml = renderStockPedRow(item, idx, tipoIA, autoMatch);
+      var row = document.getElementById('spd-row-' + idx);
+      if (!row) return;
+      // Reemplazar fila con el tipo IA y el nuevo match
+      var tmp = document.createElement('div');
+      tmp.innerHTML = newHtml;
+      row.parentNode.replaceChild(tmp.firstChild, row);
+      // Si el usuario ya había seleccionado algo, restaurar su selección
+      var newSel = document.getElementById('spd-mat-' + idx);
+      if (newSel && seleccionActual && seleccionActual !== '' && seleccionActual !== '__nueva__') {
+        newSel.value = seleccionActual;
+      }
+      // Guardar tipo IA en el select para usarlo al crear materia prima
+      if (newSel && tipoIA) newSel.setAttribute('data-tipo-ia', tipoIA);
+    });
+  });
 }
 
 function cerrarModalStockPedido() {
@@ -3184,7 +3295,7 @@ function aplicarStockPedido() {
   var actualizados = 0;
   pendingPedidoItems.forEach(function(item, idx) {
     var sel = document.getElementById('spd-mat-' + idx);
-    if (!sel || !sel.value) return;
+    if (!sel || !sel.value || sel.value === '__nueva__') return;
     var mat = materias.find(function(m) { return m.id === sel.value; });
     if (!mat) return;
     var cantBase = convertirABaseProd(item.qty, item.unidad || 'u');

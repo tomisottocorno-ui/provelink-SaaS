@@ -1577,19 +1577,38 @@ h3 { font-size: 18px; }
   font-size: 13px;
   font-family: var(--f-sans);
 }
-.ing-qty-inp {
-  width: 90px;
+.ing-qty-group {
+  display: flex;
+  align-items: center;
   flex-shrink: 0;
-  padding: 8px 10px;
-  background: var(--bg-elev2);
   border: 1px solid var(--border-hi);
   border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--bg-elev2);
+}
+.ing-qty-inp {
+  width: 80px;
+  padding: 8px 8px;
+  background: transparent;
+  border: none;
   color: var(--text);
   font-size: 13px;
   font-family: var(--f-sans);
-  text-align: center;
+  text-align: right;
+  outline: none;
 }
-.ing-unit-lbl { min-width: 28px; font-size: 12px; color: var(--text-muted); text-align: center; flex-shrink: 0; }
+.ing-unit-lbl {
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--bg-elev3);
+  border-left: 1px solid var(--border-hi);
+  min-width: 32px;
+  text-align: center;
+  line-height: 36px;
+  flex-shrink: 0;
+}
 .btn-icon-sm {
   width: 28px;
   height: 28px;

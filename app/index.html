@@ -180,7 +180,7 @@
           <span style="font-size:16px;">📦</span> Stock
         </button>
         <button class="prod-subtab" id="psub-recetas" onclick="prodSubtab('recetas')">
-          <span style="font-size:16px;">📋</span> Recetas
+          <span style="font-size:16px;">📋</span> Productos y Recetas
         </button>
         <button class="prod-subtab" id="psub-producir" onclick="prodSubtab('producir')">
           <span style="font-size:16px;">🏭</span> Producir
@@ -197,13 +197,13 @@
         <div id="prod-stock-lista"></div>
       </div>
 
-      <!-- Sub-panel: Recetas -->
+      <!-- Sub-panel: Productos y Recetas -->
       <div id="prod-panel-recetas" class="prod-panel">
         <div class="seccion-titulo" style="margin-top:0;padding-top:0;">
-          <h3 style="font-size:15px;font-weight:600;margin:0;">Recetas de producción</h3>
-          <button class="btn primary" onclick="abrirModalReceta()"><span class="icon-slot" data-icon="plus"></span> Nueva</button>
+          <h3 style="font-size:15px;font-weight:600;margin:0;">Productos y Recetas</h3>
+          <button class="btn primary" onclick="abrirModalReceta()"><span class="icon-slot" data-icon="plus"></span> Nuevo producto</button>
         </div>
-        <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Definí qué materias primas y qué cantidad usa cada producto que fabricás.</p>
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Definí tus productos con su receta: qué ingredientes usan y en qué cantidad (en g o ml por unidad producida).</p>
         <div id="prod-recetas-lista"></div>
       </div>
 
@@ -427,16 +427,16 @@
   </div>
 </div>
 
-<!-- Modal: Receta -->
+<!-- Modal: Producto / Receta -->
 <div class="modal-overlay" id="modal-receta">
   <div class="modal" style="max-width:560px;">
-    <h3 id="modal-receta-titulo">Nueva receta</h3>
+    <h3 id="modal-receta-titulo">Nuevo producto</h3>
     <div class="form-row">
       <label for="rec-nombre">Nombre del producto *</label>
       <input type="text" id="rec-nombre" placeholder="Ej: Pan francés, Medialunas, Facturas">
     </div>
     <div class="form-row">
-      <label>Ingredientes <span style="font-size:11px;color:var(--text-muted);text-transform:none;">(cantidad por unidad producida)</span></label>
+      <label>Ingredientes <span style="font-size:11px;color:var(--text-muted);text-transform:none;">— cantidad por unidad producida, en g o ml</span></label>
       <div id="rec-ingredientes" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;"></div>
       <button class="btn" type="button" style="font-size:12px;padding:7px 14px;" onclick="agregarIngredienteModal()">+ Agregar ingrediente</button>
     </div>
@@ -3118,7 +3118,7 @@ function abrirModalReceta(id) {
   prodIngCount = 0;
   var receta = id ? getRecetas().find(function(r) { return r.id === id; }) : null;
   var $t = document.getElementById('modal-receta-titulo');
-  if ($t) $t.textContent = id ? 'Editar receta' : 'Nueva receta';
+  if ($t) $t.textContent = id ? 'Editar producto' : 'Nuevo producto';
   document.getElementById('rec-nombre').value = receta ? receta.nombre : '';
   var container = document.getElementById('rec-ingredientes');
   container.innerHTML = '';
@@ -3148,23 +3148,31 @@ function agregarIngredienteModal(materiaId, cantidad) {
   var options = '<option value="">— Materia prima —</option>' +
     materias.map(function(m) {
       return '<option value="' + m.id + '"' + (m.id === materiaId ? ' selected' : '') + '>' +
-        escapeHtml(m.nombre) + ' (' + m.unidadBase + ')</option>';
+        escapeHtml(m.nombre) + '</option>';
     }).join('');
-  var unitLabel = '';
-  if (materiaId) {
-    var mat = materias.find(function(m) { return m.id === materiaId; });
-    if (mat) unitLabel = mat.unidadBase;
-  }
+  var mat = materiaId ? materias.find(function(m) { return m.id === materiaId; }) : null;
+  var unitLabel = mat ? mat.unidadBase : '';
+  var stepVal = (unitLabel === 'g' || unitLabel === 'ml') ? '1' : '0.1';
+  var placeholder = unitLabel ? 'ej: 250 ' + unitLabel : 'cantidad';
+
   div.innerHTML =
     '<select class="ing-mat-sel" id="ing-mat-' + idx + '">' + options + '</select>' +
-    '<input type="number" class="ing-qty-inp" id="ing-qty-' + idx + '" placeholder="Cantidad" min="0.1" step="0.1" value="' + (cantidad || '') + '">' +
-    '<span class="ing-unit-lbl" id="ing-unit-' + idx + '">' + unitLabel + '</span>' +
+    '<div class="ing-qty-group">' +
+      '<input type="number" class="ing-qty-inp" id="ing-qty-' + idx + '" placeholder="' + placeholder + '" min="0" step="' + stepVal + '" value="' + (cantidad || '') + '">' +
+      '<span class="ing-unit-lbl" id="ing-unit-' + idx + '">' + unitLabel + '</span>' +
+    '</div>' +
     '<button class="btn-icon-sm" type="button" onclick="quitarIngredienteModal(\'' + idx + '\')" title="Quitar">✕</button>';
-  // Actualizar label de unidad al cambiar selección
+
   div.querySelector('select').addEventListener('change', function() {
     var mat2 = getMaterias().find(function(m) { return m.id === this.value; }.bind(this));
     var lbl = document.getElementById('ing-unit-' + idx);
-    if (lbl) lbl.textContent = mat2 ? mat2.unidadBase : '';
+    var inp = document.getElementById('ing-qty-' + idx);
+    var u = mat2 ? mat2.unidadBase : '';
+    if (lbl) lbl.textContent = u;
+    if (inp) {
+      inp.step = (u === 'g' || u === 'ml') ? '1' : '0.1';
+      inp.placeholder = u ? 'ej: 250 ' + u : 'cantidad';
+    }
   });
   document.getElementById('rec-ingredientes').appendChild(div);
 }

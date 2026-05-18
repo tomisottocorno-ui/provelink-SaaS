@@ -3185,16 +3185,28 @@ async function normalizarTiposProductoIA(nombres) {
   }
 }
 
-// Busca materia prima por nombre con tolerancia: exacto → contiene → contenido por
+// Busca materia prima por nombre con tolerancia: exacto → contiene (con límite de palabra)
+// El límite de palabra evita que "harina 000" haga match con "harina 0000".
 function buscarMateriaFuzzy(nombreBuscado, materias) {
   var norm = function(s) { return (s || '').toLowerCase().replace(/\s+/g, ' ').trim(); };
+  var wordEnd = function(str, pos, len) {
+    // Verdadero si la subcadena termina en límite de palabra (espacio o fin de string)
+    var after = str[pos + len];
+    return after === undefined || after === ' ';
+  };
   var nb = norm(nombreBuscado);
   if (!nb) return null;
   var exact = materias.find(function(m) { return norm(m.nombre) === nb; });
   if (exact) return exact;
   var contains = materias.find(function(m) {
     var mn = norm(m.nombre);
-    return mn.indexOf(nb) >= 0 || nb.indexOf(mn) >= 0;
+    // mn contiene nb: "harina 0000" dentro de algún nombre más largo
+    var i = mn.indexOf(nb);
+    if (i >= 0 && wordEnd(mn, i, nb.length)) return true;
+    // nb contiene mn: "harina 000" dentro del término buscado "harina 0000" → bloqueado por wordEnd
+    var j = nb.indexOf(mn);
+    if (j >= 0 && wordEnd(nb, j, mn.length)) return true;
+    return false;
   });
   return contains || null;
 }

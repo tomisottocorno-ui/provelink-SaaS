@@ -2723,27 +2723,20 @@ function fmtStock(valor, unidad) {
   return v + ' ' + unidad;
 }
 
-// Formato dual: muestra unidad grande y pequeña simultáneamente.
-// 5000g → "5 kg / 5000 g" | 500g → "500 g" | 1500ml → "1.5 L / 1500 ml" | 42u → "42 u"
+// Formato dual: siempre muestra la unidad grande (kg/L) y la pequeña (g/ml).
+// 5000g → "5 kg / 5000 g" | 500g → "0.5 kg / 500 g" | 42u → "42 u"
 function fmtStockDual(valor, unidad) {
   var v = parseFloat(valor) || 0;
   if (unidad === 'g') {
     var g = Math.round(v);
-    if (v >= 1000) {
-      var kg = v / 1000;
-      var kgStr = (Number.isInteger(kg) ? kg : parseFloat(kg.toFixed(2))) + ' kg';
-      return kgStr + ' <span class="stock-unit-small">/ ' + g.toLocaleString('es-AR') + ' g</span>';
-    }
-    return g + ' g';
+    var kg = parseFloat((v / 1000).toFixed(3));
+    var kgStr = Number.isInteger(kg) ? kg : kg;
+    return kgStr + ' kg <span class="stock-unit-small">/ ' + g.toLocaleString('es-AR') + ' g</span>';
   }
   if (unidad === 'ml') {
     var ml = Math.round(v);
-    if (v >= 1000) {
-      var l = v / 1000;
-      var lStr = (Number.isInteger(l) ? l : parseFloat(l.toFixed(2))) + ' L';
-      return lStr + ' <span class="stock-unit-small">/ ' + ml.toLocaleString('es-AR') + ' ml</span>';
-    }
-    return ml + ' ml';
+    var l = parseFloat((v / 1000).toFixed(3));
+    return l + ' L <span class="stock-unit-small">/ ' + ml.toLocaleString('es-AR') + ' ml</span>';
   }
   return (Number.isInteger(v) ? v : parseFloat(v.toFixed(2))) + ' u';
 }

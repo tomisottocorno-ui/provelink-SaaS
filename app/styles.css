@@ -763,6 +763,7 @@ h3 { font-size: 18px; }
   outline: none;
 }
 .preview-fila input.nombre { flex: 1; min-width: 0; }
+.preview-fila input.unidad-input { width: 90px; }
 .preview-fila input.precio { width: 110px; text-align: right; font-variant-numeric: tabular-nums; }
 .preview-fila .btn-icon { width: 28px; height: 28px; padding: 0; }
 

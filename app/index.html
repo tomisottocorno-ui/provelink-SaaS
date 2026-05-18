@@ -654,7 +654,7 @@ function abrirModalLista(proveedorId) {
       sel.value = proveedorId;
       sel.disabled = true;
       filasPreview = (lista.items || []).map(function(it) {
-        return { productoLista: it.productoLista, precio: parseFloat(it.precio) };
+        return { productoLista: it.productoLista, precio: parseFloat(it.precio), unidad: it.unidad || '' };
       });
       $('modal-lista-titulo').textContent = 'Editar lista de precios';
       $('btn-eliminar-lista').style.display = 'inline-flex';
@@ -768,7 +768,7 @@ async function procesarImagen(file) {
 
   var base64 = await fileToBase64(file);
   var proveedorId = $('lista-prov-select').value;
-  var prompt = 'Esta imagen es una lista de precios de un proveedor. Extrae cada producto con su precio.\n\nFORMATO DE RESPUESTA OBLIGATORIO:\n- Tu respuesta debe ser ÚNICAMENTE un array JSON válido.\n- Empezá con [ y terminá con ]\n- NO incluyas texto explicativo antes ni después.\n- NO uses markdown ni bloques de código.\n- Cada elemento debe tener exactamente: {"nombre": "...", "precio": numero}\n- Mantené nombres COMPLETOS (marca, presentación, tamaño del envase)\n- precio es número con punto decimal: 9644.07\n- Ignorá encabezados, totales, fechas y filas que no sean productos';
+  var prompt = 'Esta imagen es una lista de precios de un proveedor. Extrae cada producto con su precio y unidad.\n\nFORMATO DE RESPUESTA OBLIGATORIO:\n- Tu respuesta debe ser ÚNICAMENTE un array JSON válido.\n- Empezá con [ y terminá con ]\n- NO incluyas texto explicativo antes ni después.\n- NO uses markdown ni bloques de código.\n- Cada elemento: {"nombre": "...", "precio": numero, "unidad": "..."}\n- nombre: nombre COMPLETO del producto (marca, variedad)\n- precio: número decimal (ej: 9644.07)\n- unidad: tamaño/presentación (ej: "5 kg", "500 g", "1 lt", "250 ml"). Si está en el nombre igual extraéla. Si no hay info de cantidad, usá ""\n- Ignorá encabezados, totales, fechas y filas que no sean productos';
 
   var items = await llamarClaudeProcesarLista({
     tipo: 'procesar_lista',
@@ -786,7 +786,7 @@ async function procesarImagen(file) {
   filasPreview = items
     .filter(function(it) { return it.nombre && it.precio > 0; })
     .map(function(it) {
-      return { productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio) };
+      return { productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim() };
     });
 
   loading.style.display = 'none';
@@ -947,7 +947,7 @@ async function procesarPDFConColumna(lineas, nombreColumna) {
     }
     items.forEach(function(it) {
       if (it.nombre && it.precio > 0) {
-        filasPreview.push({ productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio) });
+        filasPreview.push({ productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim() });
       }
     });
     renderPreview();
@@ -967,7 +967,7 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna) {
   var textoCrudo = chunkLineas.join('\n');
   // Si el texto es muy largo, reducir a 20000 chars (unas 60-80 líneas = seguro)
   if (textoCrudo.length > 20000) textoCrudo = textoCrudo.slice(0, 20000);
-  var prompt = 'Texto crudo de una lista de precios. Extraé el nombre del producto y EL PRECIO de la columna "' + nombreColumna + '".\n\nDevolvé EXCLUSIVAMENTE un array JSON sin texto adicional:\n[{"nombre":"...","precio":numero}, ...]\n\n- Nombres COMPLETOS (marca, presentación, tamaño)\n- precio solo número decimal (ej: 9644.07)\n- Ignorá encabezados, totales, líneas vacías\n- Incluí TODOS los productos, sin omitir ninguno\n\nTexto:\n\n' + textoCrudo;
+  var prompt = 'Texto crudo de una lista de precios. Extraé nombre, precio y unidad de medida/presentación.\n\nDevolvé EXCLUSIVAMENTE un array JSON sin texto adicional:\n[{"nombre":"...","precio":numero,"unidad":"..."}, ...]\n\n- nombre: nombre COMPLETO del producto (marca, variedad)\n- precio: de la columna "' + nombreColumna + '", solo número decimal (ej: 9644.07)\n- unidad: tamaño/presentación del envase (ej: "5 kg", "500 g", "1 lt", "250 ml", "10 u"). Si está en el nombre del producto extraéla igual. Si no hay info de cantidad, usá ""\n- Ignorá encabezados, totales, líneas vacías\n- Incluí TODOS los productos sin omitir ninguno\n\nTexto:\n\n' + textoCrudo;
   var proveedorId = $('lista-prov-select').value;
   var resp = await fetch('/api/claude', {
     method: 'POST',
@@ -1063,8 +1063,9 @@ function renderPreview() {
   var html = '';
   filasPreview.forEach(function(it, idx) {
     html += '<div class="preview-fila">' +
-      '<input type="text" class="nombre" value="' + escapeHtmlAttr(it.productoLista) + '" oninput="editarFilaPreview(' + idx + ', this.value, null)">' +
-      '<input type="number" step="0.01" class="precio" value="' + it.precio + '" oninput="editarFilaPreview(' + idx + ', null, this.value)">' +
+      '<input type="text" class="nombre" value="' + escapeHtmlAttr(it.productoLista) + '" oninput="editarFilaPreview(' + idx + ',\'nombre\',this.value)" placeholder="Nombre">' +
+      '<input type="text" class="unidad-input" value="' + escapeHtmlAttr(it.unidad || '') + '" oninput="editarFilaPreview(' + idx + ',\'unidad\',this.value)" placeholder="Ej: 1 kg">' +
+      '<input type="number" step="0.01" class="precio" value="' + it.precio + '" oninput="editarFilaPreview(' + idx + ',\'precio\',this.value)">' +
       '<button class="btn-icon" onclick="borrarFilaPreview(' + idx + ')" title="Borrar">' + Icon.trash() + '</button>' +
     '</div>';
   });
@@ -1073,10 +1074,11 @@ function renderPreview() {
   $('btn-guardar-lista').disabled = false;
 }
 
-function editarFilaPreview(idx, nombre, precio) {
-  if (nombre !== null) filasPreview[idx].productoLista = nombre;
-  if (precio !== null) {
-    var p = parseFloat(precio);
+function editarFilaPreview(idx, campo, valor) {
+  if (campo === 'nombre') filasPreview[idx].productoLista = valor;
+  else if (campo === 'unidad') filasPreview[idx].unidad = valor;
+  else if (campo === 'precio') {
+    var p = parseFloat(valor);
     filasPreview[idx].precio = isNaN(p) ? 0 : p;
   }
 }
@@ -1933,7 +1935,7 @@ function construirContextoIA() {
     ctx += '\n--- ' + (prov ? prov.nombre : '?') + ' (' + items.length + ' prod, actualizada ' + fecha + ') ---\n';
     // Máximo 400 items por lista para mantener tokens razonables
     items.slice(0, 400).forEach(function(it) {
-      ctx += it.productoLista + ' | $' + it.precio + '\n';
+      ctx += it.productoLista + (it.unidad ? ' [' + it.unidad + ']' : '') + ' | $' + it.precio + '\n';
     });
     if (items.length > 400) ctx += '... y ' + (items.length - 400) + ' productos más\n';
   });

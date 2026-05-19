@@ -535,7 +535,7 @@
 <div class="modal-overlay" id="modal-stock-pedido">
   <div class="modal" style="max-width:540px;">
     <h3>¿Recibiste este pedido?</h3>
-    <p style="font-size:13px;color:var(--text-muted);margin:0 0 16px;">La IA detecta el tipo de producto e ignora marca y presentación. Las materias que no existan se crean automáticamente al actualizar.</p>
+    <p style="font-size:13px;color:var(--text-muted);margin:0 0 16px;">Se detecta el tipo de producto ignorando marca y presentación. Las materias que no existan se crean automáticamente al actualizar.</p>
     <div id="stock-pedido-items" style="display:flex;flex-direction:column;gap:8px;max-height:380px;overflow-y:auto;padding-right:2px;"></div>
     <div class="modal-actions">
       <button class="btn" onclick="cerrarModalStockPedido()">Omitir</button>
@@ -3149,7 +3149,11 @@ function extraerCantidadBase(item) {
     return { cantBase: qty * pesoUnit * packMult, unidadBase: unidadBase };
   }
 
-  // 3. No se pudo determinar unidad física → tratar como unidades
+  // 3. "X KG" / "X L" sin número (ej: "BARRA DANBO X KG") → 1 unidad = 1 kg o 1 L
+  if (/\bx\s*kg\b/i.test(nombre) || /\bpor\s*kg\b/i.test(nombre)) return { cantBase: qty * 1000, unidadBase: 'g'  };
+  if (/\bx\s*(?:l|lt|litro)\b/i.test(nombre) || /\bpor\s*litro\b/i.test(nombre)) return { cantBase: qty * 1000, unidadBase: 'ml' };
+
+  // 4. No se pudo determinar unidad física → tratar como unidades
   return { cantBase: qty, unidadBase: 'u' };
 }
 
@@ -4151,50 +4155,45 @@ function borrarProdSubcat() {
 
 // ——— Actualizar stock desde pedido confirmado ———
 
-// Llama a la IA para detectar el TIPO de producto (sin marca ni presentación).
-// Devuelve { "nombre original": "tipo normalizado", ... }
-async function normalizarTiposProductoIA(nombres) {
-  if (!nombres || !nombres.length) return {};
-  try {
-    var sd = await supabase.auth.getSession();
-    var token = sd.data && sd.data.session && sd.data.session.access_token;
-    if (!token) return {};
-    var lista = nombres.slice(0, 30).map(function(n, i) { return (i + 1) + '. ' + n; }).join('\n');
-    var resp = await fetch('/api/claude', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({
-        tipo: 'expandir_query',
-        max_tokens: 500,
-        messages: [{
-          role: 'user',
-          content:
-            'Para cada ítem de esta lista de precios de proveedor, extraé el TIPO de producto ' +
-            '(sin marca, sin tamaño/presentación).\n' +
-            'Reglas clave:\n' +
-            '- Ignorá marcas: Cañuelas, Pureza, Hellman\'s, Natura, La Serenísima, Molinos, etc.\n' +
-            '- Ignorá presentaciones: kg, g, ml, L, x6, caja, bolsa, sachet, etc.\n' +
-            '- Conservá el tipo/grado SI es relevante para diferenciarlo: ' +
-            '  "0000" vs "000" son harinas distintas; "leudante" vs "integral" son distintas; ' +
-            '  "descremada" vs "entera" son distintas; "light" vs normal son distintas.\n' +
-            '- Hellman\'s mayonesa = Natura mayonesa = "Mayonesa" (mismo producto, distinta marca).\n' +
-            '- Harina 0000 Pureza = Harina 0000 Cañuelas = "Harina 0000" (mismo tipo).\n' +
-            '- Harina 000 ≠ Harina 0000 (son tipos distintos, conservalos diferentes).\n\n' +
-            'Respondé ÚNICAMENTE con JSON válido: {"nombre original": "tipo", ...}\n\n' +
-            'Ítems:\n' + lista
-        }]
-      })
-    });
-    if (!resp.ok) return {};
-    var data = await resp.json();
-    var texto = (data.content && data.content[0] && data.content[0].text) || '';
-    var match = texto.match(/\{[\s\S]*?\}/);
-    if (!match) return {};
-    return JSON.parse(match[0]);
-  } catch(e) {
-    console.warn('[normalizarTiposProductoIA]', e);
-    return {};
-  }
+// Marcas conocidas de proveedores argentinos — se eliminan del nombre al normalizar
+var MARCAS_AR = [
+  'cañuelas','pureza','favorita','la serenisima','serenisima','sancor','milkaut',
+  'ilolay','tregar','manfrey','loncotue','veronica','verónica','la paulina','conosur',
+  'belen','belén','noalsa','marolio','arcor','bagley','la campagnola','campagnola',
+  'granix','fleischmann','levex','calsa','ledesma','chango','celusal','dos anclas',
+  "hellman's",'hellmans','hellmann','natura','cocinero','lira','molinos',
+  'don mario','sytari','mendicrim','casancrem','adler','dulcor','cabrales','bonafide',
+  'la florida','alicante','fargo','bimbo','lactal','georgalos','savora','maggi','knorr',
+];
+
+// Normaliza nombre de producto a tipo genérico: quita marca y presentación,
+// conserva calificadores relevantes (0000, 000, integral, light, sin gluten, etc.)
+function normalizarNombreProductoJS(nombre) {
+  var n = (nombre || '').toLowerCase().trim();
+
+  // 1. Pack multiplier: "pack x 10 uds", "x12 unidades"
+  n = n.replace(/pack\s*x\s*\d+\s*(?:uds?|unidades?|unid)?\b/gi, ' ');
+  n = n.replace(/\bx\s*\d+\s*(?:uds?|unidades?|unid)\b/gi, ' ');
+
+  // 2. Peso/volumen con número: "x500grs", "25kg", "1.5l", "500 ml"
+  n = n.replace(/\bx\s*\d+(?:[.,]\d+)?\s*(?:kg|grs?|gr|gramos?|lts?|litros?|ml|cc|l)\b/gi, ' ');
+  n = n.replace(/\b\d+(?:[.,]\d+)?\s*(?:kg|grs?|gr|gramos?|lts?|litros?|ml|cc)\b/gi, ' ');
+
+  // 3. "X KG" / "X L" sin número
+  n = n.replace(/\bx\s*kg\b/gi, ' ');
+  n = n.replace(/\bx\s*(?:l|lt|litro)\b/gi, ' ');
+
+  // 4. Marcas conocidas (palabra completa)
+  MARCAS_AR.forEach(function(marca) {
+    var escaped = marca.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    n = n.replace(new RegExp('(?:^|\\s)' + escaped + '(?=\\s|$)', 'gi'), ' ');
+  });
+
+  // 5. Limpiar y title case
+  n = n.replace(/\s+/g, ' ').trim();
+  return n.split(' ').map(function(w) {
+    return w ? w.charAt(0).toUpperCase() + w.slice(1) : '';
+  }).join(' ').trim();
 }
 
 // Busca materia prima por nombre con tolerancia: exacto → contiene (con límite de palabra)
@@ -4224,17 +4223,13 @@ function buscarMateriaFuzzy(nombreBuscado, materias) {
 }
 
 // Genera el HTML de una fila del modal stock-pedido
-function renderStockPedRow(item, idx, tipoIA, autoMatch) {
+function renderStockPedRow(item, idx, tipoJS, autoMatch) {
   var materias = getMaterias();
-  var unidadItem = (item.unidad || 'u').toLowerCase().replace(/[^a-z]/g, '');
-  var factConv   = factorConvProd(unidadItem);
-  var cantBase   = convertirABaseProd(item.qty, unidadItem);
+  var ext      = extraerCantidadBase(item);
+  var cantBase = ext.cantBase;
+  var unidadBase = ext.unidadBase;
 
-  // Determinar selección automática:
-  // autoMatch → seleccionar materia existente
-  // tipoIA sin match → seleccionar __nueva__ (se crea al guardar)
-  // ninguno → sin selección
-  var selectedId = autoMatch ? autoMatch.id : (tipoIA ? '__nueva__' : '');
+  var selectedId = autoMatch ? autoMatch.id : (tipoJS ? '__nueva__' : '');
 
   var opts = '<option value="">— No actualizar —</option>' +
     materias.map(function(m) {
@@ -4242,58 +4237,45 @@ function renderStockPedRow(item, idx, tipoIA, autoMatch) {
         escapeHtml(m.nombre) + ' (' + m.unidadBase + ')</option>';
     }).join('') +
     '<option value="__nueva__"' + (selectedId === '__nueva__' ? ' selected' : '') + '>' +
-      '+ Crear "' + escapeHtml(tipoIA || 'nueva materia') + '"</option>';
+      '+ Crear "' + escapeHtml(tipoJS || 'nueva materia') + '"</option>';
 
-  var tipoLabel = '';
-  if (tipoIA) {
-    var labelTxt = autoMatch
-      ? ('🤖 ' + escapeHtml(tipoIA))
-      : ('🤖 nueva: ' + escapeHtml(tipoIA));
-    tipoLabel = '<span class="spd-tipo-ia">' + labelTxt + '</span>';
+  var tipoLabel = tipoJS
+    ? '<span class="spd-tipo-ia">' + (autoMatch ? '' : 'nueva: ') + escapeHtml(tipoJS) + '</span>'
+    : '';
+
+  var convDisplay = '';
+  if (unidadBase !== 'u' && cantBase !== (parseFloat(item.qty) || 0)) {
+    convDisplay = ' → <strong>' + cantBase + (unidadBase === 'g' ? 'g' : 'ml') + '</strong>';
   }
 
   return '<div class="stock-ped-row" id="spd-row-' + idx + '">' +
     '<div class="stock-ped-item-info">' +
       '<div class="stock-ped-nombre">' + escapeHtml(item.productoLista || '—') + tipoLabel + '</div>' +
-      '<div class="stock-ped-qty">' + item.qty + ' ' + (item.unidad || '') +
-        (factConv > 1 ? ' → <strong>' + cantBase + (unidadItem === 'kg' ? 'g' : 'ml') + '</strong>' : '') +
-      '</div>' +
+      '<div class="stock-ped-qty">' + item.qty + ' ' + (item.unidad || 'u') + convDisplay + '</div>' +
     '</div>' +
-    '<select id="spd-mat-' + idx + '" class="stock-ped-sel" data-tipo-ia="' + escapeHtml(tipoIA || '') + '">' + opts + '</select>' +
+    '<select id="spd-mat-' + idx + '" class="stock-ped-sel" data-tipo-ia="' + escapeHtml(tipoJS || '') + '">' + opts + '</select>' +
   '</div>';
 }
 
-async function ofrecerActualizarStockPedido(items) {
+function ofrecerActualizarStockPedido(items) {
   if (!items || !items.length) return;
   pendingPedidoItems = items;
   var container = document.getElementById('stock-pedido-items');
   if (!container) return;
 
-  // Mostrar modal inmediatamente con estado de carga
-  container.innerHTML = '<div style="text-align:center;padding:20px 0;color:var(--text-muted);font-size:13px;">🤖 Detectando tipos de productos…</div>';
-  document.getElementById('modal-stock-pedido').classList.add('open');
-
-  // Esperar normalización IA antes de renderizar las filas
-  var nombres = items.map(function(it) { return it.productoLista || ''; }).filter(Boolean);
-  var tipos = {};
-  try { tipos = await normalizarTiposProductoIA(nombres); } catch(e) {}
-
   var materias = getMaterias();
 
-  // Renderizar filas con resultado IA: match existente o auto-crear si detectó tipo
   container.innerHTML = items.map(function(item, idx) {
-    var tipoIA = tipos[item.productoLista] || tipos[(item.productoLista || '').toLowerCase()] || null;
-    var autoMatch = null;
-    if (tipoIA) {
-      autoMatch = buscarMateriaFuzzy(tipoIA, materias);
-    }
-    // Fallback: matching exacto por nombre si la IA no detectó nada
-    if (!autoMatch && !tipoIA) {
+    var tipoJS = normalizarNombreProductoJS(item.productoLista || '');
+    var autoMatch = buscarMateriaFuzzy(tipoJS, materias);
+    if (!autoMatch) {
       var nombreNorm = (item.productoLista || '').toLowerCase().trim();
       autoMatch = materias.find(function(m) { return m.nombre.toLowerCase().trim() === nombreNorm; }) || null;
     }
-    return renderStockPedRow(item, idx, tipoIA, autoMatch);
+    return renderStockPedRow(item, idx, tipoJS, autoMatch);
   }).join('');
+
+  document.getElementById('modal-stock-pedido').classList.add('open');
 }
 
 function cerrarModalStockPedido() {
@@ -4313,21 +4295,22 @@ function limpiarNombreProducto(nombre) {
 }
 
 // Actualiza el stock de materias primas automáticamente al confirmar un pedido.
-// Usa IA para identificar el tipo (ignora marca/presentación). Si la IA no normaliza
-// un producto, usa el nombre limpio como fallback — nunca saltea items.
-async function actualizarStockAutomatico(items) {
+// Usa normalización JS (sin IA) para quitar marca/presentación del nombre.
+function actualizarStockAutomatico(items) {
   if (!items || !items.length) return;
 
-  var nombres = items.map(function(it) { return it.productoLista || ''; }).filter(Boolean);
   var tipos = {};
-  try { tipos = await normalizarTiposProductoIA(nombres); } catch(e) {}
+  items.forEach(function(it) {
+    var n = it.productoLista || '';
+    if (n) tipos[n] = normalizarNombreProductoJS(n);
+  });
 
   var materias = getMaterias();
   var actualizados = 0;
   var creados = 0;
 
   items.forEach(function(item, idx) {
-    var tipoIA = tipos[item.productoLista] || tipos[(item.productoLista || '').toLowerCase()] || null;
+    var tipoIA = tipos[item.productoLista] || null;
 
     var ext = extraerCantidadBase(item);
     var cantBase = ext.cantBase;
@@ -4387,12 +4370,12 @@ function aplicarStockPedido() {
     var sel = document.getElementById('spd-mat-' + idx);
     if (!sel || !sel.value) return;
 
-    var cantBase = convertirABaseProd(item.qty, item.unidad || 'u');
+    var ext      = extraerCantidadBase(item);
+    var cantBase = ext.cantBase;
 
     if (sel.value === '__nueva__') {
-      // Crear nueva materia prima automáticamente con el tipo detectado por IA
       var tipoIA = sel.getAttribute('data-tipo-ia') || item.productoLista || 'Sin nombre';
-      var unidadBase = inferirUnidadBase(item.unidad || 'u');
+      var unidadBase = ext.unidadBase;
       materias.push({
         id: 'mat_' + Date.now() + '_' + idx,
         nombre: tipoIA,

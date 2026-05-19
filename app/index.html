@@ -217,7 +217,10 @@
       <div id="prod-panel-stock" class="prod-panel active">
         <div class="seccion-titulo" style="margin-top:0;padding-top:0;">
           <h3 style="font-size:15px;font-weight:600;margin:0;">Materias primas</h3>
-          <button class="btn primary" onclick="abrirModalMateria()"><span class="icon-slot" data-icon="plus"></span> Nueva</button>
+          <div style="display:flex;gap:6px;">
+            <button class="btn" onclick="limpiarMarcasExistentes()" title="Quita marcas comerciales de los nombres de materias primas">🧹 Limpiar marcas</button>
+            <button class="btn primary" onclick="abrirModalMateria()"><span class="icon-slot" data-icon="plus"></span> Nueva</button>
+          </div>
         </div>
         <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Ingresá las materias primas que comprás a tus proveedores (harina, aceite, levadura, etc.)</p>
         <div id="prod-stock-lista"></div>
@@ -3817,6 +3820,29 @@ function renderProdLog() {
       '<span class="prod-log-fecha">' + (entry.fecha || '') + '</span>' +
     '</div>';
   }).join('');
+}
+
+// Quita marcas comerciales de los nombres de todas las materias primas existentes
+function limpiarMarcasExistentes() {
+  var materias = getMaterias();
+  if (!materias.length) { showToast('No hay materias primas'); return; }
+  var cambios = [];
+  materias.forEach(function(m) {
+    var limpio = normalizarNombreProductoJS(m.nombre);
+    if (limpio && limpio !== m.nombre) cambios.push({ id: m.id, antes: m.nombre, despues: limpio });
+  });
+  if (!cambios.length) { showToast('No se encontraron marcas para limpiar'); return; }
+  var lista = cambios.slice(0, 5).map(function(c) { return '"' + c.antes + '" → "' + c.despues + '"'; }).join('\n');
+  if (cambios.length > 5) lista += '\n...y ' + (cambios.length - 5) + ' más';
+  if (!confirm('Se van a renombrar ' + cambios.length + ' materia' + (cambios.length !== 1 ? 's' : '') + ':\n\n' + lista + '\n\n¿Continuar?')) return;
+  cambios.forEach(function(c) {
+    var m = materias.find(function(x) { return x.id === c.id; });
+    if (m) m.nombre = c.despues;
+  });
+  setMaterias(materias);
+  var tabProd = document.getElementById('tab-produccion');
+  if (tabProd && tabProd.classList.contains('active')) renderProduccion();
+  showToast('✅ ' + cambios.length + ' materia' + (cambios.length !== 1 ? 's' : '') + ' actualizadas');
 }
 
 // ——— Modal: Materia prima ———

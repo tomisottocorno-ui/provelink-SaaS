@@ -4155,28 +4155,30 @@ function borrarProdSubcat() {
 
 // ——— Actualizar stock desde pedido confirmado ———
 
-// Elimina acentos para comparar sin diferencias de codificación
-function _sinAcentos(s) {
-  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+// Normaliza string para comparación: quita acentos y unifica todos los apóstrofes en ''
+function _normCompar(s) {
+  return (s || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '') // quita acentos diacríticos
+    .replace(/[´‘’`']/g, '') // quita apóstrofes/acentos agudos
+    .toLowerCase();
 }
 
-// Marcas conocidas de proveedores argentinos (sin acentos, minúsculas)
+// Marcas conocidas de proveedores argentinos (sin acentos, sin apóstrofes, minúsculas)
 var MARCAS_AR = [
   // Harinas / panificación
   'canuelas','pureza','favorita','morixe','la union','don poroto','fargo','bimbo','lactal',
   // Lácteos / quesos
   'la serenisima','serenisima','mastellone','sancor','milkaut','ilolay','tregar','manfrey',
   'loncotue','veronica','la paulina','conosur','belen','williner','el triangulo',
-  'la suipachense','gandara','vidal','la martona','parmalat','mendicrim','casancrem',
-  'la paulina','velez','colun',
+  'la suipachense','gandara','vidal','la martona','parmalat','mendicrim','casancrem','velez','colun',
   // Quesos específicos
-  'noalsa','manfrey','la serenisima',
+  'noalsa',
   // Aceites / grasas
   'cocinero','lira','natura','molinos','essen','mazola','ideal','9 de oro',
   // Azúcar / endulzantes
   'ledesma','chango','la esperanza','nutrasweet','dulcor',
-  // Condimentos / salsas
-  "hellman's",'hellmans','hellmann','savora','knorr','maggi','unilever','aji-no-moto',
+  // Condimentos / salsas (todos los variantes hellmann sin apóstrofe)
+  'hellmans','hellmanns','hellmann','savora','knorr','maggi','unilever','ajinomoto',
   // Conservas
   'la campagnola','campagnola','marolio','arcor','bauduco',
   // Levaduras
@@ -4189,37 +4191,38 @@ var MARCAS_AR = [
   'bagley','terrabusi','canale','granix',
   // Varios
   'don mario','sytari','la florida','alicante','danone','danon','nutricia',
-  'deleo','linde','baggio','gancia','quilmes',
+  'deleo','baggio','gancia','quilmes',
 ];
 
 // Normaliza nombre de producto a tipo genérico: quita marca y presentación,
 // conserva calificadores relevantes (0000, 000, integral, light, sin gluten, etc.)
 function normalizarNombreProductoJS(nombre) {
-  var n = (nombre || '').toLowerCase().trim();
-  // Normalizar acentos para que "SERENÍSIMA" y "serenisima" matcheen igual
-  var nSinAc = _sinAcentos(n);
+  // Trabajamos sobre una copia normalizada (sin acentos, sin apóstrofes) para todas las
+  // comparaciones y stripping — el output también estará normalizado (title case).
+  var n = _normCompar(nombre);
 
   // 1. Pack multiplier: "pack x 10 uds", "x12 unidades"
-  nSinAc = nSinAc.replace(/pack\s*x\s*\d+\s*(?:uds?|unidades?|unid)?\b/gi, ' ');
-  nSinAc = nSinAc.replace(/\bx\s*\d+\s*(?:uds?|unidades?|unid)\b/gi, ' ');
+  n = n.replace(/pack\s*x\s*\d+\s*(?:uds?|unidades?|unid)?\b/gi, ' ');
+  n = n.replace(/\bx\s*\d+\s*(?:uds?|unidades?|unid)\b/gi, ' ');
 
   // 2. Peso/volumen con número: "x500grs", "25kg", "1.5l", "500 ml"
-  nSinAc = nSinAc.replace(/\bx\s*\d+(?:[.,]\d+)?\s*(?:kg|grs?|gr|gramos?|lts?|litros?|ml|cc|l)\b/gi, ' ');
-  nSinAc = nSinAc.replace(/\b\d+(?:[.,]\d+)?\s*(?:kg|grs?|gr|gramos?|lts?|litros?|ml|cc)\b/gi, ' ');
+  n = n.replace(/\bx\s*\d+(?:[.,]\d+)?\s*(?:kg|grs?|gr|gramos?|lts?|litros?|ml|cc|l)\b/gi, ' ');
+  n = n.replace(/\b\d+(?:[.,]\d+)?\s*(?:kg|grs?|gr|gramos?|lts?|litros?|ml|cc)\b/gi, ' ');
 
   // 3. "X KG" / "X L" sin número
-  nSinAc = nSinAc.replace(/\bx\s*kg\b/gi, ' ');
-  nSinAc = nSinAc.replace(/\bx\s*(?:l|lt|litro)\b/gi, ' ');
+  n = n.replace(/\bx\s*kg\b/gi, ' ');
+  n = n.replace(/\bx\s*(?:l|lt|litro)\b/gi, ' ');
 
-  // 4. Marcas (ya están sin acentos, buscamos en nSinAc)
+  // 4. Marcas: comparar contra versión normalizada del input
   MARCAS_AR.forEach(function(marca) {
-    var escaped = marca.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    nSinAc = nSinAc.replace(new RegExp('(?:^|\\s)' + escaped + '(?:\\s|$)', 'gi'), ' ');
+    var marcaNorm = _normCompar(marca);
+    var escaped   = marcaNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    n = n.replace(new RegExp('(?:^|\\s)' + escaped + '(?:\\s|$)', 'gi'), ' ');
   });
 
   // 5. Limpiar y title case
-  nSinAc = nSinAc.replace(/\s+/g, ' ').trim();
-  return nSinAc.split(' ').map(function(w) {
+  n = n.replace(/\s+/g, ' ').trim();
+  return n.split(' ').map(function(w) {
     return w ? w.charAt(0).toUpperCase() + w.slice(1) : '';
   }).join(' ').trim();
 }

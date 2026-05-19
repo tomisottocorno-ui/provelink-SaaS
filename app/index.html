@@ -4155,43 +4155,71 @@ function borrarProdSubcat() {
 
 // ——— Actualizar stock desde pedido confirmado ———
 
-// Marcas conocidas de proveedores argentinos — se eliminan del nombre al normalizar
+// Elimina acentos para comparar sin diferencias de codificación
+function _sinAcentos(s) {
+  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// Marcas conocidas de proveedores argentinos (sin acentos, minúsculas)
 var MARCAS_AR = [
-  'cañuelas','pureza','favorita','la serenisima','serenisima','sancor','milkaut',
-  'ilolay','tregar','manfrey','loncotue','veronica','verónica','la paulina','conosur',
-  'belen','belén','noalsa','marolio','arcor','bagley','la campagnola','campagnola',
-  'granix','fleischmann','levex','calsa','ledesma','chango','celusal','dos anclas',
-  "hellman's",'hellmans','hellmann','natura','cocinero','lira','molinos',
-  'don mario','sytari','mendicrim','casancrem','adler','dulcor','cabrales','bonafide',
-  'la florida','alicante','fargo','bimbo','lactal','georgalos','savora','maggi','knorr',
+  // Harinas / panificación
+  'canuelas','pureza','favorita','morixe','la union','don poroto','fargo','bimbo','lactal',
+  // Lácteos / quesos
+  'la serenisima','serenisima','mastellone','sancor','milkaut','ilolay','tregar','manfrey',
+  'loncotue','veronica','la paulina','conosur','belen','williner','el triangulo',
+  'la suipachense','gandara','vidal','la martona','parmalat','mendicrim','casancrem',
+  'la paulina','velez','colun',
+  // Quesos específicos
+  'noalsa','manfrey','la serenisima',
+  // Aceites / grasas
+  'cocinero','lira','natura','molinos','essen','mazola','ideal','9 de oro',
+  // Azúcar / endulzantes
+  'ledesma','chango','la esperanza','nutrasweet','dulcor',
+  // Condimentos / salsas
+  "hellman's",'hellmans','hellmann','savora','knorr','maggi','unilever','aji-no-moto',
+  // Conservas
+  'la campagnola','campagnola','marolio','arcor','bauduco',
+  // Levaduras
+  'fleischmann','levex','calsa','levapan',
+  // Sal
+  'celusal','dos anclas',
+  // Chocolates / coberturas
+  'felfort','cachafaz','barry','georgalos','adler','bonafide','cabrales','nestle','nestlé',
+  // Snacks / galletitas
+  'bagley','terrabusi','canale','granix',
+  // Varios
+  'don mario','sytari','la florida','alicante','danone','danon','nutricia',
+  'deleo','linde','baggio','gancia','quilmes',
 ];
 
 // Normaliza nombre de producto a tipo genérico: quita marca y presentación,
 // conserva calificadores relevantes (0000, 000, integral, light, sin gluten, etc.)
 function normalizarNombreProductoJS(nombre) {
   var n = (nombre || '').toLowerCase().trim();
+  // Normalizar acentos para que "SERENÍSIMA" y "serenisima" matcheen igual
+  var nSinAc = _sinAcentos(n);
 
   // 1. Pack multiplier: "pack x 10 uds", "x12 unidades"
-  n = n.replace(/pack\s*x\s*\d+\s*(?:uds?|unidades?|unid)?\b/gi, ' ');
-  n = n.replace(/\bx\s*\d+\s*(?:uds?|unidades?|unid)\b/gi, ' ');
+  nSinAc = nSinAc.replace(/pack\s*x\s*\d+\s*(?:uds?|unidades?|unid)?\b/gi, ' ');
+  nSinAc = nSinAc.replace(/\bx\s*\d+\s*(?:uds?|unidades?|unid)\b/gi, ' ');
 
   // 2. Peso/volumen con número: "x500grs", "25kg", "1.5l", "500 ml"
-  n = n.replace(/\bx\s*\d+(?:[.,]\d+)?\s*(?:kg|grs?|gr|gramos?|lts?|litros?|ml|cc|l)\b/gi, ' ');
-  n = n.replace(/\b\d+(?:[.,]\d+)?\s*(?:kg|grs?|gr|gramos?|lts?|litros?|ml|cc)\b/gi, ' ');
+  nSinAc = nSinAc.replace(/\bx\s*\d+(?:[.,]\d+)?\s*(?:kg|grs?|gr|gramos?|lts?|litros?|ml|cc|l)\b/gi, ' ');
+  nSinAc = nSinAc.replace(/\b\d+(?:[.,]\d+)?\s*(?:kg|grs?|gr|gramos?|lts?|litros?|ml|cc)\b/gi, ' ');
 
   // 3. "X KG" / "X L" sin número
-  n = n.replace(/\bx\s*kg\b/gi, ' ');
-  n = n.replace(/\bx\s*(?:l|lt|litro)\b/gi, ' ');
+  nSinAc = nSinAc.replace(/\bx\s*kg\b/gi, ' ');
+  nSinAc = nSinAc.replace(/\bx\s*(?:l|lt|litro)\b/gi, ' ');
 
-  // 4. Marcas conocidas (palabra completa)
+  // 4. Marcas (ya están sin acentos, buscamos en nSinAc)
   MARCAS_AR.forEach(function(marca) {
     var escaped = marca.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    n = n.replace(new RegExp('(?:^|\\s)' + escaped + '(?=\\s|$)', 'gi'), ' ');
+    nSinAc = nSinAc.replace(new RegExp('(?:^|\\s)' + escaped + '(?:\\s|$)', 'gi'), ' ');
   });
 
   // 5. Limpiar y title case
-  n = n.replace(/\s+/g, ' ').trim();
-  return n.split(' ').map(function(w) {
+  nSinAc = nSinAc.replace(/\s+/g, ' ').trim();
+  return nSinAc.split(' ').map(function(w) {
     return w ? w.charAt(0).toUpperCase() + w.slice(1) : '';
   }).join(' ').trim();
 }
@@ -4317,23 +4345,23 @@ function actualizarStockAutomatico(items) {
     var unidadBase = ext.unidadBase;
     if (cantBase <= 0) return;
 
-    // Nombre con el que buscar y eventualmente crear la materia:
-    // 1° tipo de IA (sin marca), 2° nombre limpio (sin tallas), 3° nombre crudo
-    var nombreMatch = tipoIA || limpiarNombreProducto(item.productoLista) || item.productoLista || '';
-    if (!nombreMatch) return;
+    // Para buscar: nombre normalizado (sin marca) → fallback nombre crudo limpio
+    var nombreNorm  = tipoIA || '';
+    var nombreCrudo = limpiarNombreProducto(item.productoLista) || item.productoLista || '';
 
-    // Buscar materia existente por nombre normalizado, luego por nombre crudo como fallback
-    var match = buscarMateriaFuzzy(nombreMatch, materias);
-    if (!match && tipoIA) match = buscarMateriaFuzzy(limpiarNombreProducto(item.productoLista) || '', materias);
+    // Buscar materia existente con nombre normalizado primero, luego crudo
+    var match = buscarMateriaFuzzy(nombreNorm || nombreCrudo, materias);
+    if (!match && nombreNorm) match = buscarMateriaFuzzy(nombreCrudo, materias);
 
     if (match) {
       if (match.unidadBase === 'u' && unidadBase !== 'u') match.unidadBase = unidadBase;
       match.stockActual = (match.stockActual || 0) + cantBase;
       actualizados++;
-    } else {
+    } else if (nombreNorm) {
+      // Solo auto-crear si tenemos un nombre limpio (sin marca)
       materias.push({
         id: 'mat_' + Date.now() + '_' + idx,
-        nombre: nombreMatch,
+        nombre: nombreNorm,
         unidadBase: unidadBase,
         stockActual: cantBase,
         stockMinimo: 0
@@ -4341,6 +4369,7 @@ function actualizarStockAutomatico(items) {
       creados++;
       actualizados++;
     }
+    // Si nombreNorm está vacío (la marca era todo el nombre), saltear — no crear con marca
   });
 
   if (actualizados > 0) {

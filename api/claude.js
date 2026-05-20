@@ -29,8 +29,9 @@ const PRECIOS_SONNET = {
 // Solo imágenes usan Sonnet+thinking (una llamada, puede tardar más)
 // Los chunks de PDF van en Haiku para no multiplicar el tiempo x11 partes
 const TIPOS_CON_THINKING = ['procesar_lista'];
-// Sonnet sin thinking: necesita visión o razonamiento comparativo pero no extended thinking
-const TIPOS_SONNET_SIN_THINKING = ['detectar_modo_precios'];
+// Sonnet sin thinking: solo para tareas que requieren visión o razonamiento complejo
+// detectar_modo_precios usa Haiku (es aritmética simple: comparar ratios de precios)
+const TIPOS_SONNET_SIN_THINKING = [];
 
 const LIMITES_IA = { free: 0, pro: 150, business: 500 };
 

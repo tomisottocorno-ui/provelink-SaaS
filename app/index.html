@@ -1604,35 +1604,70 @@ async function guardarCacheNorm(nuevos) {
 
 // ---- Llamadas a la IA ----
 
-async function llamarNormalizarListaIA(items) {
-  // items: [{id, nombre_original, presentacion_original}]
-  // Batches de 80 para no exceder tokens
-  var resultados = [];
-  for (var i = 0; i < items.length; i += 80) {
-    var batch = items.slice(i, i + 80);
-    var prompt = batch.map(function(p) {
-      return 'ID:' + p.id + ' | NOMBRE: ' + p.nombre_original +
-             ' | PRESENTACION: ' + (p.presentacion_original || 'sin dato');
-    }).join('\n');
-    var resp = await fetch('/api/claude', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
-      body: JSON.stringify({ tipo: 'normalizar_lista', max_tokens: 4000,
-        system: SYSTEM_NORMALIZACION, messages: [{ role: 'user', content: prompt }] })
-    });
-    var data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'Error normalizando');
-    var txt = ((data.content || [])[0] || {}).text || '';
-    txt = txt.replace(/```json|```/g, '').trim();
-    var arr = [];
-    try { arr = JSON.parse(txt); }
-    catch(e) {
-      var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
-      if (ini >= 0 && fin > ini) { try { arr = JSON.parse(txt.slice(ini, fin + 1)); } catch(e2) {} }
-    }
-    resultados = resultados.concat(arr);
+async function _normBatch(batch) {
+  var prompt = batch.map(function(p) {
+    return 'ID:' + p.id + ' | NOMBRE: ' + p.nombre_original +
+           ' | PRESENTACION: ' + (p.presentacion_original || 'sin dato');
+  }).join('\n');
+  var resp = await fetch('/api/claude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+    body: JSON.stringify({ tipo: 'normalizar_lista', max_tokens: 4000,
+      system: SYSTEM_NORMALIZACION, messages: [{ role: 'user', content: prompt }] })
+  });
+  var data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'Error normalizando');
+  var txt = ((data.content || [])[0] || {}).text || '';
+  txt = txt.replace(/```json|```/g, '').trim();
+  try { return JSON.parse(txt); }
+  catch(e) {
+    var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
+    if (ini >= 0 && fin > ini) { try { return JSON.parse(txt.slice(ini, fin + 1)); } catch(e2) {} }
+    return [];
   }
-  return resultados;
+}
+
+async function llamarNormalizarListaIA(items) {
+  // Todos los batches de 80 en PARALELO (Haiku, tolerante a concurrencia)
+  var promises = [];
+  for (var i = 0; i < items.length; i += 80) {
+    promises.push(_normBatch(items.slice(i, i + 80)));
+  }
+  var resultados = await Promise.all(promises);
+  return resultados.reduce(function(acc, r) { return acc.concat(r); }, []);
+}
+
+// Detecta modo sin IA usando la columna de presentación — evita llamadas innecesarias.
+// Devuelve {modo, confianza, razonamiento} o null si no puede decidir.
+function detectarModoHeuristico(grupo) {
+  // Si hay 2+ proveedores propios con precios distintos → dejar para la IA (comparativa)
+  var propios = grupo.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+  var externos = grupo.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') === 0; });
+  if (externos.length > 0) return null; // hay datos cross-proveedor, la IA los aprovecha mejor
+  if (propios.length !== 1) return null;
+
+  var pres = (propios[0].presentacion_original || '').trim();
+  var tamano = grupo.tamano || 0;
+
+  // Patrones PACK: envase con cantidad explícita
+  var esPack = [
+    /\b(bolsa|caja|bid[oó]n|lata|saco|fardo|paquete|pack|balde|tacho)\b.{0,15}\d/i,
+    /x\s*\d+(?:[.,]\d+)?\s*(kg|kgs?|kilos?|grs?|gr|gramos?|lts?|litros?|ml|cc|l|un?d?s?|piezas?)/i,
+    /\d+(?:[.,]\d+)?\s*(kg|kgs?|kilos?|grs?|gr|gramos?|lts?|litros?|ml|cc)\b/i
+  ].some(function(re) { return re.test(pres); });
+
+  // Patrones UNITARIO: solo la unidad de medida
+  var esUnitario = /^(kg|kgs?|kilos?|lts?|litros?|l|ml|cc|grs?|gramos?|bot(?:ella)?s?|uni(?:dad(?:es)?)?|u)\s*$/i.test(pres) ||
+                   /^x\s*(kg|kgs?|lt|lts?|l|g|grs?|kilos?)\s*$/i.test(pres);
+
+  if (esPack && !esUnitario) return { modo: 'pack', confianza: 0.78,
+    razonamiento: 'heurístico: presentación indica envase (' + pres + ')' };
+  if (esUnitario && !esPack) return { modo: 'unitario', confianza: 0.78,
+    razonamiento: 'heurístico: presentación indica unidad base (' + pres + ')' };
+  if (tamano === 1 && pres && !esPack) return { modo: 'unitario', confianza: 0.65,
+    razonamiento: 'heurístico: tamaño 1 sin indicador de bulto' };
+
+  return null; // ambiguo → necesita IA
 }
 
 async function normalizarConCache(itemsConId, loadingEl) {
@@ -1803,17 +1838,45 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     return enriquecido;
   });
 
-  // Etapa 4: Detectar modo (batches de 30)
-  if (loadingEl) loadingEl.textContent = 'Detectando modo de precio (pack vs. unitario)...';
+  // Etapa 4: Detectar modo — heurística gratis primero, luego IA en paralelo para el resto
+  if (loadingEl) loadingEl.textContent = 'Detectando modo de precio...';
   var todosLosModos = [];
-  for (var i = 0; i < gruposConComparacion.length; i += 30) {
-    var batch = gruposConComparacion.slice(i, i + 30);
-    try {
-      var modos = await llamarDetectarModoIA(batch);
-      todosLosModos = todosLosModos.concat(modos);
-    } catch(e) {
-      console.warn('[Pipeline] Error en batch modo ' + i + ':', e.message);
+  var gruposParaIA = [];
+
+  gruposConComparacion.forEach(function(g) {
+    var h = detectarModoHeuristico(g);
+    if (h) {
+      // Aplicar heurística directamente (sin llamada a IA)
+      var propios = g.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+      todosLosModos.push({
+        clave_canonica: g.clave_canonica,
+        resultados: propios.map(function(p) {
+          return { id_original: p.id_original, proveedor_id: p.proveedor_id,
+                   modo: h.modo, confianza: h.confianza, razonamiento: h.razonamiento };
+        })
+      });
+    } else {
+      gruposParaIA.push(g);
     }
+  });
+
+  console.log('[Pipeline] Modo — heurística: ' + todosLosModos.length +
+    ' grupos · IA: ' + gruposParaIA.length + ' grupos');
+
+  // Batches de 60 en PARALELO (Haiku, tolerante a concurrencia)
+  if (gruposParaIA.length > 0) {
+    var modoPromises = [];
+    for (var j = 0; j < gruposParaIA.length; j += 60) {
+      var batchModo = gruposParaIA.slice(j, j + 60);
+      modoPromises.push(
+        llamarDetectarModoIA(batchModo).catch(function(e) {
+          console.warn('[Pipeline] Error batch modo:', e.message);
+          return [];
+        })
+      );
+    }
+    var modoResultados = await Promise.all(modoPromises);
+    modoResultados.forEach(function(r) { todosLosModos = todosLosModos.concat(r); });
   }
 
   // Etapa 5: Calcular precios finales (código puro)

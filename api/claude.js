@@ -14,13 +14,20 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
-// Precios Claude Haiku 4.5 (USD por millón de tokens)
-const PRECIOS = {
+// Precios por modelo (USD por millón de tokens)
+const PRECIOS_HAIKU = {
   input: 1.0,
   cache_write: 1.25,
   cache_read: 0.10,
   output: 5.0
 };
+const PRECIOS_SONNET = {
+  input: 3.0,
+  output: 15.0
+};
+
+// Tipos que usan Sonnet + extended thinking para razonar precios
+const TIPOS_CON_THINKING = ['procesar_lista', 'procesar_chunk'];
 
 const LIMITES_IA = { free: 0, pro: 150, business: 500 };
 
@@ -203,22 +210,32 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'Falta el campo messages' });
     }
 
-    // 7) Llamar a Claude con prompt caching en el system prompt
-    // El caching reduce el costo de input hasta 10x en requests consecutivos
+    // 7) Llamar a Claude — Sonnet+thinking para listas, Haiku para el resto
+    const usarThinking = TIPOS_CON_THINKING.indexOf(tipo) >= 0;
+    const modelo = usarThinking ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001';
+    const PRECIOS = usarThinking ? PRECIOS_SONNET : PRECIOS_HAIKU;
+
     const apiBody = {
-      model: 'claude-haiku-4-5-20251001',
+      model: modelo,
       max_tokens: maxTokens,
       messages: messages
     };
-    if (system) {
+
+    if (usarThinking) {
+      // budget_tokens: hasta 8000 pero siempre menor a max_tokens
+      apiBody.thinking = { type: 'enabled', budget_tokens: Math.min(8000, maxTokens - 2000) };
+    } else if (system) {
       apiBody.system = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
     }
+
+    const betaHeader = usarThinking ? 'interleaved-thinking-2025-05-14' : 'prompt-caching-2024-07-31';
+
     const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'x-api-key': ANTHROPIC_KEY,
         'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'prompt-caching-2024-07-31',
+        'anthropic-beta': betaHeader,
         'content-type': 'application/json'
       },
       body: JSON.stringify(apiBody)
@@ -242,12 +259,9 @@ module.exports = async function handler(req, res) {
     const cacheReadT = usage.cache_read_input_tokens || 0;
     const cacheCreationT = usage.cache_creation_input_tokens || 0;
 
-    const costo = (
-      (inputT * PRECIOS.input) +
-      (cacheCreationT * PRECIOS.cache_write) +
-      (cacheReadT * PRECIOS.cache_read) +
-      (outputT * PRECIOS.output)
-    ) / 1_000_000;
+    const costo = usarThinking
+      ? ((inputT * PRECIOS_SONNET.input) + (outputT * PRECIOS_SONNET.output)) / 1_000_000
+      : ((inputT * PRECIOS_HAIKU.input) + (cacheCreationT * PRECIOS_HAIKU.cache_write) + (cacheReadT * PRECIOS_HAIKU.cache_read) + (outputT * PRECIOS_HAIKU.output)) / 1_000_000;
 
     // 9) Loguear uso siempre. Solo incrementar contador si es tipo 'chat'
     const updates = [];
@@ -278,8 +292,11 @@ module.exports = async function handler(req, res) {
       limite: limite,
       restantes: limite - ((profile.consultas_ia_mes || 0) + 1)
     };
+    // Filtrar bloques de thinking — el frontend solo necesita los bloques de texto
+    const contentFiltrado = (claudeData.content || []).filter(function(b) { return b.type === 'text'; });
+
     return res.status(200).json({
-      content: claudeData.content,
+      content: contentFiltrado,
       stop_reason: claudeData.stop_reason,
       usage: usage,
       cuota: cuotaInfo

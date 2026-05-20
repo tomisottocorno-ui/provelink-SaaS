@@ -26,8 +26,9 @@ const PRECIOS_SONNET = {
   output: 15.0
 };
 
-// Tipos que usan Sonnet + extended thinking para razonar precios
-const TIPOS_CON_THINKING = ['procesar_lista', 'procesar_chunk'];
+// Solo imágenes usan Sonnet+thinking (una llamada, puede tardar más)
+// Los chunks de PDF van en Haiku para no multiplicar el tiempo x11 partes
+const TIPOS_CON_THINKING = ['procesar_lista'];
 
 const LIMITES_IA = { free: 0, pro: 150, business: 500 };
 

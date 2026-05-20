@@ -290,3 +290,86 @@ drop policy if exists "Provider logos: public read" on storage.objects;
 create policy "Provider logos: public read"
   on storage.objects for select
   using (bucket_id = 'provider-logos');
+
+
+-- ============================================================================
+-- TABLA: pl_auditoria_precios (registro de cada item procesado por el pipeline)
+-- ============================================================================
+create table if not exists public.pl_auditoria_precios (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz default now(),
+  user_id uuid references auth.users(id) on delete cascade not null,
+  proveedor_id text not null,
+  lista_id text,
+  id_original text,
+  nombre_original text,
+  clave_canonica text,
+  tipo text,
+  tamano numeric,
+  unidad_base text,
+  precio_raw numeric,
+  modo_detectado text,
+  precio_total_calculado numeric,
+  precio_unitario_calculado numeric,
+  confianza numeric,
+  razonamiento text,
+  revisado_por_usuario boolean default false,
+  correccion_usuario jsonb,
+  fue_error boolean default false
+);
+
+create index if not exists idx_auditoria_user on public.pl_auditoria_precios(user_id, created_at desc);
+create index if not exists idx_auditoria_clave on public.pl_auditoria_precios(user_id, clave_canonica);
+
+alter table public.pl_auditoria_precios enable row level security;
+
+drop policy if exists "Auditoría: usuarios ven la propia" on public.pl_auditoria_precios;
+create policy "Auditoría: usuarios ven la propia"
+  on public.pl_auditoria_precios for select
+  using (auth.uid() = user_id);
+
+-- La inserción la hace el frontend con anon key (RLS permite insertar datos propios)
+drop policy if exists "Auditoría: usuarios insertan la propia" on public.pl_auditoria_precios;
+create policy "Auditoría: usuarios insertan la propia"
+  on public.pl_auditoria_precios for insert
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Auditoría: usuarios actualizan la propia" on public.pl_auditoria_precios;
+create policy "Auditoría: usuarios actualizan la propia"
+  on public.pl_auditoria_precios for update
+  using (auth.uid() = user_id);
+
+
+-- ============================================================================
+-- TABLA: pl_cache_normalizacion (cache global de nombres normalizados)
+-- ============================================================================
+create table if not exists public.pl_cache_normalizacion (
+  nombre_key text primary key,        -- nombre normalizado para búsqueda (minúsculas, sin puntuación)
+  clave_canonica text not null,
+  tipo text,
+  tamano numeric,
+  unidad_base text,
+  confianza numeric,
+  usos integer default 1,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- Sin RLS: el cache es global (compartido entre todos los usuarios).
+-- Solo se puede leer y upsert, no eliminar.
+alter table public.pl_cache_normalizacion enable row level security;
+
+drop policy if exists "Cache norm: lectura pública autenticada" on public.pl_cache_normalizacion;
+create policy "Cache norm: lectura pública autenticada"
+  on public.pl_cache_normalizacion for select
+  using (auth.role() = 'authenticated');
+
+drop policy if exists "Cache norm: upsert autenticado" on public.pl_cache_normalizacion;
+create policy "Cache norm: upsert autenticado"
+  on public.pl_cache_normalizacion for insert
+  with check (auth.role() = 'authenticated');
+
+drop policy if exists "Cache norm: update autenticado" on public.pl_cache_normalizacion;
+create policy "Cache norm: update autenticado"
+  on public.pl_cache_normalizacion for update
+  using (auth.role() = 'authenticated');

@@ -1112,11 +1112,22 @@ async function procesarImagen(file) {
       return { productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta };
     });
 
-  loading.style.display = 'none';
   if (filasPreview.length === 0) {
+    loading.style.display = 'none';
     showToast('No se detectaron productos. Probá con una foto de mejor calidad', 'error');
     return;
   }
+
+  // Etapas 2-5: normalización, agrupamiento, detección de modo, cálculo
+  try {
+    var provId = $('lista-prov-select').value;
+    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provId, loading);
+  } catch(pipeErr) {
+    console.warn('[Pipeline] Falló, usando extracción básica:', pipeErr.message);
+    showToast('Extraídos sin normalizar (' + pipeErr.message + ')', 'warn');
+  }
+
+  loading.style.display = 'none';
   renderPreview();
   showToast('IA extrajo ' + filasPreview.length + ' productos');
 }
@@ -1275,11 +1286,24 @@ async function procesarPDFConColumna(lineas, nombreColumna) {
     });
     renderPreview();
   }
-  loading.style.display = 'none';
+
   if (filasPreview.length === 0) {
+    loading.style.display = 'none';
     showToast('No se pudieron extraer productos', 'error');
     return;
   }
+
+  // Etapas 2-5: normalización, agrupamiento, detección de modo, cálculo
+  try {
+    var provIdPDF = $('lista-prov-select').value;
+    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provIdPDF, loading);
+  } catch(pipeErrPDF) {
+    console.warn('[Pipeline PDF] Falló, usando extracción básica:', pipeErrPDF.message);
+    showToast('Extraídos sin normalizar (' + pipeErrPDF.message + ')', 'warn');
+  }
+
+  loading.style.display = 'none';
+  renderPreview();
   var msg = 'IA extrajo ' + filasPreview.length + ' productos';
   if (errores > 0) msg += ' (' + errores + ' partes fallaron)';
   showToast(msg, errores > 0 ? 'warn' : 'ok');
@@ -1374,6 +1398,461 @@ async function llamarClaudeProcesarLista(payload) {
   return items;
 }
 
+// ============================================================
+// PIPELINE DE NORMALIZACIÓN Y COMPARACIÓN (Etapas 2-5)
+// ============================================================
+
+var SYSTEM_NORMALIZACION = [
+  'Normalizás nombres de productos de distintos proveedores para poder agruparlos y compararlos.',
+  'Devolvé SOLO un array JSON, sin texto adicional ni markdown.',
+  '',
+  'Para cada producto generá una "clave_canonica" siguiendo estas reglas ESTRICTAS:',
+  '',
+  '1. SIN MARCA: ignorá la marca completamente.',
+  '   "Cocinero", "Costa del Sol", "Cañuelas", "Chacabuco", "Gallo", "Hellmann\'s",',
+  '   "Noalsa", "Fargo", "La Serenísima", "Mastellone", "Sancor" no van en la clave.',
+  '',
+  '2. TIPO ESPECÍFICO: usá el nombre genérico más específico posible.',
+  '   "aceite girasol" ≠ "aceite oliva" ≠ "aceite maíz" (son DISTINTOS)',
+  '   "harina 000" ≠ "harina 0000" ≠ "harina 00" ≠ "harina integral" (son DISTINTOS)',
+  '   "arroz largo fino" ≠ "arroz doble carolina" ≠ "arroz yamaní" (son DISTINTOS)',
+  '   "mayonesa" ≠ "mostaza" ≠ "ketchup"',
+  '',
+  '3. TAMAÑO NORMALIZADO:',
+  '   lts/litros/L/lt → L | kg/kgs/kilos → kg | cc/ml → L (÷1000) | gr/grs → kg (÷1000)',
+  '   "Bolsa x 25 kg" → tamaño 25, unidad kg',
+  '   500 cc → 0.5L | 500 gr → 0.5kg | 1000 ml → 1L',
+  '   "X KG" sin número → tamaño 1, unidad kg',
+  '',
+  '4. FORMATO: "[tipo] [tamaño][unidad]" todo minúsculas sin acentos.',
+  '   Ejemplos: "aceite girasol 5L", "harina 000 25kg", "levadura fresca 0.5kg", "mayonesa 2.9kg"',
+  '',
+  'Devolvé:',
+  '[{',
+  '  "id_original": "el id que te pase",',
+  '  "clave_canonica": "la clave normalizada",',
+  '  "tipo": "categoria: aceite|harina|arroz|azucar|levadura|sal|etc",',
+  '  "tamano": número (ej: 5, 25, 0.5, 1),',
+  '  "unidad_base": "kg" | "L" | "u",',
+  '  "confianza": 0.0 a 1.0',
+  '}]'
+].join('\n');
+
+var SYSTEM_DETECCION_MODO = [
+  'Tu única tarea es determinar si el precio de cada proveedor es UNITARIO o PACK.',
+  'NO hagas ninguna multiplicación ni división en tu respuesta. Solo clasificá.',
+  '',
+  'Definiciones:',
+  '- UNITARIO: el precio es por 1 kg, 1 litro o 1 unidad base.',
+  '- PACK: el precio es el total del bulto/envase completo.',
+  '',
+  'MÉTODO PRINCIPAL (cuando hay 2+ proveedores con precios distintos):',
+  'Si dos precios difieren aproximadamente en un factor igual al tamaño del producto,',
+  'el menor es UNITARIO y el mayor es PACK.',
+  'Ejemplo: aceite girasol 5L → precios 3.580 y 17.900',
+  '→ 17.900 / 3.580 ≈ 5.0 (= tamaño 5L) → 3.580 es UNITARIO, 17.900 es PACK.',
+  'Verificá siempre que la relación sea coherente con el tamaño.',
+  '',
+  'MÉTODO SECUNDARIO (1 solo proveedor o factor no coincide):',
+  '- Presentación con envase ("Bolsa x 25 kg", "Caja x 12 uds", "Bidón x 5 lts") → PACK.',
+  '- Presentación con solo unidad ("LTS", "KG", "BOT", "UNI", "x kg", "x lt") → UNITARIO.',
+  '- Usá rangos esperados del tipo de producto como sanity check.',
+  '',
+  'Devolvé SOLO un array JSON:',
+  '[{',
+  '  "clave_canonica": "clave del grupo",',
+  '  "resultados": [{',
+  '    "id_original": "id de la fila",',
+  '    "proveedor_id": "id del proveedor",',
+  '    "modo": "unitario" | "pack",',
+  '    "confianza": 0.0 a 1.0,',
+  '    "razonamiento": "una línea explicando"',
+  '  }]',
+  '}]'
+].join('\n');
+
+// ---- Helpers de código puro (sin IA) ----
+
+function parsePrecio(str) {
+  if (str === null || str === undefined) return null;
+  var s = String(str).trim();
+  // Formato argentino: "18.449,65" → 18449.65
+  if (/^\d{1,3}(\.\d{3})*(,\d+)?$/.test(s)) {
+    return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+  }
+  return parseFloat(s.replace(',', '')) || null;
+}
+
+function redondear(n) { return Math.round(n * 100) / 100; }
+
+function agruparPorClaveCanonica(filas) {
+  var grupos = {};
+  filas.forEach(function(fila) {
+    var clave = fila.clave_canonica || ('_raw_' + (fila.id_original || fila.productoLista || '?'));
+    if (!grupos[clave]) {
+      grupos[clave] = {
+        clave_canonica: clave,
+        tipo: fila.tipo || '',
+        tamano: fila.tamano || 0,
+        unidad_base: fila.unidad_base || 'u',
+        proveedores: []
+      };
+    }
+    grupos[clave].proveedores.push({
+      proveedor_id: fila.proveedor_id || '',
+      proveedor_nombre: fila.proveedor_nombre || '',
+      id_original: fila.id_original || '',
+      nombre_original: fila.nombre_original || fila.productoLista || '',
+      precio_raw: typeof fila.precio === 'number' ? fila.precio : (parsePrecio(fila.precio) || 0),
+      presentacion_original: fila.presentacion_original || fila.unidad || '',
+      confianza_normalizacion: fila.confianza || 1
+    });
+  });
+  return Object.values(grupos);
+}
+
+function calcularPrecios(grupos, resultadosModo) {
+  var modoPorId = {};
+  (resultadosModo || []).forEach(function(g) {
+    (g.resultados || []).forEach(function(r) { modoPorId[r.id_original] = r; });
+  });
+  var resultado = [];
+  grupos.forEach(function(grupo) {
+    grupo.proveedores.forEach(function(prov) {
+      var modoInfo = modoPorId[prov.id_original];
+      var precio = prov.precio_raw;
+      var tamano = grupo.tamano;
+      var precio_total = null;
+      var precio_unitario = null;
+      if (modoInfo) {
+        if (modoInfo.modo === 'pack') {
+          precio_total = precio;
+          precio_unitario = (tamano && tamano > 0) ? redondear(precio / tamano) : null;
+        } else {
+          precio_unitario = precio;
+          precio_total = (tamano && tamano > 0) ? redondear(precio * tamano) : null;
+        }
+      }
+      resultado.push({
+        id_original: prov.id_original,
+        clave_canonica: grupo.clave_canonica,
+        tipo: grupo.tipo,
+        tamano: tamano,
+        unidad_base: grupo.unidad_base,
+        proveedor_id: prov.proveedor_id,
+        nombre_original: prov.nombre_original,
+        presentacion_original: prov.presentacion_original,
+        precio_raw: precio,
+        modo: modoInfo ? modoInfo.modo : null,
+        precio_total: precio_total,
+        precio_unitario: precio_unitario,
+        confianza: Math.min(
+          prov.confianza_normalizacion || 1,
+          modoInfo ? (modoInfo.confianza || 0.5) : 0.5
+        ),
+        revisar: !modoInfo || (modoInfo.confianza || 0) < 0.7 || (prov.confianza_normalizacion || 1) < 0.7,
+        razonamiento: modoInfo ? modoInfo.razonamiento : null
+      });
+    });
+  });
+  return resultado;
+}
+
+// ---- Cache de normalización (Supabase) ----
+
+function normalKey(nombre) {
+  return (nombre || '').toLowerCase().trim().replace(/\s+/g, ' ').replace(/['"´`‘’“”]/g, '');
+}
+
+var _cacheNorm = null; // en memoria para evitar recargar en el mismo tab
+
+async function getCacheNorm() {
+  if (_cacheNorm) return _cacheNorm;
+  try {
+    var res = await supabase.from('pl_cache_normalizacion').select('*');
+    if (res.error) { console.warn('[CacheNorm] Error cargando:', res.error.message); return {}; }
+    var c = {};
+    (res.data || []).forEach(function(row) { c[row.nombre_key] = row; });
+    _cacheNorm = c;
+    return c;
+  } catch(e) { console.warn('[CacheNorm] excepción:', e); return {}; }
+}
+
+async function guardarCacheNorm(nuevos) {
+  if (!nuevos || !nuevos.length) return;
+  var filas = nuevos
+    .filter(function(n) { return n.clave_canonica && (n.nombre_original || n.productoLista); })
+    .map(function(n) {
+      return {
+        nombre_key: normalKey(n.nombre_original || n.productoLista || ''),
+        clave_canonica: n.clave_canonica,
+        tipo: n.tipo || null,
+        tamano: n.tamano || null,
+        unidad_base: n.unidad_base || null,
+        confianza: n.confianza || null,
+        updated_at: new Date().toISOString()
+      };
+    })
+    .filter(function(f) { return f.nombre_key; });
+  if (!filas.length) return;
+  try {
+    var res = await supabase.from('pl_cache_normalizacion').upsert(filas, { onConflict: 'nombre_key' });
+    if (res.error) console.warn('[CacheNorm] Error guardando:', res.error.message);
+    else _cacheNorm = null; // invalidar cache en memoria
+  } catch(e) { console.warn('[CacheNorm] excepción guardando:', e); }
+}
+
+// ---- Llamadas a la IA ----
+
+async function llamarNormalizarListaIA(items) {
+  // items: [{id, nombre_original, presentacion_original}]
+  // Batches de 80 para no exceder tokens
+  var resultados = [];
+  for (var i = 0; i < items.length; i += 80) {
+    var batch = items.slice(i, i + 80);
+    var prompt = batch.map(function(p) {
+      return 'ID:' + p.id + ' | NOMBRE: ' + p.nombre_original +
+             ' | PRESENTACION: ' + (p.presentacion_original || 'sin dato');
+    }).join('\n');
+    var resp = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      body: JSON.stringify({ tipo: 'normalizar_lista', max_tokens: 4000,
+        system: SYSTEM_NORMALIZACION, messages: [{ role: 'user', content: prompt }] })
+    });
+    var data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Error normalizando');
+    var txt = ((data.content || [])[0] || {}).text || '';
+    txt = txt.replace(/```json|```/g, '').trim();
+    var arr = [];
+    try { arr = JSON.parse(txt); }
+    catch(e) {
+      var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
+      if (ini >= 0 && fin > ini) { try { arr = JSON.parse(txt.slice(ini, fin + 1)); } catch(e2) {} }
+    }
+    resultados = resultados.concat(arr);
+  }
+  return resultados;
+}
+
+async function normalizarConCache(itemsConId, loadingEl) {
+  var cache = await getCacheNorm();
+  var sinCache = [];
+  var resultado = [];
+
+  itemsConId.forEach(function(p) {
+    var key = normalKey(p.nombre_original || p.productoLista || '');
+    var cached = cache[key];
+    if (cached && (cached.confianza || 0) >= 0.75) {
+      resultado.push(Object.assign({}, p, {
+        clave_canonica: cached.clave_canonica,
+        tipo: cached.tipo,
+        tamano: cached.tamano,
+        unidad_base: cached.unidad_base,
+        confianza: cached.confianza,
+        desde_cache: true
+      }));
+    } else {
+      sinCache.push(p);
+    }
+  });
+
+  if (sinCache.length > 0) {
+    if (loadingEl) loadingEl.textContent = 'Normalizando ' + sinCache.length + ' productos nuevos...';
+    var itemsIA = sinCache.map(function(p, j) {
+      return { id: p.id_original || ('i' + j),
+               nombre_original: p.nombre_original || p.productoLista || '',
+               presentacion_original: p.presentacion_original || p.unidad || '' };
+    });
+    var normIA = await llamarNormalizarListaIA(itemsIA);
+
+    // Guardar en cache de forma asíncrona
+    var paraNuevosCache = normIA.map(function(n) {
+      var orig = sinCache.find(function(p) {
+        return (p.id_original || '') === n.id_original ||
+               itemsIA.some(function(ip) { return ip.id === n.id_original; });
+      });
+      return Object.assign({ nombre_original: orig ? (orig.nombre_original || orig.productoLista || '') : '' }, n);
+    });
+    guardarCacheNorm(paraNuevosCache).catch(function(e) { console.warn('[CacheNorm] error guardando:', e); });
+
+    // Indexar por id_original para merge
+    var normIdx = {};
+    normIA.forEach(function(n) { normIdx[n.id_original] = n; });
+    sinCache.forEach(function(p) {
+      var norm = normIdx[p.id_original] || {};
+      resultado.push(Object.assign({}, p, norm, {
+        id_original: p.id_original,
+        nombre_original: p.nombre_original || p.productoLista || '',
+        desde_cache: false
+      }));
+    });
+  }
+
+  var nCache = resultado.filter(function(r) { return r.desde_cache; }).length;
+  console.log('[Normalización] Cache: ' + nCache + '/' + itemsConId.length + ' · IA: ' + sinCache.length);
+  return resultado;
+}
+
+async function llamarDetectarModoIA(grupos) {
+  var textoGrupos = grupos.map(function(g) {
+    var provStr = g.proveedores.map(function(p) {
+      return '  ID:' + p.id_original +
+             ' | Proveedor: ' + (p.proveedor_nombre || p.proveedor_id) +
+             ' | Precio: ' + p.precio_raw +
+             ' | Presentacion: ' + (p.presentacion_original || 'sin dato');
+    }).join('\n');
+    return 'PRODUCTO: ' + g.clave_canonica + ' | Tamaño: ' + g.tamano + ' ' + g.unidad_base + '\n' + provStr;
+  }).join('\n\n');
+
+  var resp = await fetch('/api/claude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+    body: JSON.stringify({ tipo: 'detectar_modo_precios', max_tokens: 4000,
+      system: SYSTEM_DETECCION_MODO, messages: [{ role: 'user', content: textoGrupos }] })
+  });
+  var data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'Error detectando modo');
+  var txt = ((data.content || [])[0] || {}).text || '';
+  txt = txt.replace(/```json|```/g, '').trim();
+  try { return JSON.parse(txt); }
+  catch(e) {
+    var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
+    if (ini >= 0 && fin > ini) { try { return JSON.parse(txt.slice(ini, fin + 1)); } catch(e2) {} }
+    return [];
+  }
+}
+
+// ---- Auditoría ----
+
+async function guardarAuditoriaPrecios(items, listaId, proveedorId) {
+  if (!items || !items.length) return;
+  var filas = items
+    .filter(function(p) { return p.clave_canonica; })
+    .map(function(p) {
+      return {
+        user_id: sesion.user.id,
+        proveedor_id: proveedorId,
+        lista_id: listaId,
+        id_original: p.id_original || null,
+        nombre_original: p.productoLista || p.nombre_original || null,
+        clave_canonica: p.clave_canonica || null,
+        tipo: p.tipo || null,
+        tamano: p.tamano || null,
+        unidad_base: p.unidad_base || null,
+        precio_raw: p.precio || p.precio_raw || null,
+        modo_detectado: p.modo || null,
+        precio_total_calculado: p.precio_total || null,
+        precio_unitario_calculado: p.precio_unitario || null,
+        confianza: p.confianza || null,
+        razonamiento: p.razonamiento || null
+      };
+    });
+  if (!filas.length) return;
+  var res = await supabase.from('pl_auditoria_precios').insert(filas);
+  if (res.error) console.warn('[Auditoría] Error:', res.error.message);
+  else console.log('[Auditoría] Guardados', filas.length, 'items');
+}
+
+// ---- Orquestador principal: Etapas 2-5 ----
+
+async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) {
+  var provNombre = (proveedores.find(function(p) { return p.id === proveedorId; }) || {}).nombre || '';
+
+  // Preparar items con IDs y campos estandarizados
+  var ts = Date.now();
+  var itemsConId = filasBase.map(function(it, idx) {
+    return Object.assign({}, it, {
+      id_original: 'n' + ts + '_' + idx,
+      nombre_original: it.productoLista || '',
+      presentacion_original: it.unidad || '',
+      proveedor_id: proveedorId,
+      proveedor_nombre: provNombre
+    });
+  });
+
+  // Etapa 2: Normalización con cache
+  if (loadingEl) loadingEl.textContent = 'Normalizando nombres de productos...';
+  var normalizadas = await normalizarConCache(itemsConId, loadingEl);
+
+  // Etapa 3: Agrupar por clave canónica (solo proveedor actual)
+  var gruposPropios = agruparPorClaveCanonica(normalizadas);
+
+  // Enriquecer con datos de OTROS proveedores para comparación cross-proveedor
+  var gruposConComparacion = gruposPropios.map(function(g) {
+    var enriquecido = Object.assign({}, g, { proveedores: g.proveedores.slice() });
+    // Solo buscar si la clave no empieza con "_raw_" (sin normalizar)
+    if (g.clave_canonica.indexOf('_raw_') === 0) return enriquecido;
+    listas.forEach(function(l) {
+      if (l.proveedor_id === proveedorId) return; // saltar proveedor actual
+      var otroProvNombre = (proveedores.find(function(p) { return p.id === l.proveedor_id; }) || {}).nombre || '';
+      (l.items || []).forEach(function(it) {
+        if (it.clave_canonica && it.clave_canonica === g.clave_canonica) {
+          enriquecido.proveedores.push({
+            proveedor_id: l.proveedor_id,
+            proveedor_nombre: otroProvNombre,
+            id_original: 'ext_' + l.proveedor_id + '_' + (it.id_original || it.productoLista || ''),
+            nombre_original: it.productoLista || '',
+            precio_raw: it.precio || 0,
+            presentacion_original: it.unidad || '',
+            confianza_normalizacion: 1
+          });
+        }
+      });
+    });
+    return enriquecido;
+  });
+
+  // Etapa 4: Detectar modo (batches de 30)
+  if (loadingEl) loadingEl.textContent = 'Detectando modo de precio (pack vs. unitario)...';
+  var todosLosModos = [];
+  for (var i = 0; i < gruposConComparacion.length; i += 30) {
+    var batch = gruposConComparacion.slice(i, i + 30);
+    try {
+      var modos = await llamarDetectarModoIA(batch);
+      todosLosModos = todosLosModos.concat(modos);
+    } catch(e) {
+      console.warn('[Pipeline] Error en batch modo ' + i + ':', e.message);
+    }
+  }
+
+  // Etapa 5: Calcular precios finales (código puro)
+  var productosFinales = calcularPrecios(gruposPropios, todosLosModos);
+
+  // Mapear de vuelta al formato de filasPreview, conservando campos editables originales
+  var idxPorId = {};
+  itemsConId.forEach(function(it, idx) { idxPorId[it.id_original] = idx; });
+
+  var resultado = productosFinales.map(function(p) {
+    var idx = idxPorId[p.id_original];
+    var orig = idx !== undefined ? filasBase[idx] : {};
+    return Object.assign({}, orig, {
+      productoLista: orig.productoLista || p.nombre_original || '',
+      precio: orig.precio || p.precio_raw || 0,
+      unidad: orig.unidad || p.presentacion_original || '',
+      // Mantener alerta original O marcar si revisar
+      alerta: orig.alerta || false,
+      // Campos del pipeline
+      id_original: p.id_original,
+      clave_canonica: (p.clave_canonica && p.clave_canonica.indexOf('_raw_') !== 0) ? p.clave_canonica : '',
+      tipo: p.tipo || '',
+      tamano: p.tamano || 0,
+      unidad_base: p.unidad_base || 'u',
+      modo: p.modo || null,
+      precio_total: p.precio_total || null,
+      precio_unitario: p.precio_unitario || null,
+      confianza: p.confianza || 0,
+      revisar: p.revisar || false,
+      razonamiento: p.razonamiento || null
+    });
+  });
+
+  console.log('[Pipeline] Completado: ' + resultado.length + ' items · ' +
+    resultado.filter(function(r){return r.modo;}).length + ' con modo detectado · ' +
+    resultado.filter(function(r){return r.revisar;}).length + ' para revisar');
+  return resultado;
+}
+
 function renderPreview() {
   var tabla = $('preview-tabla');
   if (filasPreview.length === 0) {
@@ -1382,18 +1861,60 @@ function renderPreview() {
     $('btn-guardar-lista').disabled = true;
     return;
   }
-  var alertas = filasPreview.filter(function(it) { return it.alerta; }).length;
-  $('preview-info').textContent = alertas > 0
-    ? 'La IA marcó ' + alertas + ' producto(s) con precio dudoso (fondo naranja). Revisalos antes de guardar.'
-    : 'Revisá y editá si hace falta. Después tocá "Guardar".';
+  var alertas  = filasPreview.filter(function(it) { return it.alerta; }).length;
+  var revisares = filasPreview.filter(function(it) { return it.revisar; }).length;
+  var conModo  = filasPreview.filter(function(it) { return it.modo; }).length;
+
+  var infoMsg = '';
+  if (conModo > 0) {
+    infoMsg = '✅ Pipeline: ' + conModo + ' productos normalizados';
+    if (revisares > 0) infoMsg += ' · ⚠️ ' + revisares + ' para revisar (fondo naranja)';
+    infoMsg += '. Editá si hace falta y guardá.';
+  } else if (alertas > 0) {
+    infoMsg = 'La IA marcó ' + alertas + ' producto(s) con precio dudoso. Revisalos antes de guardar.';
+  } else {
+    infoMsg = 'Revisá y editá si hace falta. Después tocá "Guardar".';
+  }
+  $('preview-info').textContent = infoMsg;
+
   var html = '';
   filasPreview.forEach(function(it, idx) {
-    var alertStyle = it.alerta ? ' style="background:var(--warn-soft);border-color:var(--warn-border);border-width:1px;border-style:solid;"' : '';
-    html += '<div class="preview-fila"' + alertStyle + '>' +
-      '<input type="text" class="nombre" value="' + escapeHtmlAttr(it.productoLista) + '" oninput="editarFilaPreview(' + idx + ',\'nombre\',this.value)" placeholder="Nombre">' +
-      '<input type="text" class="unidad-input" value="' + escapeHtmlAttr(it.unidad || '') + '" oninput="editarFilaPreview(' + idx + ',\'unidad\',this.value)" placeholder="Ej: 1 kg">' +
-      '<input type="number" step="0.01" class="precio" value="' + it.precio + '" oninput="editarFilaPreview(' + idx + ',\'precio\',this.value)">' +
+    var necesitaFlag = it.alerta || it.revisar;
+    var alertStyle = necesitaFlag
+      ? 'background:var(--warn-soft);border-color:var(--warn-border);border-width:1px;border-style:solid;'
+      : '';
+
+    // Info del pipeline (clave canónica + modo + precio unitario)
+    var pipelineHtml = '';
+    if (it.clave_canonica) {
+      var modoLabel = it.modo === 'pack' ? '📦 bulto'
+                    : it.modo === 'unitario' ? '⚖️ x unidad'
+                    : '❓ modo?';
+      var precioUnitStr = '';
+      if (it.precio_unitario != null && it.unidad_base && it.unidad_base !== 'u') {
+        precioUnitStr = ' · <strong>$' +
+          Number(it.precio_unitario).toLocaleString('es-AR', { maximumFractionDigits: 2 }) +
+          '/' + it.unidad_base + '</strong>';
+      }
+      var confStr = it.confianza != null ? ' · ' + Math.round(it.confianza * 100) + '%' : '';
+      var revisarStr = it.revisar ? ' <span style="color:var(--warn);font-weight:600;">⚠️</span>' : '';
+      pipelineHtml = '<div style="flex-basis:100%;font-size:10.5px;color:var(--text-muted);' +
+        'margin-top:3px;padding:2px 4px 0;line-height:1.4;">' +
+        '<span style="color:var(--text-2);font-weight:500;">' + escapeHtml(it.clave_canonica) + '</span>' +
+        ' · ' + modoLabel + precioUnitStr + confStr + revisarStr +
+        '</div>';
+    }
+
+    var filaStyle = 'style="' + alertStyle + (it.clave_canonica ? 'flex-wrap:wrap;' : '') + '"';
+    html += '<div class="preview-fila" ' + filaStyle + '>' +
+      '<input type="text" class="nombre" value="' + escapeHtmlAttr(it.productoLista) + '" ' +
+        'oninput="editarFilaPreview(' + idx + ',\'nombre\',this.value)" placeholder="Nombre">' +
+      '<input type="text" class="unidad-input" value="' + escapeHtmlAttr(it.unidad || '') + '" ' +
+        'oninput="editarFilaPreview(' + idx + ',\'unidad\',this.value)" placeholder="Ej: 1 kg">' +
+      '<input type="number" step="0.01" class="precio" value="' + it.precio + '" ' +
+        'oninput="editarFilaPreview(' + idx + ',\'precio\',this.value)">' +
       '<button class="btn-icon" onclick="borrarFilaPreview(' + idx + ')" title="Borrar">' + Icon.trash() + '</button>' +
+      pipelineHtml +
     '</div>';
   });
   tabla.innerHTML = html;
@@ -1470,6 +1991,14 @@ async function guardarLista() {
           items: items
         });
       if (error) throw error;
+    }
+
+    // Auditoría asíncrona (no bloquea el guardado)
+    var itemsNormalizados = items.filter(function(it) { return it.clave_canonica; });
+    if (itemsNormalizados.length > 0) {
+      var listaAuditId = Date.now().toString();
+      guardarAuditoriaPrecios(itemsNormalizados, listaAuditId, proveedorId)
+        .catch(function(e) { console.warn('[Auditoría] error:', e); });
     }
 
     showToast('Lista guardada (' + items.length + ' items)', 'success');

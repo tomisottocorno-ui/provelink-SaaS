@@ -29,6 +29,8 @@ const PRECIOS_SONNET = {
 // Solo imágenes usan Sonnet+thinking (una llamada, puede tardar más)
 // Los chunks de PDF van en Haiku para no multiplicar el tiempo x11 partes
 const TIPOS_CON_THINKING = ['procesar_lista'];
+// Sonnet sin thinking: necesita visión o razonamiento comparativo pero no extended thinking
+const TIPOS_SONNET_SIN_THINKING = ['detectar_modo_precios'];
 
 const LIMITES_IA = { free: 0, pro: 150, business: 500 };
 
@@ -95,7 +97,8 @@ module.exports = async function handler(req, res) {
 
     // Los tipos relacionados con procesar listas NO consumen cuota de IA
     // pero tienen sus propias restricciones por plan
-    const tiposProcesarLista = ['procesar_lista', 'detectar_columnas', 'procesar_chunk'];
+    const tiposProcesarLista = ['procesar_lista', 'detectar_columnas', 'procesar_chunk',
+                               'normalizar_lista', 'detectar_modo_precios'];
     const esProcesarLista = tiposProcesarLista.indexOf(tipo) >= 0;
 
     // expandir_query: usado para expandir abreviaciones en el buscador.
@@ -211,10 +214,11 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'Falta el campo messages' });
     }
 
-    // 7) Llamar a Claude — Sonnet+thinking para listas, Haiku para el resto
+    // 7) Llamar a Claude — tres tiers: Sonnet+thinking / Sonnet plain / Haiku
     const usarThinking = TIPOS_CON_THINKING.indexOf(tipo) >= 0;
-    const modelo = usarThinking ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001';
-    const PRECIOS = usarThinking ? PRECIOS_SONNET : PRECIOS_HAIKU;
+    const usarSonnet   = usarThinking || TIPOS_SONNET_SIN_THINKING.indexOf(tipo) >= 0;
+    const modelo = usarSonnet ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001';
+    const PRECIOS = usarSonnet ? PRECIOS_SONNET : PRECIOS_HAIKU;
 
     const apiBody = {
       model: modelo,
@@ -260,7 +264,7 @@ module.exports = async function handler(req, res) {
     const cacheReadT = usage.cache_read_input_tokens || 0;
     const cacheCreationT = usage.cache_creation_input_tokens || 0;
 
-    const costo = usarThinking
+    const costo = usarSonnet
       ? ((inputT * PRECIOS_SONNET.input) + (outputT * PRECIOS_SONNET.output)) / 1_000_000
       : ((inputT * PRECIOS_HAIKU.input) + (cacheCreationT * PRECIOS_HAIKU.cache_write) + (cacheReadT * PRECIOS_HAIKU.cache_read) + (outputT * PRECIOS_HAIKU.output)) / 1_000_000;
 

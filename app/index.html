@@ -1159,7 +1159,7 @@ async function procesarImagen(file) {
 
   var base64 = await fileToBase64(file);
   var proveedorId = $('lista-prov-select').value;
-  var prompt = 'Esta imagen es una lista de precios de un proveedor. Extrae cada producto con su precio y unidad.\n\nFORMATO DE RESPUESTA OBLIGATORIO:\n- Tu respuesta debe ser ÚNICAMENTE un array JSON válido.\n- Empezá con [ y terminá con ]\n- NO incluyas texto explicativo antes ni después.\n- NO uses markdown ni bloques de código.\n- Cada elemento: {"nombre": "...", "precio": numero, "unidad": "..."}\n- nombre: nombre COMPLETO del producto (marca, variedad)\n- precio: número decimal (ej: 9644.07)\n- unidad: tamaño/presentación (ej: "5 kg", "500 g", "1 lt", "250 ml"). Si está en el nombre igual extraéla. Si no hay info de cantidad, usá ""\n- Ignorá encabezados, totales, fechas y filas que no sean productos';
+  var prompt = 'Sos un asistente especializado en leer listas de precios de distribuidores argentinos.\n\nTAREA CRÍTICA: para cada producto, determiná si el precio es POR UNIDAD INDIVIDUAL o POR PACK/CAJA antes de extraerlo.\n\nRAZONAMIENTO OBLIGATORIO:\n1. ¿El nombre indica que viene en pack? (buscá: "x N uds", "x N u.", "caja x N", "display x N", "pack x N", "fardo x N", "bandeja x N")\n2. ¿El precio tiene sentido para UNA unidad de ese producto? Usá tu conocimiento general de precios de distribuidoras argentinas.\n3. Si el precio parece ser por unidad individual (razonable para 1 solo producto), registralo tal cual.\n4. Si el precio parece ser por el pack completo, registralo tal cual igualmente — no lo dividas.\n5. Si no podés determinarlo con certeza, marcá alerta: true para que el usuario lo revise.\n\nFORMATO DE RESPUESTA OBLIGATORIO:\n- ÚNICAMENTE un array JSON válido. Empezá con [ y terminá con ]\n- Sin texto antes ni después, sin markdown, sin bloques de código.\n- Cada elemento: {"nombre":"...","precio":numero,"unidad":"...","alerta":false}\n- nombre: nombre COMPLETO (marca, variedad, tamaño, cantidad de pack si corresponde)\n- precio: número decimal exacto tal como aparece en la lista\n- unidad: presentación del envase individual (ej: "1 kg", "500 g", "1 lt"). Si está en el nombre, extraéla igual. Si no hay info, usá ""\n- alerta: true solo si hay ambigüedad real entre precio por unidad vs precio por pack\n- Ignorá encabezados, totales, fechas y filas que no sean productos';
 
   var items = await llamarClaudeProcesarLista({
     tipo: 'procesar_lista',
@@ -1177,7 +1177,7 @@ async function procesarImagen(file) {
   filasPreview = items
     .filter(function(it) { return it.nombre && it.precio > 0; })
     .map(function(it) {
-      return { productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim() };
+      return { productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta };
     });
 
   loading.style.display = 'none';
@@ -1245,7 +1245,7 @@ async function procesarPDF(file) {
 }
 
 async function detectarColumnasPDF(muestraTexto) {
-  var prompt = 'Mirá esta muestra de una lista de precios. Identificá las columnas que parecen ser PRECIOS (puede haber varias: precio lista, precio con descuento, precio mayorista, etc).\n\nDevolvé EXCLUSIVAMENTE un JSON con este formato:\n{"precios":[{"nombre":"nombre/encabezado de la columna","ejemplo":"valor de ejemplo"}, ...]}\n\nIMPORTANTE: solo columnas de PRECIO (números monetarios). No incluyas códigos, cantidades de stock, ni descripciones.\n\nMuestra:\n\n' + muestraTexto;
+  var prompt = 'Mirá esta muestra de una lista de precios de un distribuidor argentino. Identificá las columnas que parecen ser PRECIOS (puede haber varias: precio lista, precio con descuento, precio mayorista, precio por mayor, etc).\n\nDevolvé EXCLUSIVAMENTE un JSON con este formato:\n{"precios":[{"nombre":"nombre/encabezado de la columna","ejemplo":"valor de ejemplo"}, ...]}\n\nIMPORTANTE:\n- Solo columnas de PRECIO (números monetarios). No incluyas códigos, cantidades de stock, ni descripciones.\n- Si ves columnas como "PRECIO UNIT" y "PRECIO CAJA", incluí ambas — son precios diferentes.\n- El ejemplo debe ser un valor numérico real de esa columna.\n\nMuestra:\n\n' + muestraTexto;
   var proveedorId = $('lista-prov-select').value;
   var resp = await fetch('/api/claude', {
     method: 'POST',
@@ -1338,7 +1338,7 @@ async function procesarPDFConColumna(lineas, nombreColumna) {
     }
     items.forEach(function(it) {
       if (it.nombre && it.precio > 0) {
-        filasPreview.push({ productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim() });
+        filasPreview.push({ productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta });
       }
     });
     renderPreview();
@@ -1358,7 +1358,7 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna) {
   var textoCrudo = chunkLineas.join('\n');
   // Si el texto es muy largo, reducir a 20000 chars (unas 60-80 líneas = seguro)
   if (textoCrudo.length > 20000) textoCrudo = textoCrudo.slice(0, 20000);
-  var prompt = 'Texto crudo de una lista de precios. Extraé nombre, precio y unidad de medida/presentación.\n\nDevolvé EXCLUSIVAMENTE un array JSON sin texto adicional:\n[{"nombre":"...","precio":numero,"unidad":"..."}, ...]\n\n- nombre: nombre COMPLETO del producto (marca, variedad)\n- precio: de la columna "' + nombreColumna + '", solo número decimal (ej: 9644.07)\n- unidad: tamaño/presentación del envase (ej: "5 kg", "500 g", "1 lt", "250 ml", "10 u"). Si está en el nombre del producto extraéla igual. Si no hay info de cantidad, usá ""\n- Ignorá encabezados, totales, líneas vacías\n- Incluí TODOS los productos sin omitir ninguno\n\nTexto:\n\n' + textoCrudo;
+  var prompt = 'Sos un asistente especializado en leer listas de precios de distribuidores argentinos.\n\nTAREA CRÍTICA: para cada producto, determiná si el precio es POR UNIDAD INDIVIDUAL o POR PACK/CAJA antes de extraerlo.\n\nRAZONAMIENTO OBLIGATORIO:\n1. ¿El nombre indica que viene en pack? (buscá: "x N uds", "x N u.", "caja x N", "display x N", "pack x N", "fardo x N", "bandeja x N")\n2. ¿El precio de la columna "' + nombreColumna + '" tiene sentido para UNA unidad de ese producto? Usá tu conocimiento de precios de distribuidoras argentinas.\n3. Registrá el precio TAL COMO APARECE en la lista (no multipliques ni dividas).\n4. Si no podés determinarlo con certeza, marcá alerta: true para que el usuario lo revise.\n\nFORMATO DE RESPUESTA OBLIGATORIO:\n- ÚNICAMENTE un array JSON válido, sin texto antes ni después, sin markdown.\n- Cada elemento: {"nombre":"...","precio":numero,"unidad":"...","alerta":false}\n- nombre: nombre COMPLETO del producto (marca, variedad, tamaño, cantidad de pack si aplica)\n- precio: de la columna "' + nombreColumna + '", número decimal exacto (ej: 9644.07)\n- unidad: presentación del envase individual (ej: "5 kg", "500 g", "1 lt", "250 ml"). Si está en el nombre, extraéla igual. Si no hay info, usá ""\n- alerta: true solo si hay ambigüedad real entre precio por unidad vs precio por pack\n- Ignorá encabezados, totales, líneas vacías\n- Incluí TODOS los productos sin omitir ninguno\n\nTexto:\n\n' + textoCrudo;
   var proveedorId = $('lista-prov-select').value;
   var resp = await fetch('/api/claude', {
     method: 'POST',
@@ -1450,10 +1450,14 @@ function renderPreview() {
     $('btn-guardar-lista').disabled = true;
     return;
   }
-  $('preview-info').textContent = 'Revisá y editá si hace falta. Después tocá "Guardar".';
+  var alertas = filasPreview.filter(function(it) { return it.alerta; }).length;
+  $('preview-info').textContent = alertas > 0
+    ? 'La IA marcó ' + alertas + ' producto(s) con precio dudoso (fondo naranja). Revisalos antes de guardar.'
+    : 'Revisá y editá si hace falta. Después tocá "Guardar".';
   var html = '';
   filasPreview.forEach(function(it, idx) {
-    html += '<div class="preview-fila">' +
+    var alertStyle = it.alerta ? ' style="background:var(--warn-soft);border-color:var(--warn-border);border-width:1px;border-style:solid;"' : '';
+    html += '<div class="preview-fila"' + alertStyle + '>' +
       '<input type="text" class="nombre" value="' + escapeHtmlAttr(it.productoLista) + '" oninput="editarFilaPreview(' + idx + ',\'nombre\',this.value)" placeholder="Nombre">' +
       '<input type="text" class="unidad-input" value="' + escapeHtmlAttr(it.unidad || '') + '" oninput="editarFilaPreview(' + idx + ',\'unidad\',this.value)" placeholder="Ej: 1 kg">' +
       '<input type="number" step="0.01" class="precio" value="' + it.precio + '" oninput="editarFilaPreview(' + idx + ',\'precio\',this.value)">' +

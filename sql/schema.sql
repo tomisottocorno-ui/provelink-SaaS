@@ -54,9 +54,13 @@ create table if not exists public.proveedores (
   nombre text not null,
   telefono text,
   logo_url text,
+  precio_tipo text default 'envase' check (precio_tipo in ('envase', 'kglt')),
   creado timestamptz default now() not null,
   actualizado timestamptz default now() not null
 );
+
+-- Migración: agregar precio_tipo a proveedores existentes
+alter table public.proveedores add column if not exists precio_tipo text default 'envase' check (precio_tipo in ('envase', 'kglt'));
 
 create index if not exists idx_proveedores_user on public.proveedores(user_id);
 

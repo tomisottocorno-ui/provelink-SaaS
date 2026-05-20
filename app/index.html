@@ -334,6 +334,14 @@
       </div>
     </div>
 
+    <div class="form-row">
+      <label for="prov-precio-tipo">¿Cómo lista los precios?</label>
+      <select id="prov-precio-tipo">
+        <option value="envase">Por envase (ej: $2.851 por botella de 5lt)</option>
+        <option value="kglt">Por kg/lt (ej: $570 por litro)</option>
+      </select>
+    </div>
+
     <div class="modal-actions">
       <button class="btn" onclick="cerrarModalProv()">Cancelar</button>
       <button class="btn primary" id="btn-guardar-prov" onclick="guardarProveedor()">Guardar</button>
@@ -833,9 +841,9 @@ function editarProveedor(id) {
   logoQuitado = false;
   $('modal-prov-titulo').textContent = 'Editar proveedor';
   $('prov-nombre').value = p.nombre || '';
-  // Mostrar solo la parte sin +54 para edición
   var telEdit = (p.telefono || '').replace(/^\+54\s?/, '').trim();
   $('prov-telefono').value = telEdit;
+  $('prov-precio-tipo').value = p.precio_tipo || 'envase';
   $('prov-logo-input').value = '';
   resetLogoPreview(p.nombre, p.logo_url);
   $('modal-prov').classList.add('open');
@@ -852,6 +860,7 @@ async function guardarProveedor() {
   var nombre = $('prov-nombre').value.trim();
   var telRaw = $('prov-telefono').value.replace(/\D/g, '').trim();
   var tel = telRaw ? ('+54' + telRaw) : '';
+  var precioTipo = $('prov-precio-tipo').value || 'envase';
   if (!nombre) {
     showToast('El nombre es obligatorio', 'error');
     return;
@@ -862,7 +871,7 @@ async function guardarProveedor() {
   try {
     if (provEditandoId) {
       // UPDATE
-      var updateData = { nombre: nombre, telefono: tel || null, actualizado: new Date().toISOString() };
+      var updateData = { nombre: nombre, telefono: tel || null, precio_tipo: precioTipo, actualizado: new Date().toISOString() };
       if (logoQuitado) {
         updateData.logo_url = null;
       } else if (logoFile) {
@@ -880,7 +889,7 @@ async function guardarProveedor() {
       // INSERT: crear primero, luego subir logo con el id real
       var { data: inserted, error: insError } = await supabase
         .from('proveedores')
-        .insert({ user_id: sesion.user.id, nombre: nombre, telefono: tel || null })
+        .insert({ user_id: sesion.user.id, nombre: nombre, telefono: tel || null, precio_tipo: precioTipo })
         .select()
         .single();
       if (insError) throw insError;
@@ -1775,7 +1784,7 @@ function formatPrecio(n) {
   return Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function parsearPrecioBase(precio, unidad, nombre) {
+function parsearPrecioBase(precio, unidad, nombre, precioTipo) {
   var texto = (unidad || nombre || '').toLowerCase();
   var patrones = [
     { re: /(\d+(?:[.,]\d+)?)\s*(?:gr?|gramos?)\b/, toBase: function(n) { return n/1000; }, base: 'kg' },
@@ -1790,7 +1799,15 @@ function parsearPrecioBase(precio, unidad, nombre) {
       var cant = parseFloat(m[1].replace(',', '.'));
       if (cant > 0) {
         var base = patrones[i].toBase(cant);
-        if (base > 0) return { precioBase: precio / base, unidadBase: patrones[i].base };
+        if (base > 0) {
+          if (precioTipo === 'kglt' && patrones[i].base !== 'u') {
+            // Precio ya es por kg/lt → total = precio × cantidad
+            return { precioBase: precio, precioTotal: precio * base, unidadBase: patrones[i].base };
+          } else {
+            // Precio es por envase → base = precio / cantidad
+            return { precioBase: precio / base, precioTotal: precio, unidadBase: patrones[i].base };
+          }
+        }
       }
     }
   }
@@ -2061,6 +2078,8 @@ function renderBuscarProducto(expansionesExtras) {
 
   provsOrden.forEach(function(pid) {
     var prov = porProv[pid];
+    var provObj = proveedores.find(function(p) { return p.id === pid; });
+    var precioTipo = provObj ? (provObj.precio_tipo || 'envase') : 'envase';
     html += '<div style="background:var(--bg-elev);border:2px solid var(--border-hi);border-radius:12px;padding:14px;">';
     html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);">';
     html += '<div><div style="font-weight:600;font-size:15px;">' + escapeHtml(prov.nombre) + '</div>';
@@ -2071,11 +2090,12 @@ function renderBuscarProducto(expansionesExtras) {
       var enPed = enPedido[it.itemId] || 0;
       var bg = enPed > 0 ? 'background:rgba(96,165,250,0.08);border-color:#60a5fa;' : '';
       html += '<div style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);' + bg + 'display:flex;align-items:center;justify-content:space-between;gap:8px;">';
-      var pb = parsearPrecioBase(it.precio, it.unidad, it.productoLista);
+      var pb = parsearPrecioBase(it.precio, it.unidad, it.productoLista, precioTipo);
+      var precioMostrar = (pb && precioTipo === 'kglt') ? pb.precioTotal : it.precio;
       var pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
       html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + pbHtml + '</div>';
       html += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">';
-      html += '<strong style="font-size:13px;white-space:nowrap;color:#4ade80;">$' + formatPrecio(it.precio) + '</strong>';
+      html += '<strong style="font-size:13px;white-space:nowrap;color:#4ade80;">$' + formatPrecio(precioMostrar) + '</strong>';
       if (enPed > 0) {
         html += '<button class="btn" data-restar="' + it.itemId + '" style="padding:2px 7px;font-size:12px;">−</button>';
         html += '<span style="font-size:13px;font-weight:700;min-width:20px;text-align:center;">' + enPed + '</span>';

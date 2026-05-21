@@ -236,23 +236,42 @@ module.exports = async function handler(req, res) {
 
     const betaHeader = usarThinking ? 'interleaved-thinking-2025-05-14' : 'prompt-caching-2024-07-31';
 
-    const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': betaHeader,
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify(apiBody)
-    });
+    // Retry con backoff exponencial para 429 (rate limit) y 529 (overload)
+    const MAX_RETRIES = 4;
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    let claudeResp;
+    let errBody = {};
+    for (let intento = 0; intento <= MAX_RETRIES; intento++) {
+      claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+          'anthropic-beta': betaHeader,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify(apiBody)
+      });
+      if (claudeResp.ok) break;
+      errBody = await claudeResp.json().catch(() => ({}));
+      const status = claudeResp.status;
+      const reintentable = (status === 429 || status === 529 || status === 503);
+      if (!reintentable || intento === MAX_RETRIES) break;
+      // Respetar retry-after si viene; si no, backoff exponencial con jitter
+      const retryAfter = parseFloat(claudeResp.headers.get('retry-after') || '0');
+      const waitMs = retryAfter > 0
+        ? Math.min(retryAfter * 1000, 30000)
+        : Math.min(1000 * Math.pow(2, intento) + Math.random() * 500, 15000);
+      console.warn('[Claude] ' + status + ' — reintentando en ' + waitMs + 'ms (intento ' + (intento + 1) + '/' + MAX_RETRIES + ')');
+      await sleep(waitMs);
+    }
 
     if (!claudeResp.ok) {
-      const errBody = await claudeResp.json().catch(() => ({}));
       console.error('Error Claude:', claudeResp.status, errBody);
       return res.status(502).json({
         error: 'Error al consultar a la IA',
-        detalle: errBody.error && errBody.error.message
+        detalle: errBody.error && errBody.error.message,
+        status: claudeResp.status
       });
     }
 

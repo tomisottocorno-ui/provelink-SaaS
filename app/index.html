@@ -1886,11 +1886,11 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
   console.log('[Pipeline] Modo — heurística: ' + todosLosModos.length +
     ' grupos · IA: ' + gruposParaIA.length + ' grupos');
 
-  // Batches de 60 en PARALELO (Haiku, tolerante a concurrencia)
+  // Batches de 25 en PARALELO (cada grupo lleva varios proveedores, baja TPM)
   if (gruposParaIA.length > 0) {
     var modoPromises = [];
-    for (var j = 0; j < gruposParaIA.length; j += 60) {
-      var batchModo = gruposParaIA.slice(j, j + 60);
+    for (var j = 0; j < gruposParaIA.length; j += 25) {
+      var batchModo = gruposParaIA.slice(j, j + 25);
       modoPromises.push(
         llamarDetectarModoIA(batchModo).catch(function(e) {
           console.warn('[Pipeline] Error batch modo:', e.message);

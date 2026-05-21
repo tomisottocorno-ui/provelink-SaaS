@@ -310,14 +310,6 @@
       </div>
     </div>
 
-    <div class="form-row">
-      <label for="prov-precio-tipo">¿Cómo lista los precios?</label>
-      <select id="prov-precio-tipo">
-        <option value="envase">Por envase (ej: $2.851 por botella de 5lt)</option>
-        <option value="kglt">Por kg/lt (ej: $570 por litro)</option>
-      </select>
-    </div>
-
     <div class="modal-actions">
       <button class="btn" onclick="cerrarModalProv()">Cancelar</button>
       <button class="btn primary" id="btn-guardar-prov" onclick="guardarProveedor()">Guardar</button>
@@ -766,7 +758,6 @@ function editarProveedor(id) {
   $('prov-nombre').value = p.nombre || '';
   var telEdit = (p.telefono || '').replace(/^\+54\s?/, '').trim();
   $('prov-telefono').value = telEdit;
-  $('prov-precio-tipo').value = p.precio_tipo || 'envase';
   $('prov-logo-input').value = '';
   resetLogoPreview(p.nombre, p.logo_url);
   $('modal-prov').classList.add('open');
@@ -783,7 +774,6 @@ async function guardarProveedor() {
   var nombre = $('prov-nombre').value.trim();
   var telRaw = $('prov-telefono').value.replace(/\D/g, '').trim();
   var tel = telRaw ? ('+54' + telRaw) : '';
-  var precioTipo = $('prov-precio-tipo').value || 'envase';
   if (!nombre) {
     showToast('El nombre es obligatorio', 'error');
     return;
@@ -794,7 +784,7 @@ async function guardarProveedor() {
   try {
     if (provEditandoId) {
       // UPDATE
-      var updateData = { nombre: nombre, telefono: tel || null, precio_tipo: precioTipo, actualizado: new Date().toISOString() };
+      var updateData = { nombre: nombre, telefono: tel || null, actualizado: new Date().toISOString() };
       if (logoQuitado) {
         updateData.logo_url = null;
       } else if (logoFile) {
@@ -812,7 +802,7 @@ async function guardarProveedor() {
       // INSERT: crear primero, luego subir logo con el id real
       var { data: inserted, error: insError } = await supabase
         .from('proveedores')
-        .insert({ user_id: sesion.user.id, nombre: nombre, telefono: tel || null, precio_tipo: precioTipo })
+        .insert({ user_id: sesion.user.id, nombre: nombre, telefono: tel || null })
         .select()
         .single();
       if (insError) throw insError;
@@ -1467,11 +1457,20 @@ var SYSTEM_NORMALIZACION = [
   '   "arroz largo fino" ≠ "arroz doble carolina" ≠ "arroz yamaní" (son DISTINTOS)',
   '   "mayonesa" ≠ "mostaza" ≠ "ketchup"',
   '',
-  '3. TAMAÑO NORMALIZADO:',
-  '   lts/litros/L/lt → L | kg/kgs/kilos → kg | cc/ml → L (÷1000) | gr/grs → kg (÷1000)',
-  '   "Bolsa x 25 kg" → tamaño 25, unidad kg',
-  '   500 cc → 0.5L | 500 gr → 0.5kg | 1000 ml → 1L',
-  '   "X KG" sin número → tamaño 1, unidad kg',
+  '3. TAMAÑO NORMALIZADO — convertí TODO a unidades base: kg, L o u.',
+  '   IMPORTANTE: NUNCA dejes "cc", "ml", "gr" como unidad_base. Convertí siempre:',
+  '   - cc, ml (mililitros, centímetros cúbicos = lo mismo) → L dividiendo entre 1000',
+  '   - gr, g (gramos) → kg dividiendo entre 1000',
+  '   - lts, litros, lt, L → L',
+  '   - kg, kgs, kilos → kg',
+  '   - unidades, uds, un, piezas → u',
+  '   Ejemplos OBLIGATORIOS:',
+  '   "500 cc" → tamano: 0.5, unidad_base: "L"  (NO "cc", NO 500)',
+  '   "500 ml" → tamano: 0.5, unidad_base: "L"  (mismo resultado que cc — son iguales)',
+  '   "500 gr" → tamano: 0.5, unidad_base: "kg"',
+  '   "1000 ml" → tamano: 1, unidad_base: "L"',
+  '   "Bolsa x 25 kg" → tamano: 25, unidad_base: "kg"',
+  '   "X KG" sin número → tamano: 1, unidad_base: "kg"',
   '   IMPORTANTE: números seguidos de "meses", "días" o "años" son tiempo de maduración,',
   '   NO son peso ni tamaño. "24 meses", "18 meses" → ignorar, NO incluir como tamaño.',
   '   Ej: "PARMESANO EN BLOQUE 24 MESES" → clave: "queso parmesano 24 meses", tamano: 1, unidad: u',
@@ -1570,6 +1569,55 @@ function parsePrecio(str) {
 
 function redondear(n) { return Math.round(n * 100) / 100; }
 
+// Normaliza unidad_base + tamano a las 3 unidades canonicas: kg, L, u.
+// Esto cubre el caso donde la IA (o el cache) devolvio "cc", "ml", "gr", etc:
+//   { unidad_base: "cc", tamano: 500 }  ->  { unidad_base: "L",  tamano: 0.5 }
+//   { unidad_base: "gr", tamano: 500 }  ->  { unidad_base: "kg", tamano: 0.5 }
+// Tambien re-calcula la clave_canonica si la unidad cambio, para que items con
+// "500cc" y "500ml" caigan en el mismo grupo (cc = mililitros = cm cubicos).
+function canonizarUnidadBase(item) {
+  if (!item || !item.unidad_base) return item;
+  var u = String(item.unidad_base).toLowerCase().trim();
+  var tamano = parseFloat(item.tamano) || 0;
+  var factor = 1;
+  var canon = u;
+
+  if (u === 'cc' || u === 'ml' || u === 'mililitro' || u === 'mililitros') {
+    canon = 'L'; factor = 1/1000;
+  } else if (u === 'lt' || u === 'lts' || u === 'litro' || u === 'litros' || u === 'l') {
+    canon = 'L'; factor = 1;
+  } else if (u === 'gr' || u === 'grs' || u === 'g' || u === 'gramo' || u === 'gramos') {
+    canon = 'kg'; factor = 1/1000;
+  } else if (u === 'kg' || u === 'kgs' || u === 'kilo' || u === 'kilos') {
+    canon = 'kg'; factor = 1;
+  } else if (u === 'u' || u === 'un' || u === 'und' || u === 'uni' || u === 'unidad' || u === 'unidades' || u === 'pieza' || u === 'piezas') {
+    canon = 'u'; factor = 1;
+  }
+
+  if (canon === u && factor === 1) return item; // ya estaba canonica
+
+  var nuevoTamano = tamano > 0 ? tamano * factor : tamano;
+  var nuevaClave = item.clave_canonica;
+  // Reescribir la clave si terminaba en la unidad vieja (ej "coca 500cc" -> "coca 0.5L")
+  if (nuevaClave) {
+    var reUnidad = new RegExp('(\\d+(?:[.,]\\d+)?)\\s*' + u + '$', 'i');
+    if (reUnidad.test(nuevaClave)) {
+      nuevaClave = nuevaClave.replace(reUnidad, function(_, num) {
+        var n = parseFloat(num.replace(',', '.')) * factor;
+        // Formatear sin decimales innecesarios
+        var str = (n % 1 === 0) ? String(n) : String(parseFloat(n.toFixed(3)));
+        return str + canon;
+      });
+    }
+  }
+
+  return Object.assign({}, item, {
+    unidad_base: canon,
+    tamano: nuevoTamano,
+    clave_canonica: nuevaClave
+  });
+}
+
 function agruparPorClaveCanonica(filas) {
   var grupos = {};
   filas.forEach(function(fila) {
@@ -1657,7 +1705,10 @@ async function getCacheNorm() {
     var res = await supabase.from('pl_cache_normalizacion').select('*');
     if (res.error) { console.warn('[CacheNorm] Error cargando:', res.error.message); return {}; }
     var c = {};
-    (res.data || []).forEach(function(row) { c[row.nombre_key] = row; });
+    (res.data || []).forEach(function(row) {
+      // Sanear filas viejas que pueden tener unidad_base = "cc"/"ml"/"gr"
+      c[row.nombre_key] = canonizarUnidadBase(row);
+    });
     _cacheNorm = c;
     return c;
   } catch(e) { console.warn('[CacheNorm] excepción:', e); return {}; }
@@ -1783,12 +1834,15 @@ async function llamarNormalizarListaIA(items) {
   // Batches de 50 en paralelo (antes 80 — generaba ~9000 chars y se truncaba
   // por max_tokens). Cada batch reintenta hasta 3 veces y, si está truncado,
   // se autosubdivide dentro de _normBatch.
+  // Aplica canonizarUnidadBase a cada item para asegurar cc/ml/gr -> L/kg.
   var promises = [];
   var perdidos = [];
   for (var i = 0; i < items.length; i += 50) {
     (function(slice) {
       promises.push(
-        _normBatchConRetry(slice).catch(function(e) {
+        _normBatchConRetry(slice)
+          .then(function(arr) { return arr.map(canonizarUnidadBase); })
+          .catch(function(e) {
           console.error('[Normalización] Batch perdido (' + slice.length + ' items):', e.message);
           slice.forEach(function(it) { perdidos.push(it.id); });
           return [];
@@ -2855,8 +2909,6 @@ function renderBuscarProducto(expansionesExtras) {
 
   provsOrden.forEach(function(pid) {
     var prov = porProv[pid];
-    var provObj = proveedores.find(function(p) { return p.id === pid; });
-    var precioTipo = provObj ? (provObj.precio_tipo || 'envase') : 'envase';
     html += '<div style="background:var(--bg-elev);border:2px solid var(--border-hi);border-radius:12px;padding:14px;">';
     html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);">';
     html += '<div><div style="font-weight:600;font-size:15px;">' + escapeHtml(prov.nombre) + '</div>';
@@ -2867,8 +2919,9 @@ function renderBuscarProducto(expansionesExtras) {
       var enPed = enPedido[it.itemId] || 0;
       var bg = enPed > 0 ? 'background:rgba(96,165,250,0.08);border-color:#60a5fa;' : '';
       html += '<div style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);' + bg + 'display:flex;align-items:center;justify-content:space-between;gap:8px;">';
-      var pb = parsearPrecioBase(it.precio, it.unidad, it.productoLista, precioTipo);
-      var precioMostrar = (pb && precioTipo === 'kglt') ? pb.precioTotal : it.precio;
+      // Mostrar el precio crudo siempre; el "$/unidad" se calcula a modo informativo asumiendo envase
+      var pb = parsearPrecioBase(it.precio, it.unidad, it.productoLista, 'envase');
+      var precioMostrar = it.precio;
       var pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
       html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + pbHtml + '</div>';
       html += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">';

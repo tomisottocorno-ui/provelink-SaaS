@@ -1126,7 +1126,7 @@ async function procesarImagen(file) {
 
   var base64 = await fileToBase64(file);
   var proveedorId = $('lista-prov-select').value;
-  var prompt = 'Extraé productos de esta lista de precios. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques.\n\nDevolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":numero,"unidad":"...","alerta":false}]\n- nombre: nombre completo (marca, variedad, presentación)\n- precio: número decimal exacto tal como aparece en la imagen\n- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n- alerta: true solo si hay dos precios distintos para el mismo producto y no sabés cuál tomar\n- Ignorá encabezados, totales, fechas y filas que no sean productos';
+  var prompt = 'Extraé productos de esta lista de precios argentina. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques, NUNCA conviertas formato.\n\nDevolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":"texto_exacto","unidad":"...","alerta":false}]\n- nombre: nombre completo (marca, variedad, presentación)\n- precio: STRING con el texto EXACTO del precio tal como aparece en la imagen, conservando puntos y comas del formato argentino (ej: "13.996,53" → devolver "13.996,53"). NO conviertas a número.\n- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n- alerta: true solo si hay dos precios distintos para el mismo producto y no sabés cuál tomar\n- Ignorá encabezados, totales, fechas y filas que no sean productos';
 
   var items = await llamarClaudeProcesarLista({
     tipo: 'procesar_lista',
@@ -1142,10 +1142,10 @@ async function procesarImagen(file) {
   });
 
   filasPreview = items
-    .filter(function(it) { return it.nombre && it.precio > 0; })
     .map(function(it) {
-      return { productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta };
-    });
+      return { productoLista: String(it.nombre || '').trim(), precio: parsePrecio(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta };
+    })
+    .filter(function(it) { return it.productoLista && it.precio !== null && it.precio > 0; });
 
   if (filasPreview.length === 0) {
     loading.style.display = 'none';
@@ -1320,8 +1320,9 @@ async function procesarPDFConColumna(lineas, nombreColumna) {
       }
     }
     items.forEach(function(it) {
-      if (it.nombre && it.precio > 0) {
-        filasPreview.push({ productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta });
+      var p = parsePrecio(it.precio);
+      if (it.nombre && p !== null && p > 0) {
+        filasPreview.push({ productoLista: String(it.nombre).trim(), precio: p, unidad: String(it.unidad || '').trim(), alerta: !!it.alerta });
       }
     });
     renderPreview();
@@ -1354,7 +1355,7 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna) {
   var textoCrudo = chunkLineas.join('\n');
   // Si el texto es muy largo, reducir a 20000 chars (unas 60-80 líneas = seguro)
   if (textoCrudo.length > 20000) textoCrudo = textoCrudo.slice(0, 20000);
-  var prompt = 'Extraé productos de esta lista de precios. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques.\n\nDevolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":numero,"unidad":"...","alerta":false}]\n- nombre: nombre completo (marca, variedad, presentación)\n- precio: número exacto de la columna "' + nombreColumna + '" sin ningún cálculo\n- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n- alerta: true solo si hay dos precios distintos para el mismo producto y no sabés cuál tomar\n- Ignorá encabezados, totales, líneas vacías. Incluí TODOS los productos.\n\nTexto:\n\n' + textoCrudo;
+  var prompt = 'Extraé productos de esta lista de precios argentina. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques, NUNCA conviertas formato.\n\nDevolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":"texto_exacto","unidad":"...","alerta":false}]\n- nombre: nombre completo (marca, variedad, presentación)\n- precio: STRING con el texto EXACTO de la columna "' + nombreColumna + '" tal como aparece en el PDF, conservando puntos y comas (ej: "13.996,53" → devolver "13.996,53" como string). NO conviertas a número, NO saques símbolos. Es CRÍTICO mantener el formato argentino original.\n- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n- alerta: true solo si hay dos precios distintos para el mismo producto y no sabés cuál tomar\n- Ignorá encabezados, totales, líneas vacías. Incluí TODOS los productos.\n\nTexto:\n\n' + textoCrudo;
   var proveedorId = $('lista-prov-select').value;
   var resp = await fetch('/api/claude', {
     method: 'POST',
@@ -1524,14 +1525,47 @@ var SYSTEM_DETECCION_MODO = [
 
 // ---- Helpers de código puro (sin IA) ----
 
+// Robusto: maneja AR "1.234,56", US "1,234.56", con/sin símbolos de moneda
+// ("$", "ARS"), y casos ambiguos como "13.996" (3 dígitos después del punto
+// → asume miles AR, porque "$ 13.996" en una lista argentina es 13996, no 13.996).
 function parsePrecio(str) {
   if (str === null || str === undefined) return null;
+  if (typeof str === 'number') return isFinite(str) ? str : null;
   var s = String(str).trim();
-  // Formato argentino: "18.449,65" → 18449.65
-  if (/^\d{1,3}(\.\d{3})*(,\d+)?$/.test(s)) {
-    return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+  if (!s) return null;
+  // Sacar todo lo que no sea dígito, "." o "," ($ ARS espacios símbolos)
+  s = s.replace(/[^\d.,]/g, '');
+  if (!s) return null;
+
+  var lastDot = s.lastIndexOf('.');
+  var lastComma = s.lastIndexOf(',');
+
+  if (lastDot >= 0 && lastComma >= 0) {
+    // Tiene ambos: el ÚLTIMO es el decimal
+    if (lastComma > lastDot) {
+      // AR: "1.234,56" → punto miles, coma decimal
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+      // US: "1,234.56" → coma miles, punto decimal
+      s = s.replace(/,/g, '');
+    }
+  } else if (lastComma >= 0) {
+    // Solo comas: decimal AR ("13,99"); si hay varias, las primeras son miles
+    s = s.replace(/,(?=.*,)/g, '').replace(',', '.');
+  } else if (lastDot >= 0) {
+    var parts = s.split('.');
+    if (parts.length > 2) {
+      // "1.234.567" → puntos son miles
+      s = s.replace(/\./g, '');
+    } else if (parts[1].length === 3) {
+      // "13.996" ambiguo → en contexto AR asumimos miles → 13996
+      s = s.replace(/\./g, '');
+    }
+    // "13.99" o "13.5" → decimal: dejar tal cual
   }
-  return parseFloat(s.replace(',', '')) || null;
+
+  var n = parseFloat(s);
+  return (isNaN(n) || !isFinite(n)) ? null : n;
 }
 
 function redondear(n) { return Math.round(n * 100) / 100; }

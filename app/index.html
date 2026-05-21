@@ -2892,17 +2892,24 @@ function todosLosItems() {
     var prov = proveedores.find(function(p) { return p.id === l.proveedor_id; });
     if (!prov) return;
     (l.items || []).forEach(function(it) {
+      // precio = "cuánto cuesta comprar 1 envase de este producto".
+      // - Modo pack: el precio del PDF YA es el total → precio = it.precio
+      // - Modo unitario: el precio del PDF es por kg/L → precio = it.precio × tamaño
+      // El pipeline calcula esto en precio_total. Si no esta disponible (items
+      // viejos sin pipeline), caemos al precio crudo.
+      var precioFinal = (it.precio_total != null && it.precio_total > 0)
+        ? it.precio_total
+        : it.precio;
       out.push({
         listaId: l.id,
         proveedorId: l.proveedor_id,
         proveedor: prov.nombre,
         provTel: prov.telefono || '',
         productoLista: it.productoLista,
-        precio: it.precio,
+        precio: precioFinal,          // ← total para 1 envase (usado en pedidos)
+        precioRaw: it.precio,         // ← el numero crudo del PDF (referencia)
         unidad: it.unidad || '',
-        // Preservar datos del pipeline para que el display respete el modo
-        // detectado/elegido por el usuario (sin esto, el buscador siempre
-        // asumia pack y dividia el precio).
+        // Preservar datos del pipeline para el display y modo toggle
         clave_canonica: it.clave_canonica || null,
         tipo: it.tipo || null,
         tamano: it.tamano || null,

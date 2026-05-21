@@ -1032,6 +1032,41 @@ function recuperarItemsTruncados(texto) {
   return items;
 }
 
+// Parser tolerante: recorre el texto desde el primer "[" y devuelve TODOS los
+// objetos top-level que estén completos y balanceados, ignorando lo que venga
+// truncado al final. Funciona con objetos anidados y strings con escapes.
+function recuperarObjetosJsonArray(texto) {
+  var ini = texto.indexOf('[');
+  if (ini < 0) return [];
+  var objs = [];
+  var depth = 0;
+  var inString = false;
+  var prevWasEscape = false;
+  var objStart = -1;
+
+  for (var i = ini + 1; i < texto.length; i++) {
+    var c = texto[i];
+    if (inString) {
+      if (prevWasEscape) { prevWasEscape = false; }
+      else if (c === '\\') { prevWasEscape = true; }
+      else if (c === '"') { inString = false; }
+      continue;
+    }
+    if (c === '"') { inString = true; continue; }
+    if (c === '{') {
+      if (depth === 0) objStart = i;
+      depth++;
+    } else if (c === '}') {
+      depth--;
+      if (depth === 0 && objStart >= 0) {
+        try { objs.push(JSON.parse(texto.slice(objStart, i + 1))); } catch(e) {}
+        objStart = -1;
+      }
+    }
+  }
+  return objs;
+}
+
 async function procesarArchivo(event) {
   var file = event.target.files[0];
   if (!file) return;
@@ -1647,7 +1682,7 @@ async function _normBatch(batch) {
   var resp = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
-    body: JSON.stringify({ tipo: 'normalizar_lista', max_tokens: 4000,
+    body: JSON.stringify({ tipo: 'normalizar_lista', max_tokens: 12000,
       system: SYSTEM_NORMALIZACION, messages: [{ role: 'user', content: prompt }] })
   });
   var data = await resp.json();
@@ -1659,22 +1694,41 @@ async function _normBatch(batch) {
   }
   var txt = ((data.content || [])[0] || {}).text || '';
   txt = txt.replace(/```json|```/g, '').trim();
+
+  // Si Claude truncó por max_tokens y el batch es grande, subdividir y rellamar
+  // (cada mitad pedirá su propia respuesta completa)
+  if (data.stop_reason === 'max_tokens' && batch.length > 8) {
+    console.warn('[normBatch] truncado por max_tokens, subdividiendo batch de ' + batch.length);
+    var mitad = Math.ceil(batch.length / 2);
+    var a = await _normBatch(batch.slice(0, mitad));
+    var b = await _normBatch(batch.slice(mitad));
+    return a.concat(b);
+  }
+
+  // Intento 1: parse directo
   try {
     var parsed = JSON.parse(txt);
-    if (!Array.isArray(parsed)) throw new Error('respuesta no es array');
-    return parsed;
-  } catch(e) {
-    var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
-    if (ini >= 0 && fin > ini) {
-      try {
-        var parsed2 = JSON.parse(txt.slice(ini, fin + 1));
-        if (Array.isArray(parsed2)) return parsed2;
-      } catch(e2) {}
-    }
-    // No silenciar: lanzar para que el batch reintente o se reporte
-    console.error('[normBatch] JSON inválido. Inicio respuesta:', txt.slice(0, 300));
-    throw new Error('IA respondió con JSON inválido (' + txt.length + ' chars)');
+    if (Array.isArray(parsed)) return parsed;
+  } catch(e) {}
+
+  // Intento 2: slice entre primer [ y último ]
+  var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
+  if (ini >= 0 && fin > ini) {
+    try {
+      var parsed2 = JSON.parse(txt.slice(ini, fin + 1));
+      if (Array.isArray(parsed2)) return parsed2;
+    } catch(e2) {}
   }
+
+  // Intento 3: recovery — extraer objetos completos de array truncado
+  var recuperados = recuperarObjetosJsonArray(txt);
+  if (recuperados.length > 0) {
+    console.warn('[normBatch] JSON truncado pero recuperados ' + recuperados.length + '/' + batch.length + ' items');
+    return recuperados;
+  }
+
+  console.error('[normBatch] JSON inválido. Inicio respuesta:', txt.slice(0, 300));
+  throw new Error('IA respondió con JSON inválido (' + txt.length + ' chars)');
 }
 
 async function _normBatchConRetry(batch, intentos) {
@@ -1692,12 +1746,12 @@ async function _normBatchConRetry(batch, intentos) {
 }
 
 async function llamarNormalizarListaIA(items) {
-  // Batches de 80 en paralelo. Cada batch reintenta hasta 3 veces.
-  // Si un batch falla definitivamente, devuelve [] y se contabilizan los perdidos
-  // (en lugar de tirar todo el pipeline).
+  // Batches de 50 en paralelo (antes 80 — generaba ~9000 chars y se truncaba
+  // por max_tokens). Cada batch reintenta hasta 3 veces y, si está truncado,
+  // se autosubdivide dentro de _normBatch.
   var promises = [];
   var perdidos = [];
-  for (var i = 0; i < items.length; i += 80) {
+  for (var i = 0; i < items.length; i += 50) {
     (function(slice) {
       promises.push(
         _normBatchConRetry(slice).catch(function(e) {
@@ -1706,7 +1760,7 @@ async function llamarNormalizarListaIA(items) {
           return [];
         })
       );
-    })(items.slice(i, i + 80));
+    })(items.slice(i, i + 50));
   }
   var resultados = await Promise.all(promises);
   if (perdidos.length > 0 && typeof showToast === 'function') {
@@ -1862,7 +1916,7 @@ async function llamarDetectarModoIA(grupos) {
   var resp = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
-    body: JSON.stringify({ tipo: 'detectar_modo_precios', max_tokens: 4000,
+    body: JSON.stringify({ tipo: 'detectar_modo_precios', max_tokens: 12000,
       system: SYSTEM_DETECCION_MODO, messages: [{ role: 'user', content: textoGrupos }] })
   });
   var data = await resp.json();
@@ -1874,21 +1928,38 @@ async function llamarDetectarModoIA(grupos) {
   }
   var txt = ((data.content || [])[0] || {}).text || '';
   txt = txt.replace(/```json|```/g, '').trim();
+
+  // Si truncó y el batch es grande, subdividir y rellamar
+  if (data.stop_reason === 'max_tokens' && grupos.length > 4) {
+    console.warn('[detectarModo] truncado por max_tokens, subdividiendo batch de ' + grupos.length);
+    var mitad = Math.ceil(grupos.length / 2);
+    var a = await llamarDetectarModoIA(grupos.slice(0, mitad));
+    var b = await llamarDetectarModoIA(grupos.slice(mitad));
+    return a.concat(b);
+  }
+
   try {
     var parsed = JSON.parse(txt);
-    if (!Array.isArray(parsed)) throw new Error('respuesta no es array');
-    return parsed;
-  } catch(e) {
-    var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
-    if (ini >= 0 && fin > ini) {
-      try {
-        var parsed2 = JSON.parse(txt.slice(ini, fin + 1));
-        if (Array.isArray(parsed2)) return parsed2;
-      } catch(e2) {}
-    }
-    console.error('[detectarModo] JSON inválido. Inicio respuesta:', txt.slice(0, 300));
-    throw new Error('IA respondió con JSON inválido (' + txt.length + ' chars)');
+    if (Array.isArray(parsed)) return parsed;
+  } catch(e) {}
+
+  var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
+  if (ini >= 0 && fin > ini) {
+    try {
+      var parsed2 = JSON.parse(txt.slice(ini, fin + 1));
+      if (Array.isArray(parsed2)) return parsed2;
+    } catch(e2) {}
   }
+
+  // Recovery de objetos completos en array truncado
+  var recuperados = recuperarObjetosJsonArray(txt);
+  if (recuperados.length > 0) {
+    console.warn('[detectarModo] JSON truncado pero recuperados ' + recuperados.length + '/' + grupos.length + ' grupos');
+    return recuperados;
+  }
+
+  console.error('[detectarModo] JSON inválido. Inicio respuesta:', txt.slice(0, 300));
+  throw new Error('IA respondió con JSON inválido (' + txt.length + ' chars)');
 }
 
 async function llamarDetectarModoIAConRetry(grupos, intentos) {

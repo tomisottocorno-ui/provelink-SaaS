@@ -1598,10 +1598,29 @@ async function guardarCacheNorm(nuevos) {
     })
     .filter(function(f) { return f.nombre_key; });
   if (!filas.length) return;
+
+  // Deduplicar por nombre_key (Postgres rechaza un upsert con claves
+  // duplicadas en la misma sentencia: "cannot affect row a second time").
+  // Nos quedamos con la última ocurrencia de cada key.
+  var dedupMap = {};
+  filas.forEach(function(f) { dedupMap[f.nombre_key] = f; });
+  var filasUnicas = Object.keys(dedupMap).map(function(k) { return dedupMap[k]; });
+
+  // Subir en chunks para evitar requests demasiado grandes
+  var CHUNK = 200;
+  var totalGuardados = 0;
   try {
-    var res = await supabase.from('pl_cache_normalizacion').upsert(filas, { onConflict: 'nombre_key' });
-    if (res.error) console.warn('[CacheNorm] Error guardando:', res.error.message);
-    else _cacheNorm = null; // invalidar cache en memoria
+    for (var i = 0; i < filasUnicas.length; i += CHUNK) {
+      var chunk = filasUnicas.slice(i, i + CHUNK);
+      var res = await supabase.from('pl_cache_normalizacion').upsert(chunk, { onConflict: 'nombre_key' });
+      if (res.error) {
+        console.warn('[CacheNorm] Error guardando chunk', i / CHUNK, ':', res.error);
+        return;
+      }
+      totalGuardados += chunk.length;
+    }
+    _cacheNorm = null; // invalidar cache en memoria
+    console.log('[CacheNorm] Guardados', totalGuardados, 'items (de', filas.length, 'normalizados,', filasUnicas.length, 'únicos)');
   } catch(e) { console.warn('[CacheNorm] excepción guardando:', e); }
 }
 

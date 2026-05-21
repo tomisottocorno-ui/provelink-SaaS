@@ -1471,6 +1471,20 @@ var SYSTEM_NORMALIZACION = [
   '   "1000 ml" → tamano: 1, unidad_base: "L"',
   '   "Bolsa x 25 kg" → tamano: 25, unidad_base: "kg"',
   '   "X KG" sin número → tamano: 1, unidad_base: "kg"',
+  '',
+  '   MULTIPACK "N x M unidad" (CRÍTICO): si la presentación tiene formato',
+  '   "N x M unidad" donde N es CANTIDAD de unidades y M es TAMAÑO de cada una,',
+  '   devolvé el TAMAÑO TOTAL del pack (N × M convertido a kg/L).',
+  '   - "Pack 200 x 8cc" → tamano: 1.6, unidad_base: "L" (200 × 8 / 1000)',
+  '   - "Caja 12 x 1lt" → tamano: 12, unidad_base: "L" (12 × 1)',
+  '   - "24 x 500ml" → tamano: 12, unidad_base: "L" (24 × 0.5)',
+  '   - "6 x 1.5lt" → tamano: 9, unidad_base: "L" (6 × 1.5)',
+  '   - "100 x 5gr" → tamano: 0.5, unidad_base: "kg" (100 × 5 / 1000)',
+  '   Distinguilo de "Bolsa x 25 kg" donde 25 ES el tamaño total (no hay multiplicador):',
+  '   ahi tamano: 25, no 1 × 25.',
+  '   Regla práctica: si hay dos números separados por "x" donde el primero parece',
+  '   cantidad de envases (sin unidad) y el segundo tiene unidad, multiplicalos.',
+  '',
   '   IMPORTANTE: números seguidos de "meses", "días" o "años" son tiempo de maduración,',
   '   NO son peso ni tamaño. "24 meses", "18 meses" → ignorar, NO incluir como tamaño.',
   '   Ej: "PARMESANO EN BLOQUE 24 MESES" → clave: "queso parmesano 24 meses", tamano: 1, unidad: u',
@@ -1899,6 +1913,22 @@ function detectarModoHeuristico(grupo) {
 // menos llamadas IA. Los entries siempre se guardan con su confianza original.
 var CACHE_HIT_MIN_CONFIANZA = 0.6;
 
+// Detecta patron multipack "N x M unidad" en el texto (ej "200 x 8cc", "24x500ml").
+// Si lo encuentra, devuelve el tamaño total esperado en kg/L; sino null.
+function detectarMultipack(texto) {
+  var m = String(texto || '').match(/\b(\d+)\s*x\s*(\d+(?:[.,]\d+)?)\s*(cc|ml|gr|g|kg|lts?|litros?|l)\b/i);
+  if (!m) return null;
+  var n = parseInt(m[1], 10);
+  var size = parseFloat(m[2].replace(',', '.'));
+  var unit = m[3].toLowerCase();
+  if (!n || !size) return null;
+  if (unit === 'cc' || unit === 'ml') return { total: n * size / 1000, unidad: 'L' };
+  if (unit === 'gr' || unit === 'g') return { total: n * size / 1000, unidad: 'kg' };
+  if (unit === 'kg') return { total: n * size, unidad: 'kg' };
+  if (unit === 'l' || unit === 'lt' || unit === 'lts' || unit === 'litro' || unit === 'litros') return { total: n * size, unidad: 'L' };
+  return null;
+}
+
 async function normalizarConCache(itemsConId, loadingEl) {
   var cache = await getCacheNorm();
   var sinCache = [];
@@ -1908,6 +1938,18 @@ async function normalizarConCache(itemsConId, loadingEl) {
     var key = normalKey(p.nombre_original || p.productoLista || '');
     var cached = cache[key];
     if (cached && (cached.confianza || 0) >= CACHE_HIT_MIN_CONFIANZA) {
+      // Sanity check: si el item es multipack ("200 x 8cc") pero el cache tiene
+      // un tamano muy chico que NO coincide con el calculo del multipack,
+      // el cache tiene data vieja y errónea. Forzar re-normalización.
+      var nombreCompleto = (p.nombre_original || '') + ' ' + (p.presentacion_original || p.unidad || '');
+      var mp = detectarMultipack(nombreCompleto);
+      var cacheTamano = parseFloat(cached.tamano) || 0;
+      if (mp && Math.abs(cacheTamano - mp.total) > 0.01) {
+        console.warn('[Norm] Cache desactualizado para multipack:', p.nombre_original,
+          '— cache:', cacheTamano, cached.unidad_base, '· esperado:', mp.total, mp.unidad);
+        sinCache.push(p);
+        return;
+      }
       resultado.push(Object.assign({}, p, {
         clave_canonica: cached.clave_canonica,
         tipo: cached.tipo,
@@ -2720,6 +2762,17 @@ function todosLosItems() {
         productoLista: it.productoLista,
         precio: it.precio,
         unidad: it.unidad || '',
+        // Preservar datos del pipeline para que el display respete el modo
+        // detectado/elegido por el usuario (sin esto, el buscador siempre
+        // asumia pack y dividia el precio).
+        clave_canonica: it.clave_canonica || null,
+        tipo: it.tipo || null,
+        tamano: it.tamano || null,
+        unidad_base: it.unidad_base || null,
+        modo: it.modo || null,
+        precio_total: (it.precio_total != null) ? it.precio_total : null,
+        precio_unitario: (it.precio_unitario != null) ? it.precio_unitario : null,
+        confianza: (it.confianza != null) ? it.confianza : null,
         itemId: l.id + '|' + (it.productoLista || '')
       });
     });
@@ -2980,8 +3033,15 @@ function renderBuscarProducto(expansionesExtras) {
       var enPed = enPedido[it.itemId] || 0;
       var bg = enPed > 0 ? 'background:rgba(96,165,250,0.08);border-color:#60a5fa;' : '';
       html += '<div style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);' + bg + 'display:flex;align-items:center;justify-content:space-between;gap:8px;">';
-      // Mostrar el precio crudo siempre; el "$/unidad" se calcula a modo informativo asumiendo envase
-      var pb = parsearPrecioBase(it.precio, it.unidad, it.productoLista, 'envase');
+      // Mostrar el precio crudo siempre. Para "$/unidad":
+      // - Si el item tiene modo + precio_unitario guardados del pipeline → usar esos
+      // - Sino, calcular asumiendo envase (compatibilidad con items sin pipeline)
+      var pb;
+      if (it.modo && it.precio_unitario != null && it.unidad_base && it.unidad_base !== 'u') {
+        pb = { precioBase: it.precio_unitario, precioTotal: it.precio_total || it.precio, unidadBase: it.unidad_base };
+      } else {
+        pb = parsearPrecioBase(it.precio, it.unidad, it.productoLista, 'envase');
+      }
       var precioMostrar = it.precio;
       var pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
       html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + pbHtml + '</div>';

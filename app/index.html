@@ -1204,7 +1204,12 @@ async function detectarColumnasPDF(muestraTexto) {
     })
   });
   var data = await resp.json();
-  if (!resp.ok) throw new Error(data.error || 'Error detectando columnas');
+  if (!resp.ok) {
+    var msg = data.error || 'Error detectando columnas';
+    if (data.detalle) msg += ' — ' + data.detalle;
+    if (data.status) msg += ' [HTTP ' + data.status + ']';
+    throw new Error(msg);
+  }
   var texto = (data.content && data.content[0] && data.content[0].text || '').replace(/```json|```/g, '').trim();
   try { return JSON.parse(texto); }
   catch(e) {
@@ -1330,7 +1335,12 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna) {
     })
   });
   var data = await resp.json();
-  if (!resp.ok) throw new Error(data.error || 'Error en API');
+  if (!resp.ok) {
+    var msg = data.error || 'Error en API';
+    if (data.detalle) msg += ' — ' + data.detalle;
+    if (data.status) msg += ' [HTTP ' + data.status + ']';
+    throw new Error(msg);
+  }
 
   // Si Claude truncó la respuesta por max_tokens, subdividir el chunk y rellamar
   if (data.stop_reason === 'max_tokens' && chunkLineas.length > 10) {
@@ -1371,7 +1381,10 @@ async function llamarClaudeProcesarLista(payload) {
   });
   var data = await resp.json();
   if (!resp.ok) {
-    throw new Error(data.error || 'Error desconocido');
+    var msg = data.error || 'Error desconocido';
+    if (data.detalle) msg += ' — ' + data.detalle;
+    if (data.status) msg += ' [HTTP ' + data.status + ']';
+    throw new Error(msg);
   }
   var texto = data.content && data.content[0] && data.content[0].text || '';
   console.log('[IA] Respuesta length:', texto.length);
@@ -1638,24 +1651,67 @@ async function _normBatch(batch) {
       system: SYSTEM_NORMALIZACION, messages: [{ role: 'user', content: prompt }] })
   });
   var data = await resp.json();
-  if (!resp.ok) throw new Error(data.error || 'Error normalizando');
+  if (!resp.ok) {
+    var msg = data.error || 'Error normalizando';
+    if (data.detalle) msg += ' — ' + data.detalle;
+    if (data.status) msg += ' [HTTP ' + data.status + ']';
+    throw new Error(msg);
+  }
   var txt = ((data.content || [])[0] || {}).text || '';
   txt = txt.replace(/```json|```/g, '').trim();
-  try { return JSON.parse(txt); }
-  catch(e) {
+  try {
+    var parsed = JSON.parse(txt);
+    if (!Array.isArray(parsed)) throw new Error('respuesta no es array');
+    return parsed;
+  } catch(e) {
     var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
-    if (ini >= 0 && fin > ini) { try { return JSON.parse(txt.slice(ini, fin + 1)); } catch(e2) {} }
-    return [];
+    if (ini >= 0 && fin > ini) {
+      try {
+        var parsed2 = JSON.parse(txt.slice(ini, fin + 1));
+        if (Array.isArray(parsed2)) return parsed2;
+      } catch(e2) {}
+    }
+    // No silenciar: lanzar para que el batch reintente o se reporte
+    console.error('[normBatch] JSON inválido. Inicio respuesta:', txt.slice(0, 300));
+    throw new Error('IA respondió con JSON inválido (' + txt.length + ' chars)');
   }
 }
 
+async function _normBatchConRetry(batch, intentos) {
+  intentos = intentos || 3;
+  var lastErr;
+  for (var k = 0; k < intentos; k++) {
+    try { return await _normBatch(batch); }
+    catch(e) {
+      lastErr = e;
+      console.warn('[normBatch] intento ' + (k + 1) + '/' + intentos + ' falló:', e.message);
+      if (k < intentos - 1) await new Promise(function(r) { setTimeout(r, 1000 * (k + 1)); });
+    }
+  }
+  throw lastErr;
+}
+
 async function llamarNormalizarListaIA(items) {
-  // Todos los batches de 80 en PARALELO (Haiku, tolerante a concurrencia)
+  // Batches de 80 en paralelo. Cada batch reintenta hasta 3 veces.
+  // Si un batch falla definitivamente, devuelve [] y se contabilizan los perdidos
+  // (en lugar de tirar todo el pipeline).
   var promises = [];
+  var perdidos = [];
   for (var i = 0; i < items.length; i += 80) {
-    promises.push(_normBatch(items.slice(i, i + 80)));
+    (function(slice) {
+      promises.push(
+        _normBatchConRetry(slice).catch(function(e) {
+          console.error('[Normalización] Batch perdido (' + slice.length + ' items):', e.message);
+          slice.forEach(function(it) { perdidos.push(it.id); });
+          return [];
+        })
+      );
+    })(items.slice(i, i + 80));
   }
   var resultados = await Promise.all(promises);
+  if (perdidos.length > 0 && typeof showToast === 'function') {
+    showToast(perdidos.length + ' producto(s) no pudieron normalizarse — quedan sin clave canónica', 'warn');
+  }
   return resultados.reduce(function(acc, r) { return acc.concat(r); }, []);
 }
 
@@ -1692,6 +1748,10 @@ function detectarModoHeuristico(grupo) {
   return null; // ambiguo → necesita IA
 }
 
+// Umbral de confianza para USAR un entry del cache. Bajo umbral = más hits =
+// menos llamadas IA. Los entries siempre se guardan con su confianza original.
+var CACHE_HIT_MIN_CONFIANZA = 0.6;
+
 async function normalizarConCache(itemsConId, loadingEl) {
   var cache = await getCacheNorm();
   var sinCache = [];
@@ -1700,7 +1760,7 @@ async function normalizarConCache(itemsConId, loadingEl) {
   itemsConId.forEach(function(p) {
     var key = normalKey(p.nombre_original || p.productoLista || '');
     var cached = cache[key];
-    if (cached && (cached.confianza || 0) >= 0.75) {
+    if (cached && (cached.confianza || 0) >= CACHE_HIT_MIN_CONFIANZA) {
       resultado.push(Object.assign({}, p, {
         clave_canonica: cached.clave_canonica,
         tipo: cached.tipo,
@@ -1727,24 +1787,60 @@ async function normalizarConCache(itemsConId, loadingEl) {
     var sinCacheByAIId = {};
     sinCache.forEach(function(p, j) { sinCacheByAIId[p.id_original || ('i' + j)] = p; });
 
-    // Guardar en cache de forma asíncrona
-    var paraNuevosCache = normIA.map(function(n) {
-      var orig = sinCacheByAIId[n.id_original];
-      return Object.assign({ nombre_original: orig ? (orig.nombre_original || orig.productoLista || '') : '' }, n);
-    });
-    guardarCacheNorm(paraNuevosCache).catch(function(e) { console.warn('[CacheNorm] error guardando:', e); });
+    // Validación: ¿la IA devolvió ids que no pertenecen al batch?
+    var idsEsperados = {};
+    sinCache.forEach(function(p, j) { idsEsperados[p.id_original || ('i' + j)] = true; });
+    var idsExtra = normIA.filter(function(n) { return !idsEsperados[n.id_original]; });
+    if (idsExtra.length > 0) {
+      console.warn('[Normalización] IA devolvió', idsExtra.length, 'ids no esperados:',
+        idsExtra.slice(0, 5).map(function(n) { return n.id_original; }));
+    }
+
+    // Construir paraNuevosCache filtrando ids inválidos y items sin clave_canonica
+    var paraNuevosCache = normIA
+      .filter(function(n) { return sinCacheByAIId[n.id_original] && n.clave_canonica; })
+      .map(function(n) {
+        var orig = sinCacheByAIId[n.id_original];
+        return Object.assign({ nombre_original: orig.nombre_original || orig.productoLista || '' }, n);
+      });
+
+    // Ahora bloqueante: si falla queremos enterarnos en el mismo flujo
+    try {
+      await guardarCacheNorm(paraNuevosCache);
+    } catch(e) {
+      console.warn('[CacheNorm] error guardando (no bloqueante):', e);
+      if (typeof showToast === 'function') showToast('No se pudo guardar el cache de normalización (se sigue procesando)', 'warn');
+    }
 
     // Indexar por id_original para merge
     var normIdx = {};
     normIA.forEach(function(n) { normIdx[n.id_original] = n; });
+    var sinNormalizar = 0;
     sinCache.forEach(function(p, j) {
-      var norm = normIdx[p.id_original || ('i' + j)] || {};
-      resultado.push(Object.assign({}, p, norm, {
-        id_original: p.id_original,
-        nombre_original: p.nombre_original || p.productoLista || '',
-        desde_cache: false
-      }));
+      var aiId = p.id_original || ('i' + j);
+      var norm = normIdx[aiId];
+      if (!norm) {
+        sinNormalizar++;
+        // Item no devuelto por la IA: lo dejamos sin clave_canonica para que
+        // el resto del pipeline pueda marcarlo "para revisar" (no perderlo).
+        resultado.push(Object.assign({}, p, {
+          id_original: p.id_original,
+          nombre_original: p.nombre_original || p.productoLista || '',
+          desde_cache: false,
+          revisar_norm: true
+        }));
+      } else {
+        resultado.push(Object.assign({}, p, norm, {
+          id_original: p.id_original,
+          nombre_original: p.nombre_original || p.productoLista || '',
+          desde_cache: false
+        }));
+      }
     });
+    if (sinNormalizar > 0) {
+      console.warn('[Normalización] ' + sinNormalizar + ' items quedaron sin clave canónica (IA no los devolvió)');
+      if (typeof showToast === 'function') showToast(sinNormalizar + ' producto(s) sin clave canónica — marcados para revisar', 'warn');
+    }
   }
 
   var nCache = resultado.filter(function(r) { return r.desde_cache; }).length;
@@ -1770,15 +1866,43 @@ async function llamarDetectarModoIA(grupos) {
       system: SYSTEM_DETECCION_MODO, messages: [{ role: 'user', content: textoGrupos }] })
   });
   var data = await resp.json();
-  if (!resp.ok) throw new Error(data.error || 'Error detectando modo');
+  if (!resp.ok) {
+    var msg = data.error || 'Error detectando modo';
+    if (data.detalle) msg += ' — ' + data.detalle;
+    if (data.status) msg += ' [HTTP ' + data.status + ']';
+    throw new Error(msg);
+  }
   var txt = ((data.content || [])[0] || {}).text || '';
   txt = txt.replace(/```json|```/g, '').trim();
-  try { return JSON.parse(txt); }
-  catch(e) {
+  try {
+    var parsed = JSON.parse(txt);
+    if (!Array.isArray(parsed)) throw new Error('respuesta no es array');
+    return parsed;
+  } catch(e) {
     var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
-    if (ini >= 0 && fin > ini) { try { return JSON.parse(txt.slice(ini, fin + 1)); } catch(e2) {} }
-    return [];
+    if (ini >= 0 && fin > ini) {
+      try {
+        var parsed2 = JSON.parse(txt.slice(ini, fin + 1));
+        if (Array.isArray(parsed2)) return parsed2;
+      } catch(e2) {}
+    }
+    console.error('[detectarModo] JSON inválido. Inicio respuesta:', txt.slice(0, 300));
+    throw new Error('IA respondió con JSON inválido (' + txt.length + ' chars)');
   }
+}
+
+async function llamarDetectarModoIAConRetry(grupos, intentos) {
+  intentos = intentos || 3;
+  var lastErr;
+  for (var k = 0; k < intentos; k++) {
+    try { return await llamarDetectarModoIA(grupos); }
+    catch(e) {
+      lastErr = e;
+      console.warn('[detectarModo] intento ' + (k + 1) + '/' + intentos + ' falló:', e.message);
+      if (k < intentos - 1) await new Promise(function(r) { setTimeout(r, 1500 * (k + 1)); });
+    }
+  }
+  throw lastErr;
 }
 
 // ---- Auditoría ----
@@ -1887,19 +2011,29 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     ' grupos · IA: ' + gruposParaIA.length + ' grupos');
 
   // Batches de 25 en PARALELO (cada grupo lleva varios proveedores, baja TPM)
+  // Cada batch reintenta hasta 3 veces. Si falla definitivamente, contamos los
+  // grupos perdidos para reportar al usuario.
   if (gruposParaIA.length > 0) {
     var modoPromises = [];
-    for (var j = 0; j < gruposParaIA.length; j += 25) {
-      var batchModo = gruposParaIA.slice(j, j + 25);
+    var modoPerdidos = 0;
+    var BATCH_MODO = 25;
+    var hacerBatch = function(slice) {
       modoPromises.push(
-        llamarDetectarModoIA(batchModo).catch(function(e) {
-          console.warn('[Pipeline] Error batch modo:', e.message);
+        llamarDetectarModoIAConRetry(slice).catch(function(e) {
+          modoPerdidos += slice.length;
+          console.error('[Pipeline] Batch modo perdido (' + slice.length + ' grupos):', e.message);
           return [];
         })
       );
+    };
+    for (var j = 0; j < gruposParaIA.length; j += BATCH_MODO) {
+      hacerBatch(gruposParaIA.slice(j, j + BATCH_MODO));
     }
     var modoResultados = await Promise.all(modoPromises);
     modoResultados.forEach(function(r) { todosLosModos = todosLosModos.concat(r); });
+    if (modoPerdidos > 0 && typeof showToast === 'function') {
+      showToast(modoPerdidos + ' grupo(s) sin modo detectado tras 3 reintentos — quedan para revisar', 'warn');
+    }
   }
 
   // Etapa 5: Calcular precios finales (código puro)

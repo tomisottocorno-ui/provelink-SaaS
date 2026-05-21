@@ -1704,12 +1704,13 @@ async function normalizarConCache(itemsConId, loadingEl) {
     });
     var normIA = await llamarNormalizarListaIA(itemsIA);
 
+    // Índice sinCache por el mismo id que recibió la IA (p.id_original || 'i'+j)
+    var sinCacheByAIId = {};
+    sinCache.forEach(function(p, j) { sinCacheByAIId[p.id_original || ('i' + j)] = p; });
+
     // Guardar en cache de forma asíncrona
     var paraNuevosCache = normIA.map(function(n) {
-      var orig = sinCache.find(function(p) {
-        return (p.id_original || '') === n.id_original ||
-               itemsIA.some(function(ip) { return ip.id === n.id_original; });
-      });
+      var orig = sinCacheByAIId[n.id_original];
       return Object.assign({ nombre_original: orig ? (orig.nombre_original || orig.productoLista || '') : '' }, n);
     });
     guardarCacheNorm(paraNuevosCache).catch(function(e) { console.warn('[CacheNorm] error guardando:', e); });
@@ -1717,8 +1718,8 @@ async function normalizarConCache(itemsConId, loadingEl) {
     // Indexar por id_original para merge
     var normIdx = {};
     normIA.forEach(function(n) { normIdx[n.id_original] = n; });
-    sinCache.forEach(function(p) {
-      var norm = normIdx[p.id_original] || {};
+    sinCache.forEach(function(p, j) {
+      var norm = normIdx[p.id_original || ('i' + j)] || {};
       resultado.push(Object.assign({}, p, norm, {
         id_original: p.id_original,
         nombre_original: p.nombre_original || p.productoLista || '',

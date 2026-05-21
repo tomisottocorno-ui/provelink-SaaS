@@ -1869,25 +1869,31 @@ function detectarModoHeuristico(grupo) {
   var pres = (propios[0].presentacion_original || '').trim();
   var tamano = grupo.tamano || 0;
 
-  // Patrones PACK: envase con cantidad explícita
-  var esPack = [
-    /\b(bolsa|caja|bid[oó]n|lata|saco|fardo|paquete|pack|balde|tacho)\b.{0,15}\d/i,
-    /x\s*\d+(?:[.,]\d+)?\s*(kg|kgs?|kilos?|grs?|gr|gramos?|lts?|litros?|ml|cc|l|un?d?s?|piezas?)/i,
-    /\d+(?:[.,]\d+)?\s*(kg|kgs?|kilos?|grs?|gr|gramos?|lts?|litros?|ml|cc)\b/i
-  ].some(function(re) { return re.test(pres); });
+  // FUERTE PACK: palabra de envase explícita seguida de cantidad
+  // ("Bolsa x 25 kg", "Bidón 5lt", "Caja x 12 uds")
+  var fuertePack = /\b(bolsa|caja|bid[oó]n|lata|saco|fardo|paquete|pack|balde|tacho)\b.{0,15}\d/i.test(pres);
 
-  // Patrones UNITARIO: solo la unidad de medida
+  // Patrones UNITARIO: solo la unidad de medida sin cantidad
+  // ("LTS", "KG", "x kg", "x lt")
   var esUnitario = /^(kg|kgs?|kilos?|lts?|litros?|l|ml|cc|grs?|gramos?|bot(?:ella)?s?|uni(?:dad(?:es)?)?|u)\s*$/i.test(pres) ||
                    /^x\s*(kg|kgs?|lt|lts?|l|g|grs?|kilos?)\s*$/i.test(pres);
 
-  if (esPack && !esUnitario) return { modo: 'pack', confianza: 0.78,
-    razonamiento: 'heurístico: presentación indica envase (' + pres + ')' };
-  if (esUnitario && !esPack) return { modo: 'unitario', confianza: 0.78,
-    razonamiento: 'heurístico: presentación indica unidad base (' + pres + ')' };
-  if (tamano === 1 && pres && !esPack) return { modo: 'unitario', confianza: 0.65,
-    razonamiento: 'heurístico: tamaño 1 sin indicador de bulto' };
-
-  return null; // ambiguo → necesita IA
+  // Decidir SOLO en casos no ambiguos:
+  if (fuertePack && !esUnitario) {
+    return { modo: 'pack', confianza: 0.85,
+      razonamiento: 'heurístico: envase explícito (' + pres + ')' };
+  }
+  if (esUnitario && !fuertePack) {
+    return { modo: 'unitario', confianza: 0.85,
+      razonamiento: 'heurístico: presentación indica unidad base (' + pres + ')' };
+  }
+  if (tamano === 1 && pres && !fuertePack) {
+    return { modo: 'unitario', confianza: 0.65,
+      razonamiento: 'heurístico: tamaño 1 sin indicador de bulto' };
+  }
+  // Casos como "x 5 lt" sin palabra de envase: AMBIGUO → IA con contexto
+  // (antes se marcaba pack con 0.78, lo cual partía precios unitarios mal)
+  return null;
 }
 
 // Umbral de confianza para USAR un entry del cache. Bajo umbral = más hits =
@@ -2269,18 +2275,28 @@ function renderPreview() {
       var modoLabel = it.modo === 'pack' ? '📦 bulto'
                     : it.modo === 'unitario' ? '⚖️ x unidad'
                     : '❓ modo?';
+      // Botón clickeable para flippear pack ↔ unitario
+      var modoBtn = '<button onclick="flipModoPreview(' + idx + ')" title="Cambiar modo (pack/unitario)" ' +
+        'style="background:transparent;border:1px solid var(--border-hi);color:inherit;padding:1px 6px;' +
+        'border-radius:6px;font-size:10.5px;cursor:pointer;font-family:inherit;">' + modoLabel + ' ↔</button>';
       var precioUnitStr = '';
       if (it.precio_unitario != null && it.unidad_base && it.unidad_base !== 'u') {
         precioUnitStr = ' · <strong>$' +
           Number(it.precio_unitario).toLocaleString('es-AR', { maximumFractionDigits: 2 }) +
           '/' + it.unidad_base + '</strong>';
       }
+      var precioTotStr = '';
+      if (it.precio_total != null && it.precio_total !== it.precio) {
+        precioTotStr = ' · total $' +
+          Number(it.precio_total).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+      }
       var confStr = it.confianza != null ? ' · ' + Math.round(it.confianza * 100) + '%' : '';
       var revisarStr = it.revisar ? ' <span style="color:var(--warn);font-weight:600;">⚠️</span>' : '';
       pipelineHtml = '<div style="flex-basis:100%;font-size:10.5px;color:var(--text-muted);' +
-        'margin-top:3px;padding:2px 4px 0;line-height:1.4;">' +
+        'margin-top:3px;padding:2px 4px 0;line-height:1.4;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">' +
         '<span style="color:var(--text-2);font-weight:500;">' + escapeHtml(it.clave_canonica) + '</span>' +
-        ' · ' + modoLabel + precioUnitStr + confStr + revisarStr +
+        '<span>·</span>' + modoBtn +
+        '<span>' + precioUnitStr + precioTotStr + confStr + revisarStr + '</span>' +
         '</div>';
     }
 
@@ -2308,6 +2324,29 @@ function editarFilaPreview(idx, campo, valor) {
     var p = parseFloat(valor);
     filasPreview[idx].precio = isNaN(p) ? 0 : p;
   }
+}
+
+// Flip pack ↔ unitario para un item. Recalcula precio_total y precio_unitario
+// según el tamaño. El precio crudo (it.precio) NO se toca: solo cambia la
+// interpretación de qué significa ese precio.
+function flipModoPreview(idx) {
+  var it = filasPreview[idx];
+  if (!it) return;
+  var nuevoModo = (it.modo === 'pack') ? 'unitario' : 'pack';
+  var precio = parseFloat(it.precio) || 0;
+  var tamano = parseFloat(it.tamano) || 1;
+  it.modo = nuevoModo;
+  it.razonamiento = 'corregido manualmente';
+  it.revisar = false;
+  it.confianza = 1;
+  if (nuevoModo === 'pack') {
+    it.precio_total = precio;
+    it.precio_unitario = (tamano > 0) ? redondear(precio / tamano) : null;
+  } else {
+    it.precio_unitario = precio;
+    it.precio_total = (tamano > 0) ? redondear(precio * tamano) : null;
+  }
+  renderPreview();
 }
 
 function borrarFilaPreview(idx) {

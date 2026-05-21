@@ -1781,22 +1781,66 @@ async function guardarCacheNorm(nuevos) {
 
 // ---- Llamadas a la IA ----
 
+// Semaforo de concurrencia: limita cuantas llamadas a /api/claude pueden estar
+// "en vuelo" al mismo tiempo, para no superar el rate limit de Anthropic
+// (10K output tokens/min en cuentas chicas). 3 paralelos da ~ 4500 tok*3 = 13500
+// pedidos a la vez, suficientemente bajo para no disparar 429.
+var _CLAUDE_MAX_CONCURRENT = 2;
+var _claudeEnVuelo = 0;
+var _claudeCola = [];
+function _claudeAcquire() {
+  return new Promise(function(resolve) {
+    var run = function() { _claudeEnVuelo++; resolve(); };
+    if (_claudeEnVuelo < _CLAUDE_MAX_CONCURRENT) run();
+    else _claudeCola.push(run);
+  });
+}
+function _claudeRelease() {
+  _claudeEnVuelo = Math.max(0, _claudeEnVuelo - 1);
+  var next = _claudeCola.shift();
+  if (next) next();
+}
+
+// Wrapper de fetch a /api/claude con concurrencia limitada y parseo seguro de
+// respuestas no-JSON (504 Gateway Timeout devuelve HTML, no JSON).
+async function _fetchClaude(payload) {
+  await _claudeAcquire();
+  try {
+    var resp = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      body: JSON.stringify(payload)
+    });
+    var ct = (resp.headers.get('content-type') || '').toLowerCase();
+    var data = {};
+    if (ct.indexOf('application/json') >= 0) {
+      try { data = await resp.json(); } catch(e) { data = {}; }
+    } else {
+      // 504/502 con HTML, o respuesta vacia: leer texto y construir error util
+      var txt = '';
+      try { txt = await resp.text(); } catch(e) {}
+      data = { error: 'Respuesta no-JSON', detalle: txt.slice(0, 200) };
+    }
+    return { resp: resp, data: data };
+  } finally {
+    _claudeRelease();
+  }
+}
+
 async function _normBatch(batch) {
   var prompt = batch.map(function(p) {
     return 'ID:' + p.id + ' | NOMBRE: ' + p.nombre_original +
            ' | PRESENTACION: ' + (p.presentacion_original || 'sin dato');
   }).join('\n');
-  var resp = await fetch('/api/claude', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
-    body: JSON.stringify({ tipo: 'normalizar_lista', max_tokens: 12000,
-      system: SYSTEM_NORMALIZACION, messages: [{ role: 'user', content: prompt }] })
-  });
-  var data = await resp.json();
+  // max_tokens 6000: con 40 items por batch (~150 chars c/u en output) sobra,
+  // y mantiene la pretension de tokens bajo el rate limit.
+  var r = await _fetchClaude({ tipo: 'normalizar_lista', max_tokens: 6000,
+    system: SYSTEM_NORMALIZACION, messages: [{ role: 'user', content: prompt }] });
+  var resp = r.resp, data = r.data;
   if (!resp.ok) {
     var msg = data.error || 'Error normalizando';
     if (data.detalle) msg += ' — ' + data.detalle;
-    if (data.status) msg += ' [HTTP ' + data.status + ']';
+    msg += ' [HTTP ' + resp.status + ']';
     throw new Error(msg);
   }
   var txt = ((data.content || [])[0] || {}).text || '';
@@ -1838,6 +1882,15 @@ async function _normBatch(batch) {
   throw new Error('IA respondió con JSON inválido (' + txt.length + ' chars)');
 }
 
+// Considera no-reintentable un 4xx que no sea 429: significa que el problema
+// está en el request (token inválido, mal formado, etc.) y reintentar no ayuda.
+function _esNoReintentable(err) {
+  var m = String(err && err.message || '').match(/\[HTTP (\d+)\]/);
+  if (!m) return false;
+  var code = parseInt(m[1], 10);
+  return code >= 400 && code < 500 && code !== 429;
+}
+
 async function _normBatchConRetry(batch, intentos) {
   intentos = intentos || 3;
   var lastErr;
@@ -1846,20 +1899,21 @@ async function _normBatchConRetry(batch, intentos) {
     catch(e) {
       lastErr = e;
       console.warn('[normBatch] intento ' + (k + 1) + '/' + intentos + ' falló:', e.message);
-      if (k < intentos - 1) await new Promise(function(r) { setTimeout(r, 1000 * (k + 1)); });
+      if (_esNoReintentable(e)) throw e;
+      if (k < intentos - 1) await new Promise(function(r) { setTimeout(r, 1500 * (k + 1)); });
     }
   }
   throw lastErr;
 }
 
 async function llamarNormalizarListaIA(items) {
-  // Batches de 50 en paralelo (antes 80 — generaba ~9000 chars y se truncaba
-  // por max_tokens). Cada batch reintenta hasta 3 veces y, si está truncado,
-  // se autosubdivide dentro de _normBatch.
+  // Batches de 40 (antes 50). El semaforo _fetchClaude limita concurrencia a 3,
+  // asi que muchos batches en cola se procesan en olas. Cada batch reintenta
+  // 3 veces y se autosubdivide si max_tokens trunca.
   // Aplica canonizarUnidadBase a cada item para asegurar cc/ml/gr -> L/kg.
   var promises = [];
   var perdidos = [];
-  for (var i = 0; i < items.length; i += 50) {
+  for (var i = 0; i < items.length; i += 40) {
     (function(slice) {
       promises.push(
         _normBatchConRetry(slice)
@@ -1870,7 +1924,7 @@ async function llamarNormalizarListaIA(items) {
           return [];
         })
       );
-    })(items.slice(i, i + 50));
+    })(items.slice(i, i + 40));
   }
   var resultados = await Promise.all(promises);
   if (perdidos.length > 0 && typeof showToast === 'function') {
@@ -1881,6 +1935,84 @@ async function llamarNormalizarListaIA(items) {
 
 // Detecta modo sin IA usando la columna de presentación — evita llamadas innecesarias.
 // Devuelve {modo, confianza, razonamiento} o null si no puede decidir.
+// Rangos tipicos de precios AR por unidad base (2025).
+// Usados tanto en la decision cliente-side como en el prompt de la IA.
+// Si ambas interpretaciones caen en o ambas fuera del rango -> ambiguo, IA decide.
+var RANGOS_PRECIO_AR = {
+  // tipo -> { min, max, unidad } (precio por unidad_base canonica)
+  // Rangos amplios: incluyen mayorista (low) y premium (high) para que el
+  // algoritmo solo decida cuando UNA de las 2 interpretaciones (pack/unitario)
+  // queda claramente fuera. Si ambas caen dentro -> ambiguo -> IA decide.
+  'aceite girasol':   { min: 600,  max: 4000,  unidad: 'L' },
+  'aceite oliva':     { min: 3000, max: 60000, unidad: 'L' },
+  'aceite maiz':      { min: 800,  max: 5000,  unidad: 'L' },
+  'aceite mezcla':    { min: 600,  max: 4000,  unidad: 'L' },
+  'vinagre':          { min: 300,  max: 5000,  unidad: 'L' },
+  'vinagre manzana':  { min: 500,  max: 8000,  unidad: 'L' },
+  'aceto':            { min: 1000, max: 30000, unidad: 'L' },
+  'aceto balsamico':  { min: 1000, max: 30000, unidad: 'L' },
+  'harina':           { min: 300,  max: 3000,  unidad: 'kg' },
+  'azucar':           { min: 400,  max: 2500,  unidad: 'kg' },
+  'arroz':            { min: 700,  max: 5000,  unidad: 'kg' },
+  'sal':              { min: 80,   max: 1500,  unidad: 'kg' },
+  'levadura':         { min: 1200, max: 12000, unidad: 'kg' },
+  'mayonesa':         { min: 1200, max: 8000,  unidad: 'kg' },
+  'mostaza':          { min: 1200, max: 10000, unidad: 'kg' },
+  'ketchup':          { min: 1200, max: 8000,  unidad: 'kg' },
+  'leche':            { min: 500,  max: 4000,  unidad: 'L' },
+  'agua':             { min: 80,   max: 3000,  unidad: 'L' },
+  'gaseosa':          { min: 300,  max: 4000,  unidad: 'L' },
+  'cerveza':          { min: 600,  max: 8000,  unidad: 'L' }
+};
+
+// Busca el rango típico aplicable a un tipo (matching laxo: "aceite girasol marca x"
+// matchea "aceite girasol").
+function rangoParaTipo(tipo, unidadBase) {
+  if (!tipo) return null;
+  var t = String(tipo).toLowerCase().trim();
+  // 1) Match exacto
+  if (RANGOS_PRECIO_AR[t] && RANGOS_PRECIO_AR[t].unidad === unidadBase) return RANGOS_PRECIO_AR[t];
+  // 2) Match por prefijo (la clave del catalogo aparece al inicio del tipo)
+  var keys = Object.keys(RANGOS_PRECIO_AR);
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    if (t.indexOf(k) === 0 && RANGOS_PRECIO_AR[k].unidad === unidadBase) return RANGOS_PRECIO_AR[k];
+  }
+  return null;
+}
+
+// Decide modo (pack/unitario) usando rangos tipicos del producto.
+// Devuelve null si no puede decidir (tipo desconocido o ambos casos plausibles).
+// Esta heurística es la que el usuario pidió: "que la IA se de cuenta sola".
+function decidirModoPorRangos(grupo) {
+  var propios = grupo.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+  if (propios.length !== 1) return null; // si hay cross-provider, mejor que decida la IA
+  var precio = parseFloat(propios[0].precio_raw) || 0;
+  var tamano = parseFloat(grupo.tamano) || 0;
+  if (precio <= 0 || tamano <= 0) return null;
+  var rango = rangoParaTipo(grupo.tipo, grupo.unidad_base);
+  if (!rango) return null;
+
+  // Calcular el precio por unidad base bajo cada interpretacion
+  var siPack = precio / tamano;       // precio es total del bulto, dividi
+  var siUnit = precio;                // precio ya es por unidad base
+
+  var packEnRango = (siPack >= rango.min && siPack <= rango.max);
+  var unitEnRango = (siUnit >= rango.min && siUnit <= rango.max);
+
+  // Si solo UNA interpretacion cae en el rango tipico, decidimos sin IA
+  if (packEnRango && !unitEnRango) {
+    return { modo: 'pack', confianza: 0.9,
+      razonamiento: 'rango ' + grupo.tipo + ': $' + siPack.toFixed(0) + '/' + rango.unidad + ' (esperado ' + rango.min + '-' + rango.max + ')' };
+  }
+  if (unitEnRango && !packEnRango) {
+    return { modo: 'unitario', confianza: 0.9,
+      razonamiento: 'rango ' + grupo.tipo + ': $' + siUnit.toFixed(0) + '/' + rango.unidad + ' (esperado ' + rango.min + '-' + rango.max + ')' };
+  }
+  // Ambos caen / ninguno cae => ambiguo, dejar para la IA
+  return null;
+}
+
 function detectarModoHeuristico(grupo) {
   // Si hay 2+ proveedores propios con precios distintos → dejar para la IA (comparativa)
   var propios = grupo.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
@@ -2048,17 +2180,15 @@ async function llamarDetectarModoIA(grupos) {
     return 'PRODUCTO: ' + g.clave_canonica + ' | Tamaño: ' + g.tamano + ' ' + g.unidad_base + '\n' + provStr;
   }).join('\n\n');
 
-  var resp = await fetch('/api/claude', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
-    body: JSON.stringify({ tipo: 'detectar_modo_precios', max_tokens: 12000,
-      system: SYSTEM_DETECCION_MODO, messages: [{ role: 'user', content: textoGrupos }] })
-  });
-  var data = await resp.json();
+  // max_tokens 4500: con 15 grupos por batch (~250 chars c/u en output incluyendo
+  // razonamiento) sobra. Mantiene pretension baja para no disparar rate limit.
+  var r = await _fetchClaude({ tipo: 'detectar_modo_precios', max_tokens: 4500,
+    system: SYSTEM_DETECCION_MODO, messages: [{ role: 'user', content: textoGrupos }] });
+  var resp = r.resp, data = r.data;
   if (!resp.ok) {
     var msg = data.error || 'Error detectando modo';
     if (data.detalle) msg += ' — ' + data.detalle;
-    if (data.status) msg += ' [HTTP ' + data.status + ']';
+    msg += ' [HTTP ' + resp.status + ']';
     throw new Error(msg);
   }
   var txt = ((data.content || [])[0] || {}).text || '';
@@ -2105,7 +2235,8 @@ async function llamarDetectarModoIAConRetry(grupos, intentos) {
     catch(e) {
       lastErr = e;
       console.warn('[detectarModo] intento ' + (k + 1) + '/' + intentos + ' falló:', e.message);
-      if (k < intentos - 1) await new Promise(function(r) { setTimeout(r, 1500 * (k + 1)); });
+      if (_esNoReintentable(e)) throw e;
+      if (k < intentos - 1) await new Promise(function(r) { setTimeout(r, 2000 * (k + 1)); });
     }
   }
   throw lastErr;
@@ -2191,30 +2322,37 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     return enriquecido;
   });
 
-  // Etapa 4: Detectar modo — heurística gratis primero, luego IA en paralelo para el resto
+  // Etapa 4: Detectar modo
+  //   1. Heurística estructural (presentación = solo unidad sin número) → unitario
+  //   2. Rangos típicos por tipo de producto (auto-deducción del usuario) → pack/unitario
+  //   3. IA en paralelo solo para lo que queda ambiguo
   if (loadingEl) loadingEl.textContent = 'Detectando modo de precio...';
   var todosLosModos = [];
   var gruposParaIA = [];
+  var nRangos = 0;
+
+  var aplicar = function(g, h) {
+    var propios = g.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+    todosLosModos.push({
+      clave_canonica: g.clave_canonica,
+      resultados: propios.map(function(p) {
+        return { id_original: p.id_original, proveedor_id: p.proveedor_id,
+                 modo: h.modo, confianza: h.confianza, razonamiento: h.razonamiento };
+      })
+    });
+  };
 
   gruposConComparacion.forEach(function(g) {
     var h = detectarModoHeuristico(g);
-    if (h) {
-      // Aplicar heurística directamente (sin llamada a IA)
-      var propios = g.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
-      todosLosModos.push({
-        clave_canonica: g.clave_canonica,
-        resultados: propios.map(function(p) {
-          return { id_original: p.id_original, proveedor_id: p.proveedor_id,
-                   modo: h.modo, confianza: h.confianza, razonamiento: h.razonamiento };
-        })
-      });
-    } else {
-      gruposParaIA.push(g);
-    }
+    if (h) { aplicar(g, h); return; }
+    var r = decidirModoPorRangos(g);
+    if (r) { aplicar(g, r); nRangos++; return; }
+    gruposParaIA.push(g);
   });
 
-  console.log('[Pipeline] Modo — heurística: ' + todosLosModos.length +
-    ' grupos · IA: ' + gruposParaIA.length + ' grupos');
+  console.log('[Pipeline] Modo — heurística: ' + (todosLosModos.length - nRangos) +
+    ' · rangos típicos: ' + nRangos +
+    ' · IA: ' + gruposParaIA.length + ' grupos');
 
   // Batches de 25 en PARALELO (cada grupo lleva varios proveedores, baja TPM)
   // Cada batch reintenta hasta 3 veces. Si falla definitivamente, contamos los
@@ -2222,7 +2360,7 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
   if (gruposParaIA.length > 0) {
     var modoPromises = [];
     var modoPerdidos = 0;
-    var BATCH_MODO = 25;
+    var BATCH_MODO = 15;
     var hacerBatch = function(slice) {
       modoPromises.push(
         llamarDetectarModoIAConRetry(slice).catch(function(e) {

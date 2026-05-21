@@ -1472,18 +1472,28 @@ var SYSTEM_NORMALIZACION = [
   '   "Bolsa x 25 kg" → tamano: 25, unidad_base: "kg"',
   '   "X KG" sin número → tamano: 1, unidad_base: "kg"',
   '',
-  '   MULTIPACK "N x M unidad" (CRÍTICO): si la presentación tiene formato',
-  '   "N x M unidad" donde N es CANTIDAD de unidades y M es TAMAÑO de cada una,',
-  '   devolvé el TAMAÑO TOTAL del pack (N × M convertido a kg/L).',
+  '   MULTIPACK "N x M unidad": SOLO interpretar como multipack si hay UNA de estas señales:',
+  '   - Palabra de contenedor explícita: "Pack", "Caja", "Set", "Lote", "Bandeja", "Display".',
+  '   - Unidad pequeña (cc/ml/gr) con N razonable (2-500): tipico de ampollas, sobrecitos.',
+  '   Si SI es multipack, devolvé el TAMAÑO TOTAL (N × M convertido a kg/L):',
   '   - "Pack 200 x 8cc" → tamano: 1.6, unidad_base: "L" (200 × 8 / 1000)',
-  '   - "Caja 12 x 1lt" → tamano: 12, unidad_base: "L" (12 × 1)',
-  '   - "24 x 500ml" → tamano: 12, unidad_base: "L" (24 × 0.5)',
-  '   - "6 x 1.5lt" → tamano: 9, unidad_base: "L" (6 × 1.5)',
-  '   - "100 x 5gr" → tamano: 0.5, unidad_base: "kg" (100 × 5 / 1000)',
-  '   Distinguilo de "Bolsa x 25 kg" donde 25 ES el tamaño total (no hay multiplicador):',
-  '   ahi tamano: 25, no 1 × 25.',
-  '   Regla práctica: si hay dos números separados por "x" donde el primero parece',
-  '   cantidad de envases (sin unidad) y el segundo tiene unidad, multiplicalos.',
+  '   - "Caja 12 x 1lt" → tamano: 12, unidad_base: "L"',
+  '   - "200 x 8cc" (cc pequeño, N razonable) → tamano: 1.6, unidad_base: "L"',
+  '   - "100 x 5gr" → tamano: 0.5, unidad_base: "kg"',
+  '',
+  '   CUIDADO CON CODIGOS DE PRODUCTO: muchos productos tienen un código numérico',
+  '   en el nombre que NO es cantidad. Ejemplos REALES de no-multipack:',
+  '   - "Baño Blanco Aguila 9473 x 10 kg" → 9473 es CODIGO. tamano: 10, unidad: kg.',
+  '   - "Cacao Amargo Fenix 56 x 1 kg" → 56 es CODIGO. tamano: 1, unidad: kg.',
+  '   - "Mermelada Ghelco 5780 x 5.4 kg" → 5780 es CODIGO. tamano: 5.4, unidad: kg.',
+  '   - "Mr. Choc Aceite 927 x 20 kg Calsa" → 927 es CODIGO. tamano: 20, unidad: kg.',
+  '   Señales de que es código y NO conteo:',
+  '   - Sin palabra de pack delante.',
+  '   - Numero grande (más de 3 dígitos) seguido de "x kg" o "x L" → casi siempre código.',
+  '   - El total N×M daría un absurdo (más de 200 kg/L) → casi seguro código.',
+  '',
+  '   "Bolsa x 25 kg" / "Bidón 5lt" sin numero antes de "x": tamaño total directo,',
+  '   no multipack (tamano: 25, unidad_base: "kg").',
   '',
   '   IMPORTANTE: números seguidos de "meses", "días" o "años" son tiempo de maduración,',
   '   NO son peso ni tamaño. "24 meses", "18 meses" → ignorar, NO incluir como tamaño.',
@@ -2045,19 +2055,48 @@ function detectarModoHeuristico(grupo) {
 // menos llamadas IA. Los entries siempre se guardan con su confianza original.
 var CACHE_HIT_MIN_CONFIANZA = 0.6;
 
-// Detecta patron multipack "N x M unidad" en el texto (ej "200 x 8cc", "24x500ml").
-// Si lo encuentra, devuelve el tamaño total esperado en kg/L; sino null.
-function detectarMultipack(texto) {
-  var m = String(texto || '').match(/\b(\d+)\s*x\s*(\d+(?:[.,]\d+)?)\s*(cc|ml|gr|g|kg|lts?|litros?|l)\b/i);
-  if (!m) return null;
-  var n = parseInt(m[1], 10);
-  var size = parseFloat(m[2].replace(',', '.'));
-  var unit = m[3].toLowerCase();
+// Detecta patron multipack en el texto. Devuelve { total, unidad } o null.
+// CUIDADO: muchos productos tienen CODIGOS numericos en el nombre (ej
+// "Baño Blanco Aguila 9473 x 10 kg") que NO son conteos. Por eso solo
+// consideramos multipack cuando:
+//   A) Hay palabra de contenedor explicita (Pack/Caja/Set/etc.) + N x M unidad
+//   B) Unidad pequeña (cc/ml/gr) + N razonable (2-500) — son las que casi
+//      siempre son multipack real (vitaminas, ampollas, sobrecitos)
+// Para "kg" y "L" sin palabra explicita: NO tocar (riesgo de codigo).
+function _multipackResultado(n, size, unit) {
   if (!n || !size) return null;
-  if (unit === 'cc' || unit === 'ml') return { total: n * size / 1000, unidad: 'L' };
-  if (unit === 'gr' || unit === 'g') return { total: n * size / 1000, unidad: 'kg' };
-  if (unit === 'kg') return { total: n * size, unidad: 'kg' };
-  if (unit === 'l' || unit === 'lt' || unit === 'lts' || unit === 'litro' || unit === 'litros') return { total: n * size, unidad: 'L' };
+  var total, unidad;
+  if (unit === 'cc' || unit === 'ml') { total = n * size / 1000; unidad = 'L'; }
+  else if (unit === 'gr' || unit === 'g') { total = n * size / 1000; unidad = 'kg'; }
+  else if (unit === 'kg') { total = n * size; unidad = 'kg'; }
+  else if (unit === 'l' || unit === 'lt' || unit === 'lts' || unit === 'litro' || unit === 'litros') { total = n * size; unidad = 'L'; }
+  else return null;
+  // Sanity check: totales absurdos (> 200 kg/L) probablemente son codigos
+  if (total > 200) return null;
+  return { total: total, unidad: unidad };
+}
+function detectarMultipack(texto) {
+  var s = String(texto || '');
+  // Caso A: palabra explicita de contenedor antes del numero
+  var contWord = '(?:pack|caja|set|lote|bandeja|carton|cart[oó]n|display|bulto|estuche|cartoneria|cart[oó]neria)';
+  var reA = new RegExp('\\b' + contWord + '\\s*(?:de\\s+)?(\\d+)\\s*x\\s*(\\d+(?:[.,]\\d+)?)\\s*(cc|ml|gr|g|kg|lts?|litros?|l)\\b', 'i');
+  var mA = s.match(reA);
+  if (mA) {
+    var rA = _multipackResultado(parseInt(mA[1], 10), parseFloat(mA[2].replace(',', '.')), mA[3].toLowerCase());
+    if (rA) return rA;
+  }
+  // Caso B: unidad pequeña (cc/ml/gr) + N razonable (2-500)
+  // Estas casi siempre son multipack real, no codigos (un codigo "200" + "8cc"
+  // es muy improbable).
+  var reB = /(?:^|\s)(\d{1,3})\s*x\s*(\d+(?:[.,]\d+)?)\s*(cc|ml|gr|g)\b/i;
+  var mB = s.match(reB);
+  if (mB) {
+    var n = parseInt(mB[1], 10);
+    if (n >= 2 && n <= 500) {
+      var rB = _multipackResultado(n, parseFloat(mB[2].replace(',', '.')), mB[3].toLowerCase());
+      if (rB) return rB;
+    }
+  }
   return null;
 }
 

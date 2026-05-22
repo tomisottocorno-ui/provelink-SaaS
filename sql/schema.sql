@@ -373,3 +373,51 @@ drop policy if exists "Cache norm: update autenticado" on public.pl_cache_normal
 create policy "Cache norm: update autenticado"
   on public.pl_cache_normalizacion for update
   using (auth.role() = 'authenticated');
+
+
+-- ============================================================================
+-- TABLA: pl_rangos_precio (rangos de orden de magnitud para detectar bulto/unitario)
+-- ============================================================================
+-- Cachea rangos de precio por tipo de producto (sin tamaño). El rango se
+-- expresa como mediana × factor_min/max, de modo que escala con la inflación.
+-- Es compartida globalmente entre todos los usuarios (como pl_cache_normalizacion).
+-- NUNCA contiene precios de listas específicas, solo el orden de magnitud por tipo.
+--
+-- Defensas implementadas (ver BRIEF DETECCION FINAL):
+--   1. Rango provisional hasta muestras >= 3 (confiable = false)
+--   2. Outliers rechazados antes de actualizar (> 5x o < 0.2x la mediana)
+--   3. Se usa mediana (no promedio), datos manuales pesan el doble
+--   4. Una corrección de usuario recalcula el rango (recuperación)
+-- ============================================================================
+create table if not exists public.pl_rangos_precio (
+  tipo_producto text primary key,        -- clave SIN tamaño: "harina 0000", "aceite girasol"
+  unidad_base text not null,             -- 'kg' | 'L' | 'u'
+  mediana_estimada numeric not null,     -- precio por unidad base, en pesos argentinos
+  factor_min numeric default 0.5,        -- multiplicador para el piso del rango
+  factor_max numeric default 2.5,        -- multiplicador para el techo del rango
+  origen text default 'web',             -- 'web' (estimado inicial) | 'datos' (afinado con listas reales)
+  muestras integer default 0,            -- cuántos precios reales contribuyeron a la mediana
+  confiable boolean default false,       -- true cuando muestras >= 3
+  ultima_actualizacion timestamptz default now(),
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_rangos_origen on public.pl_rangos_precio(origen);
+
+-- Compartido entre todos los usuarios (como pl_cache_normalizacion)
+alter table public.pl_rangos_precio enable row level security;
+
+drop policy if exists "Rangos: lectura pública autenticada" on public.pl_rangos_precio;
+create policy "Rangos: lectura pública autenticada"
+  on public.pl_rangos_precio for select
+  using (auth.role() = 'authenticated');
+
+drop policy if exists "Rangos: upsert autenticado" on public.pl_rangos_precio;
+create policy "Rangos: upsert autenticado"
+  on public.pl_rangos_precio for insert
+  with check (auth.role() = 'authenticated');
+
+drop policy if exists "Rangos: update autenticado" on public.pl_rangos_precio;
+create policy "Rangos: update autenticado"
+  on public.pl_rangos_precio for update
+  using (auth.role() = 'authenticated');

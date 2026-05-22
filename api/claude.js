@@ -138,6 +138,100 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ content: data.content, stop_reason: data.stop_reason });
     }
 
+    // buscar_rango_web: usa Sonnet con web_search para estimar el rango de
+    // orden de magnitud de un tipo de producto (precio por kg/L/u). No consume
+    // cuota; se cachea en pl_rangos_precio y solo se llama UNA vez por tipo
+    // en toda la vida del sistema (compartido entre usuarios).
+    if (tipo === 'buscar_rango_web') {
+      const tipoProducto = (body.tipo_producto || '').trim();
+      const unidadBase   = (body.unidad_base || 'kg').trim();
+      if (!tipoProducto) {
+        return res.status(400).json({ error: 'Falta tipo_producto' });
+      }
+
+      const promptBusqueda =
+        'Necesito un rango APROXIMADO de precio por unidad para un tipo de producto, en Argentina, ' +
+        'precio mayorista. NO necesito un precio exacto ni actualizado al día: necesito el ORDEN DE ' +
+        'MAGNITUD para distinguir si un precio de lista es por unidad o por bulto completo.\n\n' +
+        'Producto: "' + tipoProducto + '" (unidad base: ' + unidadBase + ')\n\n' +
+        'Buscá en la web precios mayoristas argentinos de este tipo de producto y devolvé una ' +
+        'estimación de la mediana de precio por ' + unidadBase + '. Si no encontrás dato exacto, estimá ' +
+        'por orden de magnitud según productos similares. Un rango amplio está bien.\n\n' +
+        'Devolvé SOLO un JSON:\n' +
+        '{\n' +
+        '  "mediana_estimada": numero (precio por unidad base, en pesos argentinos),\n' +
+        '  "confianza": numero 0-1,\n' +
+        '  "fuente": "breve nota de en qué te basaste"\n' +
+        '}';
+
+      const apiBodyRango = {
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1200,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{ role: 'user', content: promptBusqueda }]
+      };
+
+      const respRango = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify(apiBodyRango)
+      });
+
+      if (!respRango.ok) {
+        const errR = await respRango.json().catch(() => ({}));
+        console.error('Error buscar_rango_web:', respRango.status, errR);
+        return res.status(502).json({ error: 'Error IA', detalle: errR.error && errR.error.message });
+      }
+
+      const dataRango = await respRango.json();
+      // Loguear uso (Sonnet, sin cuota)
+      const uR = dataRango.usage || {};
+      const costoR = ((uR.input_tokens || 0) * PRECIOS_SONNET.input + (uR.output_tokens || 0) * PRECIOS_SONNET.output) / 1_000_000;
+      sb.from('uso_ia').insert({
+        user_id: userId, tipo: 'buscar_rango_web',
+        input_tokens: uR.input_tokens || 0, output_tokens: uR.output_tokens || 0, costo_usd: costoR
+      }).then(() => {}).catch(() => {});
+
+      // Extraer el JSON de los bloques de texto (puede venir entre tool_use)
+      const textoCompleto = (dataRango.content || [])
+        .filter(c => c.type === 'text')
+        .map(c => c.text)
+        .join('\n');
+      let parsed = null;
+      try {
+        const limpio = textoCompleto.replace(/```json|```/g, '').trim();
+        parsed = JSON.parse(limpio);
+      } catch (e) {
+        const i = textoCompleto.indexOf('{');
+        const f = textoCompleto.lastIndexOf('}');
+        if (i >= 0 && f > i) {
+          try { parsed = JSON.parse(textoCompleto.slice(i, f + 1)); } catch (e2) {}
+        }
+      }
+      if (!parsed || typeof parsed.mediana_estimada !== 'number' || parsed.mediana_estimada <= 0) {
+        return res.status(200).json({ rango: null, razon: 'IA no devolvió mediana válida' });
+      }
+
+      return res.status(200).json({
+        rango: {
+          tipo_producto: tipoProducto,
+          unidad_base: unidadBase,
+          mediana_estimada: parsed.mediana_estimada,
+          factor_min: 0.5,
+          factor_max: 2.5,
+          origen: 'web',
+          muestras: 0,
+          confiable: false,
+          confianza_web: parsed.confianza || 0.5,
+          fuente: parsed.fuente || ''
+        }
+      });
+    }
+
     if (esProcesarLista) {
       // Validar límite de listas para plan free: máximo 1 lista en total
       if (plan === 'free') {

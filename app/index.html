@@ -2023,6 +2023,251 @@ function decidirModoPorRangos(grupo) {
   return null;
 }
 
+// ============================================================================
+// SISTEMA DE RANGOS DINÁMICOS (BRIEF DETECCION FINAL)
+// ----------------------------------------------------------------------------
+// Cachea rangos de orden de magnitud (mediana × factor) por tipo de producto en
+// `pl_rangos_precio` (compartido entre todos los usuarios). Permite distinguir
+// bulto vs unitario sin precios exactos: solo el orden de magnitud importa.
+//
+// Flujo (de gratis a caro):
+//   1. Rango cacheado → usar (gratis)
+//   2. Coherencia interna entre filas del mismo tipo → deducir (gratis)
+//   3. Búsqueda web (una sola vez por tipo, se cachea)
+//   4. Decidir con el rango. Si nada da certeza → revisión manual
+//
+// Defensas: provisional hasta 3+ muestras, descarte de outliers (>5x o <0.2x),
+// mediana (no promedio), datos manuales pesan x2, una corrección sana el rango.
+// ============================================================================
+
+// Cache en memoria de rangos cargados desde Supabase (vida = un pipeline)
+var _rangosCache = null;
+
+async function getRangosCacheados() {
+  if (_rangosCache) return _rangosCache;
+  try {
+    var r = await supabase.from('pl_rangos_precio').select('*');
+    if (r.error) { console.warn('[Rangos] No se pudo cargar:', r.error.message); return {}; }
+    var map = {};
+    (r.data || []).forEach(function(row) { map[(row.tipo_producto || '').toLowerCase()] = row; });
+    _rangosCache = map;
+    return map;
+  } catch(e) { console.warn('[Rangos] Excepción:', e); return {}; }
+}
+
+function _invalidarRangosCache() { _rangosCache = null; }
+
+async function guardarRangoCacheado(rango) {
+  if (!rango || !rango.tipo_producto) return;
+  try {
+    var r = await supabase.from('pl_rangos_precio').upsert({
+      tipo_producto: (rango.tipo_producto || '').toLowerCase(),
+      unidad_base: rango.unidad_base || 'kg',
+      mediana_estimada: rango.mediana_estimada,
+      factor_min: rango.factor_min || 0.5,
+      factor_max: rango.factor_max || 2.5,
+      origen: rango.origen || 'web',
+      muestras: rango.muestras || 0,
+      confiable: !!rango.confiable,
+      ultima_actualizacion: new Date().toISOString()
+    }, { onConflict: 'tipo_producto' });
+    if (r.error) console.warn('[Rangos] Error al guardar:', r.error.message);
+    else _invalidarRangosCache();
+  } catch(e) { console.warn('[Rangos] Excepción al guardar:', e); }
+}
+
+// Calcula el rango efectivo a partir de la mediana × factor.
+function rangoEfectivo(rangoRow) {
+  if (!rangoRow || !rangoRow.mediana_estimada) return null;
+  var fMin = rangoRow.factor_min != null ? rangoRow.factor_min : 0.5;
+  var fMax = rangoRow.factor_max != null ? rangoRow.factor_max : 2.5;
+  return {
+    min: rangoRow.mediana_estimada * fMin,
+    max: rangoRow.mediana_estimada * fMax,
+    mediana: rangoRow.mediana_estimada,
+    confiable: !!rangoRow.confiable,
+    unidad: rangoRow.unidad_base
+  };
+}
+
+// Detecta bulto vs unitario para una fila dada usando un rango cacheado.
+// Devuelve {modo, confianza, razonamiento} o null si no se puede decidir.
+function detectarPorRangoDinamico(fila, rangoRow) {
+  var rango = rangoEfectivo(rangoRow);
+  if (!rango) return null;
+  var precioRaw = parseFloat(fila.precio_raw || fila.precio) || 0;
+  var tamano = parseFloat(fila.tamano) || 0;
+  if (precioRaw <= 0) return null;
+  var precioSiUnitario = precioRaw;
+  var precioSiPack = tamano > 0 ? precioRaw / tamano : null;
+  var enRango = function(v) { return v != null && v >= rango.min && v <= rango.max; };
+  var uOk = enRango(precioSiUnitario);
+  var pOk = precioSiPack != null && enRango(precioSiPack);
+  // confianza base depende de si el rango es confiable (3+ muestras) o provisional
+  var confBase = rango.confiable ? 0.9 : 0.65;
+  if (uOk && !pOk) {
+    return { modo: 'unitario', confianza: confBase,
+      razonamiento: '$' + Math.round(precioSiUnitario) + '/' + rango.unidad + ' en rango (mediana $' + Math.round(rango.mediana) + ')' };
+  }
+  if (pOk && !uOk) {
+    return { modo: 'pack', confianza: confBase,
+      razonamiento: 'precio/u=$' + Math.round(precioSiPack) + '/' + rango.unidad + ' en rango (mediana $' + Math.round(rango.mediana) + ')' };
+  }
+  if (uOk && pOk) {
+    // Ambos caen (rango muy amplio o tamaño chico) → desempatar por cercanía
+    var dU = Math.abs(precioSiUnitario - rango.mediana);
+    var dP = Math.abs(precioSiPack - rango.mediana);
+    return dU <= dP
+      ? { modo: 'unitario', confianza: 0.5, razonamiento: 'ambos en rango, unitario más cerca de mediana' }
+      : { modo: 'pack',     confianza: 0.5, razonamiento: 'ambos en rango, pack más cerca de mediana' };
+  }
+  return null;
+}
+
+// Detección por coherencia interna: agrupar filas por tipo dentro de la misma
+// lista. Si hay dos tamaños muy distintos (≥2x) pero precios parecidos, el
+// grande tiene precio por unidad. Sin IA, sin DB.
+// Recibe un array de grupos { clave_canonica, tipo, tamano, unidad_base, proveedores }
+// y devuelve un map { id_original → { modo, confianza, razonamiento } }.
+function detectarPorCoherenciaInterna(grupos) {
+  var porTipo = {};
+  var det = {};
+  grupos.forEach(function(g) {
+    if (!g.tipo || !g.tamano) return;
+    var k = (g.tipo + '|' + (g.unidad_base || '')).toLowerCase();
+    (porTipo[k] = porTipo[k] || []).push(g);
+  });
+  Object.keys(porTipo).forEach(function(k) {
+    var grupo = porTipo[k];
+    if (grupo.length < 2) return;
+    for (var i = 0; i < grupo.length; i++) {
+      for (var j = 0; j < grupo.length; j++) {
+        if (i === j) continue;
+        var a = grupo[i], b = grupo[j];
+        if (a.tamano === b.tamano) continue;
+        // Tomar el primer proveedor propio de cada grupo para comparar
+        var pa = (a.proveedores || []).find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+        var pb = (b.proveedores || []).find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+        if (!pa || !pb) continue;
+        var precioA = parseFloat(pa.precio_raw) || 0;
+        var precioB = parseFloat(pb.precio_raw) || 0;
+        if (precioA <= 0 || precioB <= 0) continue;
+        var rT = Math.max(a.tamano, b.tamano) / Math.min(a.tamano, b.tamano);
+        var rP = Math.max(precioA, precioB) / Math.min(precioA, precioB);
+        // Tamaños muy distintos (≥2x) pero precios parecidos (< 60% del ratio
+        // de tamaños) → el grande es unitario (no escala con el tamaño)
+        if (rT >= 2 && rP < rT * 0.6) {
+          var grande = a.tamano > b.tamano ? a : b;
+          var pGrande = a.tamano > b.tamano ? pa : pb;
+          det[pGrande.id_original] = {
+            clave_canonica: grande.clave_canonica,
+            modo: 'unitario', confianza: 0.85,
+            razonamiento: 'coherencia interna: tamaño ' + grande.tamano + '× pero precio similar a ' + (a === grande ? b.tamano : a.tamano) + '×'
+          };
+        }
+      }
+    }
+  });
+  return det;
+}
+
+// Llama al endpoint backend que busca el rango en la web (una sola vez por tipo)
+async function buscarRangoWebCliente(tipoProducto, unidadBase) {
+  try {
+    var sd = await supabase.auth.getSession();
+    var token = sd.data && sd.data.session && sd.data.session.access_token;
+    if (!token) return null;
+    var resp = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({
+        tipo: 'buscar_rango_web',
+        tipo_producto: tipoProducto,
+        unidad_base: unidadBase
+      })
+    });
+    if (!resp.ok) return null;
+    var data = await resp.json();
+    return data.rango || null;
+  } catch(e) {
+    console.warn('[Rangos] Búsqueda web falló:', e);
+    return null;
+  }
+}
+
+// Defensa anti-outliers: un precio no actualiza el rango si está absurdamente
+// lejos de la mediana actual (>5x más caro o >5x más barato).
+function esOutlier(precioUnit, rangoRow) {
+  if (!rangoRow || !rangoRow.muestras || rangoRow.muestras === 0) return false;
+  var ratio = precioUnit / rangoRow.mediana_estimada;
+  return ratio > 5 || ratio < 0.2;
+}
+
+function _mediana(arr) {
+  if (!arr || !arr.length) return 0;
+  var s = arr.slice().sort(function(x, y) { return x - y; });
+  var m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+// Afina los rangos con los precios detectados. Solo data con confianza >= 0.7
+// alimenta. Outliers se descartan. La mediana nueva se suaviza con la anterior
+// dándole más peso a lo nuevo (refleja inflación real).
+async function actualizarRangosConDetecciones(filasDetectadas) {
+  if (!filasDetectadas || !filasDetectadas.length) return;
+  var rangosActuales = await getRangosCacheados();
+  var preciosPorTipo = {};
+  filasDetectadas.forEach(function(f) {
+    if (!f.tipo || !f.modo || (f.confianza || 0) < 0.7) return;
+    var tipo = (f.tipo || '').toLowerCase().trim();
+    if (!tipo) return;
+    var precioRaw = parseFloat(f.precio_raw || f.precio) || 0;
+    var tamano = parseFloat(f.tamano) || 0;
+    if (precioRaw <= 0) return;
+    var precioUnit = f.modo === 'pack' && tamano > 0 ? precioRaw / tamano : precioRaw;
+    if (precioUnit <= 0) return;
+    // Defensa 2: descartar outliers
+    if (esOutlier(precioUnit, rangosActuales[tipo])) {
+      console.warn('[Rangos] Outlier descartado:', tipo, precioUnit);
+      return;
+    }
+    // Defensa 3: datos confirmados manualmente pesan el doble
+    var peso = f.confirmado_manual ? 2 : 1;
+    var arr = (preciosPorTipo[tipo] = preciosPorTipo[tipo] || { precios: [], unidad: f.unidad_base || 'kg' });
+    for (var i = 0; i < peso; i++) arr.precios.push(precioUnit);
+  });
+  var updates = [];
+  Object.keys(preciosPorTipo).forEach(function(tipo) {
+    var data = preciosPorTipo[tipo];
+    var ex = rangosActuales[tipo];
+    var medianaNueva = _mediana(data.precios);
+    // Suavizar: 70% peso a nuevo, 30% a anterior (refleja inflación real)
+    var medianaFinal = ex && ex.muestras > 0
+      ? medianaNueva * 0.7 + ex.mediana_estimada * 0.3
+      : medianaNueva;
+    var muestras = (ex && ex.muestras ? ex.muestras : 0) + data.precios.length;
+    updates.push({
+      tipo_producto: tipo,
+      unidad_base: data.unidad,
+      mediana_estimada: Math.round(medianaFinal * 100) / 100,
+      factor_min: 0.5,
+      factor_max: 2.5,
+      origen: 'datos',
+      muestras: muestras,
+      confiable: muestras >= 3, // Defensa 1
+      ultima_actualizacion: new Date().toISOString()
+    });
+  });
+  if (!updates.length) return;
+  try {
+    var r = await supabase.from('pl_rangos_precio').upsert(updates, { onConflict: 'tipo_producto' });
+    if (r.error) console.warn('[Rangos] Error en upsert:', r.error.message);
+    else { console.log('[Rangos] Afinados', updates.length, 'rangos'); _invalidarRangosCache(); }
+  } catch(e) { console.warn('[Rangos] Excepción en upsert:', e); }
+}
+
+// ============================================================================
+
 function detectarModoHeuristico(grupo) {
   // Si hay 2+ proveedores propios con precios distintos → dejar para la IA (comparativa)
   var propios = grupo.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
@@ -2361,14 +2606,22 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     return enriquecido;
   });
 
-  // Etapa 4: Detectar modo
+  // Etapa 4: Detectar modo (orden de prioridad: gratis → caro)
   //   1. Heurística estructural (presentación = solo unidad sin número) → unitario
-  //   2. Rangos típicos por tipo de producto (auto-deducción del usuario) → pack/unitario
-  //   3. IA en paralelo solo para lo que queda ambiguo
+  //   2. Rango cacheado en pl_rangos_precio (compartido entre usuarios) → pack/unitario
+  //   3. Coherencia interna (dos tamaños del mismo tipo en la lista) → pack/unitario
+  //   4. Rangos hardcodeados (fallback) → pack/unitario
+  //   5. Búsqueda web (solo si no hay rango y es un tipo común) → cachea y decide
+  //   6. IA en paralelo solo para lo que queda ambiguo
   if (loadingEl) loadingEl.textContent = 'Detectando modo de precio...';
   var todosLosModos = [];
   var gruposParaIA = [];
-  var nRangos = 0;
+  var nRangos = 0, nRangosDinamicos = 0, nCoherencia = 0, nWeb = 0;
+
+  // Cargar rangos dinámicos (gratis, una consulta)
+  var rangosCacheados = await getRangosCacheados();
+  // Pre-calcular coherencia interna para todos los grupos
+  var coherenciaMap = detectarPorCoherenciaInterna(gruposConComparacion);
 
   var aplicar = function(g, h) {
     var propios = g.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
@@ -2381,16 +2634,81 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     });
   };
 
-  gruposConComparacion.forEach(function(g) {
-    var h = detectarModoHeuristico(g);
-    if (h) { aplicar(g, h); return; }
-    var r = decidirModoPorRangos(g);
-    if (r) { aplicar(g, r); nRangos++; return; }
-    gruposParaIA.push(g);
-  });
+  // Cola de tipos que faltan en pl_rangos_precio (para buscar web en paralelo)
+  var tiposParaBuscarWeb = {};
 
-  console.log('[Pipeline] Modo — heurística: ' + (todosLosModos.length - nRangos) +
-    ' · rangos típicos: ' + nRangos +
+  for (var iG = 0; iG < gruposConComparacion.length; iG++) {
+    var g = gruposConComparacion[iG];
+
+    // 1) Heurística estructural
+    var h = detectarModoHeuristico(g);
+    if (h) { aplicar(g, h); continue; }
+
+    var tipoKey = (g.tipo || '').toLowerCase().trim();
+    var rangoRow = tipoKey ? rangosCacheados[tipoKey] : null;
+    var primerPropio = g.proveedores.find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+
+    // 2) Rango cacheado (dinámico, de pl_rangos_precio)
+    if (rangoRow && primerPropio) {
+      var det = detectarPorRangoDinamico(
+        { precio_raw: primerPropio.precio_raw, tamano: g.tamano },
+        rangoRow
+      );
+      if (det) { aplicar(g, det); nRangosDinamicos++; continue; }
+    }
+
+    // 3) Coherencia interna
+    if (primerPropio && coherenciaMap[primerPropio.id_original]) {
+      aplicar(g, coherenciaMap[primerPropio.id_original]);
+      nCoherencia++;
+      continue;
+    }
+
+    // 4) Rangos hardcodeados (fallback)
+    var r = decidirModoPorRangos(g);
+    if (r) { aplicar(g, r); nRangos++; continue; }
+
+    // 5) Si no hay rango cacheado y el tipo es no-trivial, marcar para buscar web
+    if (!rangoRow && tipoKey && tipoKey.length >= 3 && g.unidad_base) {
+      tiposParaBuscarWeb[tipoKey] = { tipo: tipoKey, unidad_base: g.unidad_base };
+    }
+
+    gruposParaIA.push(g);
+  }
+
+  // 5b) Buscar rangos web en paralelo para tipos faltantes (limitado a 6 para
+  // no saturar y porque la mayoría se cubre con cache/coherencia/rangos hardcoded)
+  var tiposABuscar = Object.values(tiposParaBuscarWeb).slice(0, 6);
+  if (tiposABuscar.length) {
+    if (loadingEl) loadingEl.textContent = 'Buscando rangos de referencia (' + tiposABuscar.length + ' tipos)...';
+    var promesasWeb = tiposABuscar.map(function(t) {
+      return buscarRangoWebCliente(t.tipo, t.unidad_base).then(function(rango) {
+        if (rango) { rangosCacheados[t.tipo] = rango; guardarRangoCacheado(rango); return rango; }
+        return null;
+      }).catch(function() { return null; });
+    });
+    var resultadosWeb = await Promise.all(promesasWeb);
+    nWeb = resultadosWeb.filter(Boolean).length;
+    // Re-evaluar los grupos pendientes con los rangos recién obtenidos
+    var pendientes = gruposParaIA.slice();
+    gruposParaIA = [];
+    pendientes.forEach(function(g2) {
+      var tk = (g2.tipo || '').toLowerCase().trim();
+      var rr = tk ? rangosCacheados[tk] : null;
+      var pp = g2.proveedores.find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+      if (rr && pp) {
+        var det2 = detectarPorRangoDinamico({ precio_raw: pp.precio_raw, tamano: g2.tamano }, rr);
+        if (det2) { aplicar(g2, det2); nRangosDinamicos++; return; }
+      }
+      gruposParaIA.push(g2);
+    });
+  }
+
+  console.log('[Pipeline] Modo — heurística: ' + (todosLosModos.length - nRangos - nRangosDinamicos - nCoherencia) +
+    ' · rangos DB: ' + nRangosDinamicos +
+    ' · coherencia: ' + nCoherencia +
+    ' · rangos hardcoded: ' + nRangos +
+    ' · web cacheadas: ' + nWeb +
     ' · IA: ' + gruposParaIA.length + ' grupos');
 
   // Batches de 25 en PARALELO (cada grupo lleva varios proveedores, baja TPM)
@@ -2453,6 +2771,14 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
   console.log('[Pipeline] Completado: ' + resultado.length + ' items · ' +
     resultado.filter(function(r){return r.modo;}).length + ' con modo detectado · ' +
     resultado.filter(function(r){return r.revisar;}).length + ' para revisar');
+
+  // Etapa 6: Afinar rangos en pl_rangos_precio con los datos detectados
+  // (defensas anti-outlier internas; solo data con confianza >= 0.7 alimenta).
+  // Se ejecuta en background sin bloquear el retorno al usuario.
+  actualizarRangosConDetecciones(resultado).catch(function(e) {
+    console.warn('[Rangos] Error al afinar rangos:', e);
+  });
+
   return resultado;
 }
 

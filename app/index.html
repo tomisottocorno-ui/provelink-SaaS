@@ -2216,24 +2216,18 @@ function detectarPorCoherenciaInterna(grupos) {
   return det;
 }
 
-// Llama al endpoint backend que busca el rango en la web (una sola vez por tipo)
+// Llama al endpoint backend que busca el rango en la web (una sola vez por tipo).
+// Pasa por _fetchClaude que tiene semaforo de concurrencia (_CLAUDE_MAX_CONCURRENT)
+// para no saturar el rate limit cuando se buscan muchos tipos en paralelo.
 async function buscarRangoWebCliente(tipoProducto, unidadBase) {
   try {
-    var sd = await supabase.auth.getSession();
-    var token = sd.data && sd.data.session && sd.data.session.access_token;
-    if (!token) return null;
-    var resp = await fetch('/api/claude', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({
-        tipo: 'buscar_rango_web',
-        tipo_producto: tipoProducto,
-        unidad_base: unidadBase
-      })
+    var r = await _fetchClaude({
+      tipo: 'buscar_rango_web',
+      tipo_producto: tipoProducto,
+      unidad_base: unidadBase
     });
-    if (!resp.ok) return null;
-    var data = await resp.json();
-    return data.rango || null;
+    if (!r.resp.ok) return null;
+    return r.data.rango || null;
   } catch(e) {
     console.warn('[Rangos] Búsqueda web falló:', e);
     return null;
@@ -2721,16 +2715,21 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     gruposParaIA.push(g);
   }
 
-  // 5b) Buscar rangos web en paralelo para tipos faltantes (limitado a 6 para
-  // no saturar y porque la mayoría se cubre con cache/coherencia/rangos hardcoded)
-  var tiposABuscar = Object.values(tiposParaBuscarWeb).slice(0, 6);
+  // 5b) Buscar rangos web en paralelo para TODOS los tipos faltantes.
+  // El semaforo de _fetchClaude (_CLAUDE_MAX_CONCURRENT) limita la concurrencia
+  // automaticamente para no saturar rate limit. Sin tope: aprendemos lo que
+  // haga falta. Una vez en cache, futuras subidas lo usan sin re-fetchear.
+  var tiposABuscar = Object.values(tiposParaBuscarWeb);
   if (tiposABuscar.length) {
     if (loadingEl) loadingEl.textContent = 'Buscando rangos de referencia (' + tiposABuscar.length + ' tipos)...';
+    var completados = 0;
     var promesasWeb = tiposABuscar.map(function(t) {
       return buscarRangoWebCliente(t.tipo, t.unidad_base).then(function(rango) {
+        completados++;
+        if (loadingEl) loadingEl.textContent = 'Buscando rangos (' + completados + '/' + tiposABuscar.length + ')...';
         if (rango) { rangosCacheados[t.tipo] = rango; guardarRangoCacheado(rango); return rango; }
         return null;
-      }).catch(function() { return null; });
+      }).catch(function() { completados++; return null; });
     });
     var resultadosWeb = await Promise.all(promesasWeb);
     nWeb = resultadosWeb.filter(Boolean).length;

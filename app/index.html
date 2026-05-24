@@ -2300,15 +2300,18 @@ async function actualizarRangosConDetecciones(filasDetectadas) {
   var preciosPorTipo = {};
   filasDetectadas.forEach(function(f) {
     if (!f.tipo || !f.modo || (f.confianza || 0) < 0.7) return;
-    var tipo = (f.tipo || '').toLowerCase().trim();
+    // CRITICO: normalizar tipo para que "aceite de girasol" y "aceite girasol"
+    // se acumulen en la MISMA fila. Sin esto cada subida crea duplicados y
+    // los rangos sembrados nunca se afinan.
+    var tipo = _normTipo(f.tipo);
     if (!tipo) return;
     var precioRaw = parseFloat(f.precio_raw || f.precio) || 0;
     var tamano = parseFloat(f.tamano) || 0;
     if (precioRaw <= 0) return;
     var precioUnit = f.modo === 'pack' && tamano > 0 ? precioRaw / tamano : precioRaw;
     if (precioUnit <= 0) return;
-    // Defensa 2: descartar outliers
-    if (esOutlier(precioUnit, rangosActuales[tipo])) {
+    // Defensa 2: descartar outliers (lookup laxo para no perder match con "de")
+    if (esOutlier(precioUnit, lookupRangoCacheado(rangosActuales, tipo))) {
       console.warn('[Rangos] Outlier descartado:', tipo, precioUnit);
       return;
     }
@@ -2320,19 +2323,23 @@ async function actualizarRangosConDetecciones(filasDetectadas) {
   var updates = [];
   Object.keys(preciosPorTipo).forEach(function(tipo) {
     var data = preciosPorTipo[tipo];
-    var ex = rangosActuales[tipo];
+    var ex = lookupRangoCacheado(rangosActuales, tipo);
     var medianaNueva = _mediana(data.precios);
     // Suavizar: 70% peso a nuevo, 30% a anterior (refleja inflación real)
     var medianaFinal = ex && ex.muestras > 0
       ? medianaNueva * 0.7 + ex.mediana_estimada * 0.3
       : medianaNueva;
     var muestras = (ex && ex.muestras ? ex.muestras : 0) + data.precios.length;
+    // Preservar factors existentes (especialmente los sembrados con formula
+    // proporcional). Si no hay, usar 0.5 / 2.5 default.
+    var fMin = (ex && ex.factor_min != null) ? ex.factor_min : 0.5;
+    var fMax = (ex && ex.factor_max != null) ? ex.factor_max : 2.5;
     updates.push({
       tipo_producto: tipo,
       unidad_base: data.unidad,
       mediana_estimada: Math.round(medianaFinal * 100) / 100,
-      factor_min: 0.5,
-      factor_max: 2.5,
+      factor_min: fMin,
+      factor_max: fMax,
       origen: 'datos',
       muestras: muestras,
       confiable: muestras >= 3, // Defensa 1

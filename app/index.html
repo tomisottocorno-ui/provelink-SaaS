@@ -1977,16 +1977,27 @@ var RANGOS_PRECIO_AR = {
 
 // Busca el rango típico aplicable a un tipo (matching laxo: "aceite girasol marca x"
 // matchea "aceite girasol").
+// Normaliza tipo para matching laxo (idempotente con _normTipo de la cache DB)
+function _normTipoLite(t) {
+  return String(t || '').toLowerCase().trim()
+    .replace(/\b(de|del|la|el|los|las)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function rangoParaTipo(tipo, unidadBase) {
   if (!tipo) return null;
   var t = String(tipo).toLowerCase().trim();
-  // 1) Match exacto
-  if (RANGOS_PRECIO_AR[t] && RANGOS_PRECIO_AR[t].unidad === unidadBase) return RANGOS_PRECIO_AR[t];
-  // 2) Match por prefijo (la clave del catalogo aparece al inicio del tipo)
+  var tn = _normTipoLite(t);
+  // 1) Match exacto (raw o normalizado)
+  if (RANGOS_PRECIO_AR[t]  && RANGOS_PRECIO_AR[t].unidad  === unidadBase) return RANGOS_PRECIO_AR[t];
+  if (RANGOS_PRECIO_AR[tn] && RANGOS_PRECIO_AR[tn].unidad === unidadBase) return RANGOS_PRECIO_AR[tn];
+  // 2) Match por prefijo, tambien sobre el tipo normalizado (sin "de")
   var keys = Object.keys(RANGOS_PRECIO_AR);
   for (var i = 0; i < keys.length; i++) {
     var k = keys[i];
-    if (t.indexOf(k) === 0 && RANGOS_PRECIO_AR[k].unidad === unidadBase) return RANGOS_PRECIO_AR[k];
+    if (RANGOS_PRECIO_AR[k].unidad !== unidadBase) continue;
+    if (t.indexOf(k) === 0 || tn.indexOf(k) === 0) return RANGOS_PRECIO_AR[k];
   }
   return null;
 }
@@ -2043,19 +2054,50 @@ function decidirModoPorRangos(grupo) {
 // Cache en memoria de rangos cargados desde Supabase (vida = un pipeline)
 var _rangosCache = null;
 
+// Normaliza un tipo para matching: minusculas, sin articulos espanoles, sin
+// espacios extra. Asegura que "aceite de girasol" y "aceite girasol" matcheen.
+function _normTipo(t) {
+  return String(t || '').toLowerCase().trim()
+    .replace(/\b(de|del|la|el|los|las)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 async function getRangosCacheados() {
   if (_rangosCache) return _rangosCache;
   try {
     var r = await supabase.from('pl_rangos_precio').select('*');
     if (r.error) { console.warn('[Rangos] No se pudo cargar:', r.error.message); return {}; }
     var map = {};
-    (r.data || []).forEach(function(row) { map[(row.tipo_producto || '').toLowerCase()] = row; });
+    (r.data || []).forEach(function(row) {
+      var tipo = (row.tipo_producto || '').toLowerCase();
+      map[tipo] = row;                         // clave exacta
+      var norm = _normTipo(tipo);
+      if (norm && norm !== tipo) map[norm] = row;   // alias sin articulos
+    });
     _rangosCache = map;
     return map;
   } catch(e) { console.warn('[Rangos] Excepción:', e); return {}; }
 }
 
 function _invalidarRangosCache() { _rangosCache = null; }
+
+// Lookup robusto: prueba el tipo tal cual, su version normalizada (sin "de"),
+// y por ultimo prefix match contra todas las claves.
+function lookupRangoCacheado(rangosMap, tipo) {
+  if (!tipo || !rangosMap) return null;
+  var t = String(tipo).toLowerCase().trim();
+  if (rangosMap[t]) return rangosMap[t];
+  var n = _normTipo(t);
+  if (n && rangosMap[n]) return rangosMap[n];
+  // Prefix: alguna clave es prefijo de la consulta normalizada?
+  var keys = Object.keys(rangosMap);
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    if (n.indexOf(_normTipo(k)) === 0) return rangosMap[k];
+  }
+  return null;
+}
 
 async function guardarRangoCacheado(rango) {
   if (!rango || !rango.tipo_producto) return;
@@ -2684,7 +2726,7 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     if (h) { aplicar(g, h); continue; }
 
     var tipoKey = (g.tipo || '').toLowerCase().trim();
-    var rangoRow = tipoKey ? rangosCacheados[tipoKey] : null;
+    var rangoRow = tipoKey ? lookupRangoCacheado(rangosCacheados, tipoKey) : null;
     var primerPropio = g.proveedores.find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
 
     // 2) Rango cacheado (dinámico, de pl_rangos_precio)
@@ -2738,7 +2780,7 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     gruposParaIA = [];
     pendientes.forEach(function(g2) {
       var tk = (g2.tipo || '').toLowerCase().trim();
-      var rr = tk ? rangosCacheados[tk] : null;
+      var rr = tk ? lookupRangoCacheado(rangosCacheados, tk) : null;
       var pp = g2.proveedores.find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
       if (rr && pp) {
         var det2 = detectarPorRangoDinamico({ precio_raw: pp.precio_raw, tamano: g2.tamano }, rr);

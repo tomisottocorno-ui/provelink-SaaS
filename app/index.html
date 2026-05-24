@@ -2300,18 +2300,22 @@ async function actualizarRangosConDetecciones(filasDetectadas) {
   var preciosPorTipo = {};
   filasDetectadas.forEach(function(f) {
     if (!f.tipo || !f.modo || (f.confianza || 0) < 0.7) return;
-    // CRITICO: normalizar tipo para que "aceite de girasol" y "aceite girasol"
-    // se acumulen en la MISMA fila. Sin esto cada subida crea duplicados y
-    // los rangos sembrados nunca se afinan.
-    var tipo = _normTipo(f.tipo);
-    if (!tipo) return;
+    var tipoIA = String(f.tipo || '').toLowerCase().trim();
+    if (!tipoIA) return;
+    // Si ya hay un rango similar en cache (con o sin "de"), usar SU clave para
+    // que las actualizaciones se acumulen ahi. Esto evita crear "aceite girasol"
+    // y "aceite de girasol" como filas separadas. Pero NO normaliza ciegamente:
+    // "dulce de leche" (donde "de" es parte del nombre) queda igual si esa es
+    // la clave que ya existe.
+    var rangoExistente = lookupRangoCacheado(rangosActuales, tipoIA);
+    var tipo = rangoExistente ? rangoExistente.tipo_producto : tipoIA;
     var precioRaw = parseFloat(f.precio_raw || f.precio) || 0;
     var tamano = parseFloat(f.tamano) || 0;
     if (precioRaw <= 0) return;
     var precioUnit = f.modo === 'pack' && tamano > 0 ? precioRaw / tamano : precioRaw;
     if (precioUnit <= 0) return;
-    // Defensa 2: descartar outliers (lookup laxo para no perder match con "de")
-    if (esOutlier(precioUnit, lookupRangoCacheado(rangosActuales, tipo))) {
+    // Defensa 2: descartar outliers
+    if (esOutlier(precioUnit, rangoExistente)) {
       console.warn('[Rangos] Outlier descartado:', tipo, precioUnit);
       return;
     }

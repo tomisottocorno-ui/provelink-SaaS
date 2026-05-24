@@ -2324,6 +2324,26 @@ async function actualizarRangosConDetecciones(filasDetectadas) {
     // la clave que ya existe.
     var rangoExistente = lookupRangoCacheado(rangosActuales, tipoIA);
     var tipo = rangoExistente ? rangoExistente.tipo_producto : tipoIA;
+
+    // Defensa 4: NO crear entradas genericas si ya hay tipos mas especificos
+    // de origen manual. Ej: la IA devuelve "aceite" → si ya existen "aceite
+    // girasol", "aceite oliva" como manuales, NO guardar "aceite" como
+    // entrada nueva (seria demasiado generica y contaminaria el lookup).
+    if (!rangoExistente) {
+      var tipoNorm = _normTipo(tipo);
+      var prefijoDeManual = Object.keys(rangosActuales).some(function(k) {
+        var row = rangosActuales[k];
+        if (!row || row.origen !== 'manual') return false;
+        var nk = _normTipo(k);
+        // existe un manual que EMPIEZA con este tipo (osea es mas especifico)
+        return nk !== tipoNorm && nk.indexOf(tipoNorm + ' ') === 0;
+      });
+      if (prefijoDeManual) {
+        console.warn('[Rangos] Tipo demasiado generico, no guardado (hay manuales mas especificos):', tipo);
+        return;
+      }
+    }
+
     var precioRaw = parseFloat(f.precio_raw || f.precio) || 0;
     var tamano = parseFloat(f.tamano) || 0;
     if (precioRaw <= 0) return;

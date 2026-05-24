@@ -2076,6 +2076,51 @@ async function guardarRangoCacheado(rango) {
   } catch(e) { console.warn('[Rangos] Excepción al guardar:', e); }
 }
 
+// Helper para sembrar manualmente un rango desde la consola del browser:
+//   _seedRango('aceite girasol', 'L', 1500)
+//   _seedRango('harina 000', 'kg', 800)
+//   _seedRango('aceto balsamico', 'L', 3000)
+// Calcula los factores proporcionales al precio tipico: productos baratos
+// tienen rango mas estrecho (varian menos), caros tienen rango mas amplio
+// (mas variacion entre mayorista y premium).
+async function _seedRango(tipo, unidadBase, precioTipico) {
+  var p = parseFloat(precioTipico);
+  if (!p || p <= 0) { console.warn('[Rangos] precio invalido'); return null; }
+  var fMin, fMax;
+  if (p < 500)        { fMin = 0.5; fMax = 2.0; } // 4x range
+  else if (p < 2000)  { fMin = 0.4; fMax = 3.0; } // 7.5x range
+  else if (p < 10000) { fMin = 0.3; fMax = 4.0; } // 13x range
+  else                { fMin = 0.2; fMax = 5.0; } // 25x range
+  await guardarRangoCacheado({
+    tipo_producto: String(tipo || '').toLowerCase().trim(),
+    unidad_base: unidadBase,
+    mediana_estimada: p,
+    factor_min: fMin,
+    factor_max: fMax,
+    origen: 'manual',
+    muestras: 1,
+    confiable: true   // datos manuales se asumen confiables desde el primer punto
+  });
+  console.log('[Rangos] Sembrado:', tipo, '→ mediana $' + p + ' rango [$' + Math.round(p*fMin) + '-$' + Math.round(p*fMax) + ']/' + unidadBase);
+  return { min: p*fMin, max: p*fMax, mediana: p };
+}
+
+// Sembrar varios rangos de una sola vez. Recibe un array de [tipo, unidad, precio]:
+//   _seedRangos([
+//     ['aceite girasol', 'L', 1500],
+//     ['harina 000', 'kg', 800],
+//     ['aceto balsamico', 'L', 3000]
+//   ])
+async function _seedRangos(filas) {
+  if (!Array.isArray(filas)) return;
+  for (var i = 0; i < filas.length; i++) {
+    var f = filas[i];
+    if (!f || f.length < 3) continue;
+    await _seedRango(f[0], f[1], f[2]);
+  }
+  console.log('[Rangos] Sembrados ' + filas.length + ' rangos. Recargá la página para que el pipeline los use.');
+}
+
 // Calcula el rango efectivo a partir de la mediana × factor.
 function rangoEfectivo(rangoRow) {
   if (!rangoRow || !rangoRow.mediana_estimada) return null;

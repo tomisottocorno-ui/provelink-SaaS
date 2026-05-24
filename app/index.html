@@ -2082,21 +2082,36 @@ async function getRangosCacheados() {
 
 function _invalidarRangosCache() { _rangosCache = null; }
 
-// Lookup robusto: prueba el tipo tal cual, su version normalizada (sin "de"),
-// y por ultimo prefix match contra todas las claves.
+// Lookup robusto. Orden de preferencia:
+//   1. Exact match (raw o normalizado sin "de/del/la/el")
+//   2. Prefix match con origen='manual' (los seeds, la verdad ground-truth)
+//   3. Prefix match con cualquier origen (incluye auto-learned que pueden tener
+//      el brand pegado al tipo si la IA no lo limpio bien)
+// La preferencia de manual evita que una fila polucionada con brand
+// ("aceite de girasol canuelas") gane sobre la seed limpia ("aceite girasol").
 function lookupRangoCacheado(rangosMap, tipo) {
   if (!tipo || !rangosMap) return null;
   var t = String(tipo).toLowerCase().trim();
   if (rangosMap[t]) return rangosMap[t];
   var n = _normTipo(t);
   if (n && rangosMap[n]) return rangosMap[n];
-  // Prefix: alguna clave es prefijo de la consulta normalizada?
+  // Prefix: buscar TODOS los matches y elegir el mejor
   var keys = Object.keys(rangosMap);
+  var bestManual = null, bestManualLen = 0;
+  var bestOther  = null, bestOtherLen  = 0;
   for (var i = 0; i < keys.length; i++) {
     var k = keys[i];
-    if (n.indexOf(_normTipo(k)) === 0) return rangosMap[k];
+    var nk = _normTipo(k);
+    if (!nk || n.indexOf(nk) !== 0) continue;
+    var row = rangosMap[k];
+    if (row && row.origen === 'manual') {
+      // Entre las manual, preferir la mas especifica (mas larga)
+      if (nk.length > bestManualLen) { bestManual = row; bestManualLen = nk.length; }
+    } else {
+      if (nk.length > bestOtherLen) { bestOther = row; bestOtherLen = nk.length; }
+    }
   }
-  return null;
+  return bestManual || bestOther || null;
 }
 
 async function guardarRangoCacheado(rango) {

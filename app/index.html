@@ -2291,6 +2291,24 @@ function detectarPorCoherenciaInterna(grupos) {
 // Pasa por _fetchClaude que tiene semaforo de concurrencia (_CLAUDE_MAX_CONCURRENT)
 // para no saturar el rate limit cuando se buscan muchos tipos en paralelo.
 async function buscarRangoWebCliente(tipoProducto, unidadBase) {
+  // Defensa: NO buscar rango para tipos genericos de una palabra cuando ya
+  // hay seeds manuales mas especificas (aceite, vinagre, harina, etc.). Estos
+  // genericos contaminarian el cache global con un rango promedio de todos
+  // los subtipos.
+  var tipoNorm = _normTipo(tipoProducto);
+  if (tipoNorm && tipoNorm.indexOf(' ') < 0) {
+    var rangos = _rangosCache || {};
+    var hayManualMasEspecifica = Object.keys(rangos).some(function(k) {
+      var row = rangos[k];
+      if (!row || row.origen !== 'manual') return false;
+      var nk = _normTipo(k);
+      return nk !== tipoNorm && nk.indexOf(tipoNorm + ' ') === 0;
+    });
+    if (hayManualMasEspecifica) {
+      console.warn('[Rangos] web_search bloqueado por generico:', tipoProducto, '(hay manuales mas especificas)');
+      return null;
+    }
+  }
   try {
     var r = await _fetchClaude({
       tipo: 'buscar_rango_web',

@@ -3597,8 +3597,20 @@ function renderBuscarProducto(expansionesExtras) {
         pb = parsearPrecioBase(it.precio, it.unidad, it.productoLista, 'envase');
       }
       var precioMostrar = it.precio;
+      // Mostrar la unidad/presentacion solo si NO esta ya incluida en el nombre
+      // (para no duplicar "Aceite 5L · 5L"). Match case-insensitive sin espacios.
+      var nombre = String(it.productoLista || '');
+      var unidadStr = String(it.unidad || '').trim();
+      var mostrarUnidad = '';
+      if (unidadStr) {
+        var normNombre = nombre.toLowerCase().replace(/\s+/g, '');
+        var normUnidad = unidadStr.toLowerCase().replace(/\s+/g, '');
+        if (normNombre.indexOf(normUnidad) < 0) {
+          mostrarUnidad = ' <span style="color:var(--text-muted);font-weight:500;">· ' + escapeHtml(unidadStr) + '</span>';
+        }
+      }
       var pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
-      html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + pbHtml + '</div>';
+      html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(nombre) + mostrarUnidad + pbHtml + '</div>';
       html += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">';
       html += '<strong style="font-size:13px;white-space:nowrap;color:#4ade80;">$' + formatPrecio(precioMostrar) + '</strong>';
       if (enPed > 0) {

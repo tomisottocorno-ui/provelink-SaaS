@@ -2385,18 +2385,26 @@ function detectarPorCoherenciaInterna(grupos) {
 // para no quemar tiempo cuando Anthropic esta caido (típicamente 502s).
 var _webSearchFails = 0;
 var _WEB_SEARCH_DISABLED = false;
-var _WEB_SEARCH_MAX_FAILS = 5;
+var _WEB_SEARCH_MAX_FAILS = 3; // bajar de 5 a 3 para cortar mas rapido
+var _webSearchAvisado = false; // para loguear "deshabilitado" una sola vez
+
+function _avisarWebSearchDeshabilitado() {
+  if (_webSearchAvisado) return;
+  _webSearchAvisado = true;
+  console.warn('[Rangos] web_search deshabilitado tras ' + _webSearchFails + ' fallos consecutivos (probable problema en Anthropic)');
+}
 
 // Llama al endpoint backend que busca el rango en la web (una sola vez por tipo).
-// Pasa por _fetchClaude que tiene semaforo de concurrencia (_CLAUDE_MAX_CONCURRENT)
-// para no saturar el rate limit cuando se buscan muchos tipos en paralelo.
+// IMPORTANTE: hay DOS checks de _WEB_SEARCH_DISABLED:
+//   1. Al inicio (sincronico, antes del semaforo) — para llamadas nuevas que
+//      llegan despues de que se deshabilito.
+//   2. Despues del _claudeAcquire (asincronico) — para llamadas que ya estaban
+//      encoladas en el semaforo cuando el flag se seteo. Sin este segundo
+//      check, todas las llamadas que Promise.all disparo en paralelo pasarian
+//      el primer check sincronicamente y harian fetch.
 async function buscarRangoWebCliente(tipoProducto, unidadBase) {
-  // Si el circuit breaker se activo, no intentar mas
   if (_WEB_SEARCH_DISABLED) return null;
-  // Defensa: NO buscar rango para tipos genericos de una palabra cuando ya
-  // hay seeds manuales mas especificas (aceite, vinagre, harina, etc.). Estos
-  // genericos contaminarian el cache global con un rango promedio de todos
-  // los subtipos.
+  // Defensa: NO buscar rango para tipos genericos cuando hay manuales especificas
   var tipoNorm = _normTipo(tipoProducto);
   if (tipoNorm && tipoNorm.indexOf(' ') < 0) {
     var rangos = _rangosCache || {};
@@ -2411,27 +2419,42 @@ async function buscarRangoWebCliente(tipoProducto, unidadBase) {
       return null;
     }
   }
+  // Adquirir semaforo MANUALMENTE para poder rechequear DISABLED post-acquire
+  await _claudeAcquire();
   try {
-    var r = await _fetchClaude({
-      tipo: 'buscar_rango_web',
-      tipo_producto: tipoProducto,
-      unidad_base: unidadBase
+    // SEGUNDO check: otra llamada paralela puede haber deshabilitado en el mientras
+    if (_WEB_SEARCH_DISABLED) return null;
+    var resp = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      body: JSON.stringify({
+        tipo: 'buscar_rango_web',
+        tipo_producto: tipoProducto,
+        unidad_base: unidadBase
+      })
     });
-    if (!r.resp.ok) {
+    if (!resp.ok) {
       _webSearchFails++;
       if (_webSearchFails >= _WEB_SEARCH_MAX_FAILS) {
         _WEB_SEARCH_DISABLED = true;
-        console.warn('[Rangos] web_search deshabilitado: ' + _webSearchFails + ' fallos consecutivos (probable problema en Anthropic)');
+        _avisarWebSearchDeshabilitado();
       }
       return null;
     }
-    _webSearchFails = 0; // reset al éxito
-    return r.data.rango || null;
+    _webSearchFails = 0;
+    var data = {};
+    try { data = await resp.json(); } catch(e) {}
+    return data.rango || null;
   } catch(e) {
     _webSearchFails++;
-    if (_webSearchFails >= _WEB_SEARCH_MAX_FAILS) _WEB_SEARCH_DISABLED = true;
+    if (_webSearchFails >= _WEB_SEARCH_MAX_FAILS) {
+      _WEB_SEARCH_DISABLED = true;
+      _avisarWebSearchDeshabilitado();
+    }
     console.warn('[Rangos] Búsqueda web falló:', e);
     return null;
+  } finally {
+    _claudeRelease();
   }
 }
 

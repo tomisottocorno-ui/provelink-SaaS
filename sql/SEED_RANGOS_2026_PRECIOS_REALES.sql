@@ -89,8 +89,21 @@ values
   -- ============================================================
   -- DULCES Y CONSERVAS (fuente: LAMARIS mayo 2026)
   -- ============================================================
+  -- ============================================================
+  -- DULCE DE LECHE — por variedad (CRÍTICO: alfajorero es 8x más caro)
+  -- ============================================================
   -- Dulce de leche repostero VACALIN balde 10KG: $43.890/10 = $4.389/kg sin IVA → ×1.105 = $4.850/kg
-  ('dulce de leche',          'kg',  5000,  0.3, 4.0, 'manual', 3, true),
+  ('dulce de leche',               'kg',  5000,  0.3, 4.0, 'manual', 3, true),
+  ('dulce de leche repostero',     'kg',  5000,  0.3, 4.0, 'manual', 3, true),
+  -- ALFAJORERO / COPITOS: consistencia más dura para relleno de alfajores.
+  -- Precio REAL: DULCE ALFAJORERO ALYSER x10KG = $39.468/kg (confimado lista proveedor)
+  -- Son MUCHO más caros que el dulce de leche común — NO confundir.
+  ('dulce alfajorero',             'kg', 40000,  0.2, 5.0, 'manual', 5, true),
+  ('dulce de leche alfajorero',    'kg', 40000,  0.2, 5.0, 'manual', 5, true),
+  -- Mermelada relleno alfajorero (ej: arándanos TAXONERA x10KG = $57.755/kg)
+  ('mermelada alfajorero',         'kg', 55000,  0.2, 5.0, 'manual', 5, true),
+  ('relleno alfajorero',           'kg', 45000,  0.2, 5.0, 'manual', 5, true),
+
   -- Mermelada membrillo DEWEY 10KG: $20.350/10 = $2.035/kg sin IVA → ×1.105 = $2.249/kg
   ('mermelada',               'kg',  2500,  0.3, 4.0, 'manual', 3, true),
   ('dulce de membrillo',      'kg',  2500,  0.3, 4.0, 'manual', 3, true),

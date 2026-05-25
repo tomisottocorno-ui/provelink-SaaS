@@ -229,11 +229,14 @@ values
 
   -- ============================================================
   -- LEVADURA (fuente: LAMARIS, estimación)
-  -- LAMARIS: 10KG estuche $3.623 → $362/kg (parece precio de granel sin IVA)
-  -- Típica panadería compra por 500g-1kg: ~$800-2.000/kg
+  -- LAMARIS: estuche 10kg $3.623 = $362/kg bulk sin IVA.
+  -- Para compra en cantidades menores (500g-2kg): ~$1.500-4.000/kg.
+  -- mediana conservadora: $2.500/kg fresca, $12.000/kg seca.
   -- ============================================================
-  ('levadura fresca',         'kg',  1500,  0.3, 4.0, 'manual', 3, true),
-  ('levadura seca',           'kg', 10000,  0.2, 5.0, 'manual', 3, true),
+  ('levadura',                'kg',  2500,  0.3, 4.0, 'manual', 3, true),
+  ('levadura fresca',         'kg',  2500,  0.3, 4.0, 'manual', 3, true),
+  ('levadura seca',           'kg', 12000,  0.2, 5.0, 'manual', 3, true),
+  ('levadura instantanea',    'kg', 12000,  0.2, 5.0, 'manual', 3, true),
 
   -- ============================================================
   -- ACEITES (estimación mercado 2026 - LAMARIS data ambigua)

@@ -96,13 +96,14 @@ values
   ('dulce de leche',               'kg',  5000,  0.3, 4.0, 'manual', 3, true),
   ('dulce de leche repostero',     'kg',  5000,  0.3, 4.0, 'manual', 3, true),
   -- ALFAJORERO / COPITOS: consistencia más dura para relleno de alfajores.
-  -- Precio REAL: DULCE ALFAJORERO ALYSER x10KG = $39.468/kg (confimado lista proveedor)
-  -- Son MUCHO más caros que el dulce de leche común — NO confundir.
-  ('dulce alfajorero',             'kg', 40000,  0.2, 5.0, 'manual', 5, true),
-  ('dulce de leche alfajorero',    'kg', 40000,  0.2, 5.0, 'manual', 5, true),
-  -- Mermelada relleno alfajorero (ej: arándanos TAXONERA x10KG = $57.755/kg)
-  ('mermelada alfajorero',         'kg', 55000,  0.2, 5.0, 'manual', 5, true),
-  ('relleno alfajorero',           'kg', 45000,  0.2, 5.0, 'manual', 5, true),
+  -- Precio REAL: DULCE ALFAJORERO ALYSER x10KG total = $39.468 → $3.947/kg
+  -- MERM. ARANDANOS ALFAJORERO TAXONERA x10KG total = $57.755 → $5.775/kg
+  -- NOTA: la IA confundió el precio del bulto con el precio/kg — seeds corregidos.
+  ('dulce alfajorero',             'kg',  4000,  0.3, 4.0, 'manual', 5, true),
+  ('dulce de leche alfajorero',    'kg',  4000,  0.3, 4.0, 'manual', 5, true),
+  -- Mermelada relleno alfajorero (ej: arándanos TAXONERA x10KG = $57.755 total → $5.775/kg)
+  ('mermelada alfajorero',         'kg',  6000,  0.3, 4.0, 'manual', 5, true),
+  ('relleno alfajorero',           'kg',  5000,  0.3, 4.0, 'manual', 5, true),
 
   -- Mermelada membrillo DEWEY 10KG: $20.350/10 = $2.035/kg sin IVA → ×1.105 = $2.249/kg
   ('mermelada',               'kg',  2500,  0.3, 4.0, 'manual', 3, true),

@@ -1205,7 +1205,7 @@ async function procesarPDF(file) {
 
   // 3. Si hay UNA columna sola, procesar directo. Si hay varias, mostrar selector
   if (columnas.precios.length === 1) {
-    await procesarPDFConColumna(lineas, columnas.precios[0].nombre);
+    await procesarPDFConColumna(lineas, columnas.precios[0].nombre, columnas.precios[0].ejemplo, columnas.precios);
   } else {
     loading.style.display = 'none';
     mostrarSelectorColumnasPDF(lineas, columnas);
@@ -1268,8 +1268,10 @@ function mostrarSelectorColumnasPDF(lineas, columnas) {
     var sel = document.querySelector('input[name="sel-col-pdf"]:checked');
     if (!sel) return;
     var nombreCol = sel.value;
+    // Buscar el ejemplo correspondiente a la columna elegida
+    var colObj = columnas.precios.find(function(c) { return c.nombre === nombreCol; }) || {};
     cerrarModalColPDF();
-    procesarPDFConColumna(lineas, nombreCol).catch(function(e) {
+    procesarPDFConColumna(lineas, nombreCol, colObj.ejemplo, columnas.precios).catch(function(e) {
       console.error(e);
       $('lista-loading').style.display = 'none';
       showToast('Error: ' + (e.message || ''), 'error');
@@ -1282,7 +1284,7 @@ function cerrarModalColPDF() {
   if (m) m.remove();
 }
 
-async function procesarPDFConColumna(lineas, nombreColumna) {
+async function procesarPDFConColumna(lineas, nombreColumna, ejemploColumna, todasLasColumnas) {
   var loading = $('lista-loading');
   loading.style.display = 'block';
   filasPreview = [];
@@ -1296,7 +1298,7 @@ async function procesarPDFConColumna(lineas, nombreColumna) {
     // Hasta 3 intentos por chunk
     for (var intento = 1; intento <= 3; intento++) {
       try {
-        items = await extraerChunkConClaude(chunkLineas, nombreColumna);
+        items = await extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna, todasLasColumnas);
         break;
       } catch(chunkErr) {
         console.warn('[PDF] Chunk ' + (c + 1) + ' intento ' + intento + ' falló:', chunkErr.message);
@@ -1341,11 +1343,38 @@ async function procesarPDFConColumna(lineas, nombreColumna) {
 }
 
 // extraerChunkConClaude recibe el array de líneas para poder subdividir si se trunca
-async function extraerChunkConClaude(chunkLineas, nombreColumna) {
+async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna, todasLasColumnas) {
   var textoCrudo = chunkLineas.join('\n');
   // Si el texto es muy largo, reducir a 20000 chars (unas 60-80 líneas = seguro)
   if (textoCrudo.length > 20000) textoCrudo = textoCrudo.slice(0, 20000);
-  var prompt = 'Extraé productos de esta lista de precios argentina. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques, NUNCA conviertas formato.\n\nDevolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":"texto_exacto","unidad":"...","alerta":false}]\n- nombre: nombre completo (marca, variedad, presentación)\n- precio: STRING con el texto EXACTO de la columna "' + nombreColumna + '" tal como aparece en el PDF, conservando puntos y comas (ej: "13.996,53" → devolver "13.996,53" como string). NO conviertas a número, NO saques símbolos. Es CRÍTICO mantener el formato argentino original.\n- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n- alerta: true solo si hay dos precios distintos para el mismo producto y no sabés cuál tomar\n- Ignorá encabezados, totales, líneas vacías. Incluí TODOS los productos.\n\nTexto:\n\n' + textoCrudo;
+
+  // Contexto de columnas: la elegida (con su ejemplo de valor) y las otras
+  // (con sus ejemplos) para que la IA sepa cuáles NO tomar.
+  var ctxColumna = 'COLUMNA OBJETIVO: "' + nombreColumna + '"';
+  if (ejemploColumna) {
+    ctxColumna += ' (valor típico: ' + ejemploColumna + ')';
+  }
+  var otrasCols = (todasLasColumnas || []).filter(function(c) { return c && c.nombre !== nombreColumna; });
+  if (otrasCols.length > 0) {
+    ctxColumna += '\nCOLUMNAS A IGNORAR (estos precios NO los queremos, pero pueden estar en la misma fila):';
+    otrasCols.forEach(function(c) {
+      ctxColumna += '\n  - "' + c.nombre + '"' + (c.ejemplo ? ' (valor típico: ' + c.ejemplo + ')' : '');
+    });
+  }
+
+  var prompt = 'Extraé productos de esta lista de precios argentina. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques, NUNCA conviertas formato.\n\n' +
+    ctxColumna + '\n\n' +
+    'Devolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":"texto_exacto","unidad":"...","alerta":false}]\n' +
+    '- nombre: nombre completo (marca, variedad, presentación)\n' +
+    '- precio: STRING con el texto EXACTO de la COLUMNA OBJETIVO "' + nombreColumna + '" tal como aparece en el PDF.\n' +
+    '  IMPORTANTE: en cada fila puede haber varios números (códigos, stock, distintas columnas de precio).\n' +
+    '  Usá el valor TÍPICO de la columna objetivo (' + (ejemploColumna || 'sin ejemplo') + ') como referencia de qué número buscar.\n' +
+    '  Si el orden de columnas cambia o no estás 100% seguro de cuál es el precio correcto, marcá alerta: true.\n' +
+    '  Conservá puntos y comas (ej: "13.996,53" → devolver "13.996,53" como string). NO conviertas a número.\n' +
+    '- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n' +
+    '- alerta: true si NO estás seguro de cuál es el precio correcto de la columna objetivo (mejor marcar dudoso que adivinar mal)\n' +
+    '- Ignorá encabezados, totales, líneas vacías. Incluí TODOS los productos.\n\n' +
+    'Texto:\n\n' + textoCrudo;
   var proveedorId = $('lista-prov-select').value;
   var resp = await fetch('/api/claude', {
     method: 'POST',

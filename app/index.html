@@ -1851,6 +1851,51 @@ async function _fetchClaude(payload) {
   }
 }
 
+// Red de seguridad: si la IA devuelve un tipo generico de 1 palabra pero el
+// nombre del producto tiene info para inferir el subtipo, refinamos el tipo.
+// Esto evita que "Aceite Girasol Cocinero" se normalice como tipo="aceite"
+// (lo que mata el lookup en pl_rangos_precio).
+var SUBTIPOS_REFINAMIENTO = {
+  'aceite':   ['girasol', 'oliva', 'maiz', 'soja', 'mezcla', 'uva', 'canola', 'arroz'],
+  'vinagre':  ['manzana', 'vino', 'alcohol', 'arroz', 'blanco', 'tinto'],
+  'aceto':    ['balsamico', 'modena'],
+  'harina':   ['0000', '000', '00', 'leudante', 'integral', 'maiz', 'mandioca'],
+  'arroz':    ['largo fino', 'doble carolina', 'yamani', 'integral', 'arborio', 'jasmin', 'basmati', 'parboiled', 'largo', 'doble'],
+  'azucar':   ['rubia', 'negra', 'impalpable', 'mascabo', 'organica', 'comun', 'refinada'],
+  'sal':      ['fina', 'gruesa', 'marina', 'parrillera', 'rosada', 'himalaya'],
+  'cacao':    ['amargo', 'dulce', 'puro', 'soluble', 'alcalino'],
+  'queso':    ['cremoso', 'parmesano', 'pategrasa', 'rallado', 'mozzarella', 'azul', 'sardo', 'reggianito', 'provolone'],
+  'leche':    ['entera', 'descremada', 'condensada', 'evaporada', 'polvo'],
+  'levadura': ['fresca', 'seca', 'instantanea'],
+  'crema':    ['leche', 'chantilly', 'pastelera'],
+  'dulce':    ['leche', 'batata', 'membrillo'],
+  'mermelada':['frutilla', 'durazno', 'damasco', 'higo', 'naranja', 'frambuesa'],
+  'cobertura':['amarga', 'leche', 'blanca', 'semiamarga'],
+  'galletita':['agua', 'dulce', 'maria', 'criolla'],
+  'fideos':   ['secos', 'frescos', 'tirabuzon', 'spaghetti', 'mostachol', 'penne', 'fettuccine'],
+  'jugo':     ['naranja', 'manzana', 'multifruta', 'durazno', 'pomelo', 'limon']
+};
+
+function refinarTipoGenerico(tipo, nombreOriginal) {
+  if (!tipo || !nombreOriginal) return tipo;
+  var t = String(tipo).toLowerCase().trim();
+  if (t.indexOf(' ') >= 0) return tipo; // ya es especifico (2+ palabras)
+  var subs = SUBTIPOS_REFINAMIENTO[t];
+  if (!subs) return tipo;
+  var n = String(nombreOriginal).toLowerCase();
+  // Buscar subtipo mas largo que matchee (asi "doble carolina" gana a "doble")
+  var subsOrdenados = subs.slice().sort(function(a, b) { return b.length - a.length; });
+  for (var i = 0; i < subsOrdenados.length; i++) {
+    var sub = subsOrdenados[i];
+    var re = new RegExp('\\b' + sub.replace(/\s+/g, '\\s+') + '\\b', 'i');
+    if (re.test(n)) {
+      console.log('[Norm] Tipo refinado: "' + tipo + '" → "' + (t + ' ' + sub) + '" (nombre: "' + nombreOriginal + '")');
+      return t + ' ' + sub;
+    }
+  }
+  return tipo;
+}
+
 async function _normBatch(batch) {
   var prompt = batch.map(function(p) {
     return 'ID:' + p.id + ' | NOMBRE: ' + p.nombre_original +
@@ -1880,10 +1925,25 @@ async function _normBatch(batch) {
     return a.concat(b);
   }
 
+  // Indice por id para refinar el tipo con el nombre original del producto
+  var batchPorId = {};
+  batch.forEach(function(p) { batchPorId[p.id] = p; });
+  var refinar = function(arr) {
+    if (!Array.isArray(arr)) return arr;
+    return arr.map(function(item) {
+      if (!item || !item.tipo) return item;
+      var orig = batchPorId[item.id_original];
+      var nombre = orig ? (orig.nombre_original || '') : '';
+      var tipoRef = refinarTipoGenerico(item.tipo, nombre);
+      if (tipoRef !== item.tipo) item.tipo = tipoRef;
+      return item;
+    });
+  };
+
   // Intento 1: parse directo
   try {
     var parsed = JSON.parse(txt);
-    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed)) return refinar(parsed);
   } catch(e) {}
 
   // Intento 2: slice entre primer [ y último ]
@@ -1891,7 +1951,7 @@ async function _normBatch(batch) {
   if (ini >= 0 && fin > ini) {
     try {
       var parsed2 = JSON.parse(txt.slice(ini, fin + 1));
-      if (Array.isArray(parsed2)) return parsed2;
+      if (Array.isArray(parsed2)) return refinar(parsed2);
     } catch(e2) {}
   }
 
@@ -1899,7 +1959,7 @@ async function _normBatch(batch) {
   var recuperados = recuperarObjetosJsonArray(txt);
   if (recuperados.length > 0) {
     console.warn('[normBatch] JSON truncado pero recuperados ' + recuperados.length + '/' + batch.length + ' items');
-    return recuperados;
+    return refinar(recuperados);
   }
 
   console.error('[normBatch] JSON inválido. Inicio respuesta:', txt.slice(0, 300));
@@ -2287,10 +2347,18 @@ function detectarPorCoherenciaInterna(grupos) {
   return det;
 }
 
+// Circuit breaker para web_search: si fallan N llamadas seguidas, cortamos
+// para no quemar tiempo cuando Anthropic esta caido (típicamente 502s).
+var _webSearchFails = 0;
+var _WEB_SEARCH_DISABLED = false;
+var _WEB_SEARCH_MAX_FAILS = 5;
+
 // Llama al endpoint backend que busca el rango en la web (una sola vez por tipo).
 // Pasa por _fetchClaude que tiene semaforo de concurrencia (_CLAUDE_MAX_CONCURRENT)
 // para no saturar el rate limit cuando se buscan muchos tipos en paralelo.
 async function buscarRangoWebCliente(tipoProducto, unidadBase) {
+  // Si el circuit breaker se activo, no intentar mas
+  if (_WEB_SEARCH_DISABLED) return null;
   // Defensa: NO buscar rango para tipos genericos de una palabra cuando ya
   // hay seeds manuales mas especificas (aceite, vinagre, harina, etc.). Estos
   // genericos contaminarian el cache global con un rango promedio de todos
@@ -2315,9 +2383,19 @@ async function buscarRangoWebCliente(tipoProducto, unidadBase) {
       tipo_producto: tipoProducto,
       unidad_base: unidadBase
     });
-    if (!r.resp.ok) return null;
+    if (!r.resp.ok) {
+      _webSearchFails++;
+      if (_webSearchFails >= _WEB_SEARCH_MAX_FAILS) {
+        _WEB_SEARCH_DISABLED = true;
+        console.warn('[Rangos] web_search deshabilitado: ' + _webSearchFails + ' fallos consecutivos (probable problema en Anthropic)');
+      }
+      return null;
+    }
+    _webSearchFails = 0; // reset al éxito
     return r.data.rango || null;
   } catch(e) {
+    _webSearchFails++;
+    if (_webSearchFails >= _WEB_SEARCH_MAX_FAILS) _WEB_SEARCH_DISABLED = true;
     console.warn('[Rangos] Búsqueda web falló:', e);
     return null;
   }

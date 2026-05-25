@@ -1856,41 +1856,65 @@ async function _fetchClaude(payload) {
 // Esto evita que "Aceite Girasol Cocinero" se normalice como tipo="aceite"
 // (lo que mata el lookup en pl_rangos_precio).
 var SUBTIPOS_REFINAMIENTO = {
-  'aceite':   ['girasol', 'oliva', 'maiz', 'soja', 'mezcla', 'uva', 'canola', 'arroz'],
+  'aceite':   ['girasol', 'oliva', 'maiz', 'soja', 'mezcla', 'uva', 'canola', 'arroz', 'coco', 'sesamo', 'lino', 'algodon'],
   'vinagre':  ['manzana', 'vino', 'alcohol', 'arroz', 'blanco', 'tinto'],
   'aceto':    ['balsamico', 'modena'],
-  'harina':   ['0000', '000', '00', 'leudante', 'integral', 'maiz', 'mandioca'],
+  'harina':   ['0000', '000', '00', 'leudante', 'integral', 'maiz', 'mandioca', 'garbanzo', 'almendra', 'coco', 'arroz', 'avena', 'centeno', 'cebada', 'gluten', 'soja', 'lino', 'amaranto', 'quinoa', 'mijo'],
   'arroz':    ['largo fino', 'doble carolina', 'yamani', 'integral', 'arborio', 'jasmin', 'basmati', 'parboiled', 'largo', 'doble'],
   'azucar':   ['rubia', 'negra', 'impalpable', 'mascabo', 'organica', 'comun', 'refinada'],
   'sal':      ['fina', 'gruesa', 'marina', 'parrillera', 'rosada', 'himalaya'],
   'cacao':    ['amargo', 'dulce', 'puro', 'soluble', 'alcalino'],
-  'queso':    ['cremoso', 'parmesano', 'pategrasa', 'rallado', 'mozzarella', 'azul', 'sardo', 'reggianito', 'provolone'],
-  'leche':    ['entera', 'descremada', 'condensada', 'evaporada', 'polvo'],
+  'queso':    ['cremoso', 'parmesano', 'pategrasa', 'rallado', 'mozzarella', 'azul', 'sardo', 'reggianito', 'provolone', 'roquefort', 'gouda', 'cheddar'],
+  'leche':    ['entera', 'descremada', 'condensada', 'evaporada', 'polvo', 'almendra', 'coco', 'soja', 'avena'],
   'levadura': ['fresca', 'seca', 'instantanea'],
   'crema':    ['leche', 'chantilly', 'pastelera'],
   'dulce':    ['leche', 'batata', 'membrillo'],
-  'mermelada':['frutilla', 'durazno', 'damasco', 'higo', 'naranja', 'frambuesa'],
+  'mermelada':['frutilla', 'durazno', 'damasco', 'higo', 'naranja', 'frambuesa', 'arandano', 'ciruela'],
   'cobertura':['amarga', 'leche', 'blanca', 'semiamarga'],
   'galletita':['agua', 'dulce', 'maria', 'criolla'],
   'fideos':   ['secos', 'frescos', 'tirabuzon', 'spaghetti', 'mostachol', 'penne', 'fettuccine'],
-  'jugo':     ['naranja', 'manzana', 'multifruta', 'durazno', 'pomelo', 'limon']
+  'jugo':     ['naranja', 'manzana', 'multifruta', 'durazno', 'pomelo', 'limon'],
+  'esencia':  ['vainilla', 'almendra', 'limon', 'menta', 'naranja'],
+  'colorante':['rojo', 'amarillo', 'azul', 'verde', 'negro', 'comestible'],
+  'condimento':['provenzal', 'mixto', 'criollo', 'pollo', 'pescado'],
+  'fruto':    ['seco', 'secos'],
+  'fruta':    ['seca', 'secas', 'desecada'],
+  'semillas': ['sesamo', 'lino', 'chia', 'girasol', 'calabaza', 'amapola']
 };
 
 function refinarTipoGenerico(tipo, nombreOriginal) {
   if (!tipo || !nombreOriginal) return tipo;
   var t = String(tipo).toLowerCase().trim();
   if (t.indexOf(' ') >= 0) return tipo; // ya es especifico (2+ palabras)
-  var subs = SUBTIPOS_REFINAMIENTO[t];
-  if (!subs) return tipo;
   var n = String(nombreOriginal).toLowerCase();
-  // Buscar subtipo mas largo que matchee (asi "doble carolina" gana a "doble")
-  var subsOrdenados = subs.slice().sort(function(a, b) { return b.length - a.length; });
-  for (var i = 0; i < subsOrdenados.length; i++) {
-    var sub = subsOrdenados[i];
-    var re = new RegExp('\\b' + sub.replace(/\s+/g, '\\s+') + '\\b', 'i');
-    if (re.test(n)) {
-      console.log('[Norm] Tipo refinado: "' + tipo + '" → "' + (t + ' ' + sub) + '" (nombre: "' + nombreOriginal + '")');
-      return t + ' ' + sub;
+
+  // Estrategia 1: subtipos predefinidos (mas exactos)
+  var subs = SUBTIPOS_REFINAMIENTO[t];
+  if (subs) {
+    var subsOrdenados = subs.slice().sort(function(a, b) { return b.length - a.length; });
+    for (var i = 0; i < subsOrdenados.length; i++) {
+      var sub = subsOrdenados[i];
+      var re = new RegExp('\\b' + sub.replace(/\s+/g, '\\s+') + '\\b', 'i');
+      if (re.test(n)) {
+        console.log('[Norm] Tipo refinado: "' + tipo + '" → "' + (t + ' ' + sub) + '" (nombre: "' + nombreOriginal + '")');
+        return t + ' ' + sub;
+      }
+    }
+  }
+
+  // Estrategia 2: patron "tipo de PALABRA" → tipo + PALABRA
+  // Ej: "Harina de Garbanzo" → tipo "harina garbanzo"
+  //     "Aceite de Coco" → tipo "aceite coco"
+  // Cubre casos donde el subtipo no esta en la lista predefinida.
+  var rePatron = new RegExp('\\b' + t + '\\s+de\\s+([a-zñáéíóú]+)', 'i');
+  var m = n.match(rePatron);
+  if (m && m[1]) {
+    var palabra = m[1].toLowerCase();
+    // Filtrar palabras que no son subtipos
+    var stopWords = ['la', 'el', 'los', 'las', 'un', 'una', 'tipo', 'calidad', 'marca', 'segunda', 'primera'];
+    if (stopWords.indexOf(palabra) < 0 && palabra.length >= 3) {
+      console.log('[Norm] Tipo refinado por "de": "' + tipo + '" → "' + (t + ' ' + palabra) + '" (nombre: "' + nombreOriginal + '")');
+      return t + ' ' + palabra;
     }
   }
   return tipo;

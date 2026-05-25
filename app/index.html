@@ -1759,6 +1759,7 @@ function calcularPrecios(grupos, resultadosModo) {
           modoInfo ? (modoInfo.confianza || 0.5) : 0.5
         ),
         revisar: !modoInfo || (modoInfo.confianza || 0) < 0.7 || (prov.confianza_normalizacion || 1) < 0.7,
+        precio_alto_envase_chico: modoInfo ? (modoInfo.envase_chico || false) : false,
         razonamiento: modoInfo ? modoInfo.razonamiento : null
       });
     });
@@ -2346,50 +2347,83 @@ async function _seedRangos(filas) {
   console.log('[Rangos] Sembrados ' + filas.length + ' rangos. Recargá la página para que el pipeline los use.');
 }
 
+// Multiplica factor_max para envases pequeños que son proporcionalmente más caros.
+// Ejemplos: aceite girasol 500mL vs bidón 5L → el chico cuesta ~2x más por litro.
+// tamano ya viene en unidades canónicas (kg o L).
+function factorPackPequenio(tamano, unidadBase) {
+  if (!tamano || tamano <= 0) return 1.0;
+  var u = (unidadBase || '').toLowerCase();
+  if (u !== 'kg' && u !== 'l') return 1.0; // unidades (u) no aplica
+  if (tamano <= 0.1)  return 4.0;  // ≤100g/mL: sachets, monodosis
+  if (tamano <= 0.25) return 3.0;  // ≤250g/mL: frascos chicos
+  if (tamano <= 0.5)  return 2.5;  // ≤500g/500mL: medio kilo/litro
+  if (tamano <= 1)    return 1.8;  // ≤1kg/L
+  if (tamano <= 2)    return 1.3;  // ≤2kg/L
+  return 1.0;                      // ≥2kg/L: bulk → sin ajuste
+}
+
 // Calcula el rango efectivo a partir de la mediana × factor.
-function rangoEfectivo(rangoRow) {
+// tamano (opcional) activa el ajuste de envase pequeño sobre factor_max.
+function rangoEfectivo(rangoRow, tamano) {
   if (!rangoRow || !rangoRow.mediana_estimada) return null;
   var fMin = rangoRow.factor_min != null ? rangoRow.factor_min : 0.5;
   var fMax = rangoRow.factor_max != null ? rangoRow.factor_max : 2.5;
+  var mult = factorPackPequenio(tamano, rangoRow.unidad_base);
   return {
-    min: rangoRow.mediana_estimada * fMin,
-    max: rangoRow.mediana_estimada * fMax,
-    mediana: rangoRow.mediana_estimada,
+    min:      rangoRow.mediana_estimada * fMin,
+    max:      rangoRow.mediana_estimada * fMax * mult,  // ajustado por envase chico
+    maxBase:  rangoRow.mediana_estimada * fMax,          // máximo sin ajuste (bulk)
+    mediana:  rangoRow.mediana_estimada,
     confiable: !!rangoRow.confiable,
-    unidad: rangoRow.unidad_base
+    unidad:   rangoRow.unidad_base,
+    multPack: mult
   };
 }
 
 // Detecta bulto vs unitario para una fila dada usando un rango cacheado.
-// Devuelve {modo, confianza, razonamiento} o null si no se puede decidir.
+// Devuelve {modo, confianza, razonamiento, envase_chico} o null si no se puede decidir.
+// envase_chico=true indica que el precio es alto pero válido por ser envase pequeño.
 function detectarPorRangoDinamico(fila, rangoRow) {
-  var rango = rangoEfectivo(rangoRow);
+  var tamano = parseFloat(fila.tamano) || 0;
+  var rango = rangoEfectivo(rangoRow, tamano > 0 ? tamano : null);
   if (!rango) return null;
   var precioRaw = parseFloat(fila.precio_raw || fila.precio) || 0;
-  var tamano = parseFloat(fila.tamano) || 0;
   if (precioRaw <= 0) return null;
   var precioSiUnitario = precioRaw;
   var precioSiPack = tamano > 0 ? precioRaw / tamano : null;
-  var enRango = function(v) { return v != null && v >= rango.min && v <= rango.max; };
-  var uOk = enRango(precioSiUnitario);
-  var pOk = precioSiPack != null && enRango(precioSiPack);
+  var enRango     = function(v) { return v != null && v >= rango.min && v <= rango.max; };
+  var enRangoBase = function(v) { return v != null && v >= rango.min && v <= rango.maxBase; };
+  var uOk     = enRango(precioSiUnitario);
+  var pOk     = precioSiPack != null && enRango(precioSiPack);
+  var uOkBase = enRangoBase(precioSiUnitario);
+  var pOkBase = precioSiPack != null && enRangoBase(precioSiPack);
   // confianza base depende de si el rango es confiable (3+ muestras) o provisional
   var confBase = rango.confiable ? 0.9 : 0.65;
+  // true si entra en rango sólo gracias al ajuste de envase chico
+  var soloXEnvaseChico = function(esUnitario) {
+    return rango.multPack > 1 && (esUnitario ? (!uOkBase && uOk) : (!pOkBase && pOk));
+  };
   if (uOk && !pOk) {
-    return { modo: 'unitario', confianza: confBase,
-      razonamiento: '$' + Math.round(precioSiUnitario) + '/' + rango.unidad + ' en rango (mediana $' + Math.round(rango.mediana) + ')' };
+    var ec = soloXEnvaseChico(true);
+    return { modo: 'unitario', confianza: ec ? confBase * 0.85 : confBase, envase_chico: ec,
+      razonamiento: '$' + Math.round(precioSiUnitario) + '/' + rango.unidad +
+        (ec ? ' (precio alto — envase chico)' : ' en rango') +
+        ' (mediana $' + Math.round(rango.mediana) + ')' };
   }
   if (pOk && !uOk) {
-    return { modo: 'pack', confianza: confBase,
-      razonamiento: 'precio/u=$' + Math.round(precioSiPack) + '/' + rango.unidad + ' en rango (mediana $' + Math.round(rango.mediana) + ')' };
+    var ec = soloXEnvaseChico(false);
+    return { modo: 'pack', confianza: ec ? confBase * 0.85 : confBase, envase_chico: ec,
+      razonamiento: 'precio/u=$' + Math.round(precioSiPack) + '/' + rango.unidad +
+        (ec ? ' (precio alto — envase chico)' : ' en rango') +
+        ' (mediana $' + Math.round(rango.mediana) + ')' };
   }
   if (uOk && pOk) {
     // Ambos caen (rango muy amplio o tamaño chico) → desempatar por cercanía
     var dU = Math.abs(precioSiUnitario - rango.mediana);
     var dP = Math.abs(precioSiPack - rango.mediana);
     return dU <= dP
-      ? { modo: 'unitario', confianza: 0.5, razonamiento: 'ambos en rango, unitario más cerca de mediana' }
-      : { modo: 'pack',     confianza: 0.5, razonamiento: 'ambos en rango, pack más cerca de mediana' };
+      ? { modo: 'unitario', confianza: 0.5, envase_chico: false, razonamiento: 'ambos en rango, unitario más cerca de mediana' }
+      : { modo: 'pack',     confianza: 0.5, envase_chico: false, razonamiento: 'ambos en rango, pack más cerca de mediana' };
   }
   return null;
 }
@@ -2519,11 +2553,13 @@ async function buscarRangoWebCliente(tipoProducto, unidadBase) {
 }
 
 // Defensa anti-outliers: un precio no actualiza el rango si está absurdamente
-// lejos de la mediana actual (>5x más caro o >5x más barato).
-function esOutlier(precioUnit, rangoRow) {
+// lejos de la mediana actual. El threshold se amplía para envases chicos (ej:
+// un sachets de 100mL puede costar 4x más/L que un bidón de 5L → no es outlier).
+function esOutlier(precioUnit, rangoRow, tamano) {
   if (!rangoRow || !rangoRow.muestras || rangoRow.muestras === 0) return false;
   var ratio = precioUnit / rangoRow.mediana_estimada;
-  return ratio > 5 || ratio < 0.2;
+  var mult  = factorPackPequenio(tamano, rangoRow.unidad_base);
+  return ratio > 5 * mult || ratio < 0.2;
 }
 
 function _mediana(arr) {
@@ -2576,8 +2612,8 @@ async function actualizarRangosConDetecciones(filasDetectadas) {
     if (precioRaw <= 0) return;
     var precioUnit = f.modo === 'pack' && tamano > 0 ? precioRaw / tamano : precioRaw;
     if (precioUnit <= 0) return;
-    // Defensa 2: descartar outliers
-    if (esOutlier(precioUnit, rangoExistente)) {
+    // Defensa 2: descartar outliers (tamano amplía el umbral para envases chicos)
+    if (esOutlier(precioUnit, rangoExistente, tamano)) {
       console.warn('[Rangos] Outlier descartado:', tipo, precioUnit);
       return;
     }
@@ -3211,11 +3247,14 @@ function renderPreview() {
 
       var confStr = it.confianza != null ? '<span style="opacity:0.7;">' + Math.round(it.confianza * 100) + '%</span>' : '';
       var revisarStr = it.revisar ? '<span style="color:var(--warn);font-weight:600;">⚠️ revisar</span>' : '';
+      var envChicoStr = (!it.revisar && it.precio_alto_envase_chico)
+        ? '<span style="color:#f59e0b;font-size:10px;font-weight:600;" title="El precio por kg/L es alto porque es un envase pequeño — es normal">📦 precio alto (envase pequeño)</span>'
+        : '';
       pipelineHtml =
         '<div style="flex-basis:100%;font-size:10.5px;color:var(--text-muted);margin-top:3px;' +
         'padding:2px 4px 0;line-height:1.4;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">' +
         '<span style="color:var(--text-2);font-weight:500;">' + escapeHtml(it.clave_canonica) + '</span>' +
-        infoModoHtml + confStr + revisarStr +
+        infoModoHtml + confStr + revisarStr + envChicoStr +
         '</div>';
     }
 

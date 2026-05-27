@@ -1347,7 +1347,6 @@ async function procesarImagen(file, jobId) {
 
   removeBarraProgreso(jobId);
   if (filasPreview.length === 0) {
-    loading.style.display = 'none';
     showToast('No se detectaron productos. Probá con una foto de mejor calidad', 'error');
     return;
   }
@@ -1355,13 +1354,12 @@ async function procesarImagen(file, jobId) {
   // Etapas 2-5: normalización, agrupamiento, detección de modo, cálculo
   try {
     var provId = $('lista-prov-select').value;
-    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provId, loading);
+    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provId, null);
   } catch(pipeErr) {
     console.warn('[Pipeline] Falló, usando extracción básica:', pipeErr.message);
     showToast('Extraídos sin normalizar (' + pipeErr.message + ')', 'warn');
   }
 
-  loading.style.display = 'none';
   renderPreview();
   showToast('IA extrajo ' + filasPreview.length + ' productos');
 }
@@ -1528,7 +1526,6 @@ async function procesarPDFConColumna(lineas, nombreColumna, ejemploColumna, toda
   }
   removeBarraProgreso(jobId);
   if (filasPreview.length === 0) {
-    loading.style.display = 'none';
     showToast('No se pudieron extraer productos', 'error');
     return;
   }
@@ -1536,13 +1533,12 @@ async function procesarPDFConColumna(lineas, nombreColumna, ejemploColumna, toda
   // Etapas 2-5: normalización, agrupamiento, detección de modo, cálculo
   try {
     var provIdPDF = $('lista-prov-select').value;
-    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provIdPDF, loading);
+    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provIdPDF, null);
   } catch(pipeErrPDF) {
     console.warn('[Pipeline PDF] Falló, usando extracción básica:', pipeErrPDF.message);
     showToast('Extraídos sin normalizar (' + pipeErrPDF.message + ')', 'warn');
   }
 
-  loading.style.display = 'none';
   renderPreview();
   var msg = 'IA extrajo ' + filasPreview.length + ' productos';
   if (errores > 0) msg += ' (' + errores + ' partes fallaron)';

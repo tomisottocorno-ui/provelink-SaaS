@@ -155,8 +155,15 @@
       <div class="seccion-titulo">
         <h2>Historial</h2>
       </div>
-      <div id="historial-content-prov">
-        <div class="empty"><div class="empty-emoji"></div><div class="empty-title">Cargando...</div></div>
+      <div style="display:flex;gap:8px;margin-bottom:20px;">
+        <button class="btn primary" id="hist-btn-recepcion" onclick="switchHistorialTab('recepcion')" style="flex:1;">📥 Recepción</button>
+        <button class="btn" id="hist-btn-historial" onclick="switchHistorialTab('historial')" style="flex:1;">📋 Historial</button>
+      </div>
+      <div id="hist-panel-recepcion">
+        <div id="historial-content-recepcion"></div>
+      </div>
+      <div id="hist-panel-historial" style="display:none;">
+        <div id="historial-content-prov"></div>
       </div>
     </div>
 
@@ -2208,13 +2215,13 @@ function confirmarPedido() {
     if (idx >= 0) {
       var prev = hist[idx];
       var nuevoEditCount = (prev.editCount || 0) + 1;
-      hist[idx] = { id: prev.id, fecha: prev.fecha, timestamp: prev.timestamp, items: items, total: items.reduce(function(s, it) { return s + it.subtotal; }, 0), editCount: nuevoEditCount, ultimaEdicion: Date.now() };
+      hist[idx] = { id: prev.id, fecha: prev.fecha, timestamp: prev.timestamp, items: items, total: items.reduce(function(s, it) { return s + it.subtotal; }, 0), editCount: nuevoEditCount, ultimaEdicion: Date.now(), recepcionado: prev.recepcionado !== undefined ? prev.recepcionado : false };
       histSet(hist);
       pedidoSet({ items: {} });
       actualizarBadgePedido();
       renderHistorial();
       cambiarTab('historial');
-      showToast('Pedido editado (' + nuevoEditCount + '/2)' + (nuevoEditCount >= 2 ? ' — BLOQUEADO' : ''));
+      showToast('Pedido editado y guardado');
       return;
     }
   }
@@ -2224,7 +2231,8 @@ function confirmarPedido() {
     fecha: new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
     timestamp: Date.now(),
     items: items,
-    total: items.reduce(function(s, it) { return s + it.subtotal; }, 0)
+    total: items.reduce(function(s, it) { return s + it.subtotal; }, 0),
+    recepcionado: false
   });
   if (hist.length > 100) hist = hist.slice(0, 100);
   histSet(hist);
@@ -2235,16 +2243,91 @@ function confirmarPedido() {
   showToast('Pedido guardado en historial');
 }
 
+var historialTabActual = 'recepcion';
+
 function renderHistorial() {
-  renderHistorialProveedores();
+  switchHistorialTab(historialTabActual);
+}
+
+function switchHistorialTab(tab) {
+  historialTabActual = tab;
+  var panelRec  = document.getElementById('hist-panel-recepcion');
+  var panelHist = document.getElementById('hist-panel-historial');
+  var btnRec    = document.getElementById('hist-btn-recepcion');
+  var btnHist   = document.getElementById('hist-btn-historial');
+  if (tab === 'recepcion') {
+    if (panelRec)  panelRec.style.display  = '';
+    if (panelHist) panelHist.style.display = 'none';
+    if (btnRec)    btnRec.className  = 'btn primary';
+    if (btnHist)   btnHist.className = 'btn';
+    renderHistorialRecepcion();
+  } else {
+    if (panelRec)  panelRec.style.display  = 'none';
+    if (panelHist) panelHist.style.display = '';
+    if (btnRec)    btnRec.className  = 'btn';
+    if (btnHist)   btnHist.className = 'btn primary';
+    renderHistorialProveedores();
+  }
+}
+
+function renderHistorialRecepcion() {
+  var cont = document.getElementById('historial-content-recepcion');
+  if (!cont) return;
+  var hist = histGet().filter(function(h) { return !h.recepcionado; });
+  if (!hist.length) {
+    cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin pedidos pendientes</div><div class="empty-sub">Los pedidos confirmados aparecen acá hasta que los recepcionés</div></div>';
+    return;
+  }
+  var html = '';
+  hist.forEach(function(h) {
+    var porProv = {};
+    h.items.forEach(function(it) {
+      if (!porProv[it.proveedorId]) porProv[it.proveedorId] = { nombre: it.proveedor, items: [], total: 0 };
+      porProv[it.proveedorId].items.push(it);
+      porProv[it.proveedorId].total += it.subtotal;
+    });
+    html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:12px;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
+    html += '<div><div style="font-size:15px;font-weight:600;">' + escapeHtml(h.fecha) + '</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + '</div></div>';
+    html += '<div style="text-align:right;"><div style="font-size:11px;color:var(--text-muted);">Total</div><div style="font-size:18px;font-weight:700;">$' + formatPrecio(h.total) + '</div></div></div>';
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">';
+    Object.keys(porProv).forEach(function(pid) {
+      var p = proveedores.find(function(x) { return x.id === pid; });
+      var tel = p ? (p.telefono || '') : '';
+      var waNum = tel.replace(/[^\d]/g, '');
+      var nombre = porProv[pid].nombre;
+      var subtotal = porProv[pid].total;
+      var color = waNum ? '#25D366' : 'var(--text-muted)';
+      var attrs = waNum ? 'data-action="wa-prov" data-hist="' + h.id + '" data-prov="' + pid + '"' : 'disabled';
+      html += '<button ' + attrs + ' style="display:inline-flex;align-items:center;gap:4px;background:transparent;border:1px solid ' + color + ';color:' + color + ';padding:6px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;opacity:' + (waNum ? '1' : '0.5') + ';">📱 ' + escapeHtml(nombre) + ' <span style="opacity:0.7;font-size:10px;">$' + formatPrecio(subtotal) + '</span></button>';
+    });
+    html += '</div>';
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+    html += '<button data-action="ver-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Ver detalle</button>';
+    html += '<button data-action="recepcionar" data-id="' + h.id + '" style="background:var(--emerald);border:none;color:#fff;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">✓ Recepcionar</button>';
+    html += '<button data-action="borrar-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--danger-border);color:var(--danger);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Eliminar</button>';
+    html += '</div></div>';
+  });
+  cont.innerHTML = html;
+  cont.querySelectorAll('button[data-action]').forEach(function(btn) {
+    btn.onclick = function() {
+      var act = btn.getAttribute('data-action');
+      var id  = btn.getAttribute('data-id');
+      if (act === 'ver-hist')         verDetalleHistorial(id);
+      else if (act === 'recepcionar') recepcionarPedido(id);
+      else if (act === 'borrar-hist') borrarPedidoHist(id);
+      else if (act === 'wa-prov')     abrirWhatsAppHist(btn.getAttribute('data-hist'), btn.getAttribute('data-prov'));
+    };
+  });
 }
 
 function renderHistorialProveedores() {
   var cont = $('historial-content-prov');
   if (!cont) return;
-  var hist = histGet();
+  var hist = histGet().filter(function(h) { return h.recepcionado; });
   if (!hist.length) {
-    cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin pedidos todavía</div><div class="empty-sub">Los pedidos confirmados aparecen acá</div></div>';
+    cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin pedidos en historial</div><div class="empty-sub">Los pedidos recepcionados aparecen acá</div></div>';
     return;
   }
 
@@ -2256,14 +2339,11 @@ function renderHistorialProveedores() {
       porProv[it.proveedorId].items.push(it);
       porProv[it.proveedorId].total += it.subtotal;
     });
-    var editCount = h.editCount || 0;
-    var bloqueado = editCount >= 2;
 
     html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:12px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
     html += '<div><div style="font-size:15px;font-weight:600;">' + escapeHtml(h.fecha) + '</div>';
-    var editTag = editCount > 0 ? ' · <span style="color:' + (bloqueado ? 'var(--danger)' : 'var(--warn)') + ';">' + (bloqueado ? 'BLOQUEADO' : 'Editado ' + editCount + '/2') + '</span>' : '';
-    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + editTag + '</div></div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + '</div></div>';
     html += '<div style="text-align:right;"><div style="font-size:11px;color:var(--text-muted);">Total</div><div style="font-size:18px;font-weight:700;">$' + formatPrecio(h.total) + '</div></div></div>';
 
     // Botones WhatsApp por proveedor
@@ -2281,10 +2361,8 @@ function renderHistorialProveedores() {
     html += '</div>';
 
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
-    html += '<button data-action="ver-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Ver detalle</button>';
-    if (!bloqueado) {
-      html += '<button data-action="editar-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--warn);color:var(--warn);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">✎ Editar (' + editCount + '/2)</button>';
-    }
+    html += '<button data-action="ver-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Ver</button>';
+    html += '<button data-action="editar-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--warn);color:var(--warn);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">✎ Editar</button>';
     html += '<button data-action="repetir-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Repetir pedido</button>';
     html += '<button data-action="borrar-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--danger-border);color:var(--danger);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Eliminar</button>';
     html += '</div></div>';
@@ -2295,11 +2373,11 @@ function renderHistorialProveedores() {
     btn.onclick = function() {
       var act = btn.getAttribute('data-action');
       var id = btn.getAttribute('data-id');
-      if (act === 'ver-hist') verDetalleHistorial(id);
+      if (act === 'ver-hist')         verDetalleHistorial(id);
       else if (act === 'editar-hist') editarPedidoHist(id);
       else if (act === 'repetir-hist') repetirPedido(id);
       else if (act === 'borrar-hist') borrarPedidoHist(id);
-      else if (act === 'wa-prov') abrirWhatsAppHist(btn.getAttribute('data-hist'), btn.getAttribute('data-prov'));
+      else if (act === 'wa-prov')     abrirWhatsAppHist(btn.getAttribute('data-hist'), btn.getAttribute('data-prov'));
     };
   });
 }
@@ -2328,11 +2406,22 @@ function verDetalleHistorial(id) {
   abrirPrintOverlay(bodyHtml);
 }
 
+function recepcionarPedido(id) {
+  if (!confirm('¿Marcar este pedido como recibido?')) return;
+  var hist = histGet();
+  var idx = hist.findIndex(function(x) { return x.id === id; });
+  if (idx < 0) return;
+  hist[idx].recepcionado = true;
+  hist[idx].fechaRecepcion = Date.now();
+  histSet(hist);
+  renderHistorial();
+  showToast('Pedido recepcionado');
+}
+
 function editarPedidoHist(histId) {
   var hist = histGet();
   var h = hist.find(function(x) { return x.id === histId; });
   if (!h) { showToast('Pedido no encontrado'); return; }
-  if ((h.editCount || 0) >= 2) { showToast('Este pedido ya se editó 2 veces, no se puede más'); return; }
   var ped = pedidoGet();
   if (ped.items && Object.keys(ped.items).filter(function(k) { return ped.items[k].qty; }).length) {
     if (!confirm('Tenés un pedido en curso. ¿Reemplazarlo con éste para editarlo?')) return;
@@ -2345,7 +2434,7 @@ function editarPedidoHist(histId) {
   pedidoSet({ items: nuevoItems, editandoHistId: histId });
   actualizarBadgePedido();
   cambiarTab('pedido');
-  showToast('Editando pedido (' + ((h.editCount || 0) + 1) + '/2). Modificá lo que necesites.');
+  showToast('Editando pedido. Modificá lo que necesites y confirmá.');
 }
 
 function repetirPedido(id) {
@@ -2382,7 +2471,7 @@ function borrarPedidoHist(histId) {
   if (!confirm('¿Eliminar este pedido del historial?')) return;
   var hist = histGet().filter(function(x) { return x.id !== histId; });
   histSet(hist);
-  renderHistorialProveedores();
+  renderHistorial();
   showToast('Pedido eliminado');
 }
 

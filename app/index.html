@@ -429,7 +429,12 @@
     </div>
     <input type="file" id="lista-input-img" accept="image/*,application/pdf" style="display:none;" onchange="procesarArchivo(event)">
 
-    <div class="loading-box" id="lista-loading">Procesando...</div>
+    <div id="lista-loading" style="display:none;margin:12px 0;">
+  <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;" id="lista-loading-text">Procesando...</div>
+  <div style="background:var(--bg-elev2);border-radius:8px;height:6px;overflow:hidden;">
+    <div id="lista-loading-bar" style="height:100%;background:var(--accent);border-radius:8px;width:0%;transition:width 0.3s ease;"></div>
+  </div>
+</div>
 
     <div style="margin-bottom:10px;font-size:13px;color:var(--text-muted);" id="preview-info"></div>
 
@@ -1129,6 +1134,17 @@ function recuperarItemsTruncados(texto) {
   return items;
 }
 
+function setProgreso(texto, pct) {
+  var box = $('lista-loading');
+  var txt = $('lista-loading-text');
+  var bar = $('lista-loading-bar');
+  if (!box) return;
+  if (pct == null) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  if (txt) txt.textContent = texto || '';
+  if (bar) bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+}
+
 async function procesarArchivo(event) {
   var file = event.target.files[0];
   if (!file) return;
@@ -1181,9 +1197,7 @@ async function procesarImagen(file) {
     throw new Error('Tipo de imagen no soportado. Usá JPG, PNG, GIF o WEBP.');
   }
 
-  var loading = $('lista-loading');
-  loading.textContent = 'Procesando imagen con IA... (15-30 seg)';
-  loading.style.display = 'block';
+  setProgreso('Procesando imagen con IA...', 30);
   $('btn-guardar-lista').disabled = true;
 
   var base64 = await fileToBase64(file);
@@ -1209,7 +1223,7 @@ async function procesarImagen(file) {
       return { productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta };
     });
 
-  loading.style.display = 'none';
+  setProgreso('', null);
   if (filasPreview.length === 0) {
     showToast('No se detectaron productos. Probá con una foto de mejor calidad', 'error');
     return;
@@ -1225,16 +1239,14 @@ async function procesarPDF(file) {
   if (typeof pdfjsLib === 'undefined') {
     throw new Error('PDF.js no cargó. Recargá la página.');
   }
-  var loading = $('lista-loading');
-  loading.textContent = 'Extrayendo texto del PDF...';
-  loading.style.display = 'block';
+  setProgreso('Extrayendo texto del PDF...', 5);
 
   // 1. Extraer texto del PDF localmente (sin IA)
   var buffer = await file.arrayBuffer();
   var pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
   var lineas = [];
   for (var i = 1; i <= pdf.numPages; i++) {
-    loading.textContent = 'Leyendo página ' + i + ' de ' + pdf.numPages + '...';
+    setProgreso('Leyendo página ' + i + ' de ' + pdf.numPages + '...', Math.round(5 + (i / pdf.numPages) * 20));
     var page = await pdf.getPage(i);
     var tc = await page.getTextContent();
     var lineasPag = {};
@@ -1256,7 +1268,7 @@ async function procesarPDF(file) {
   console.log('[PDF] Líneas extraídas:', lineas.length);
 
   // 2. Detectar columnas con IA usando una muestra
-  loading.textContent = 'Detectando columnas de precio...';
+  setProgreso('Detectando columnas...', 28);
   var muestra = lineas.slice(0, 60).join('\n');
   var columnas = await detectarColumnasPDF(muestra);
 
@@ -1268,7 +1280,7 @@ async function procesarPDF(file) {
   if (columnas.precios.length === 1) {
     await procesarPDFConColumna(lineas, columnas.precios[0].nombre);
   } else {
-    loading.style.display = 'none';
+    setProgreso('', null);
     mostrarSelectorColumnasPDF(lineas, columnas);
   }
 }
@@ -1339,14 +1351,12 @@ function cerrarModalColPDF() {
 }
 
 async function procesarPDFConColumna(lineas, nombreColumna) {
-  var loading = $('lista-loading');
-  loading.style.display = 'block';
   filasPreview = [];
   var chunkSize = 80;
   var totalChunks = Math.ceil(lineas.length / chunkSize);
   var errores = 0;
   for (var c = 0; c < totalChunks; c++) {
-    loading.textContent = 'Procesando parte ' + (c + 1) + ' de ' + totalChunks + '... (' + filasPreview.length + ' productos encontrados)';
+    setProgreso('Procesando parte ' + (c + 1) + ' de ' + totalChunks + '... (' + filasPreview.length + ' productos)', Math.round(30 + (c / totalChunks) * 65));
     var chunkLineas = lineas.slice(c * chunkSize, (c + 1) * chunkSize);
     var items = [];
     // Hasta 3 intentos por chunk
@@ -1372,7 +1382,7 @@ async function procesarPDFConColumna(lineas, nombreColumna) {
     });
     renderPreview();
   }
-  loading.style.display = 'none';
+  setProgreso('', null);
   if (filasPreview.length === 0) {
     showToast('No se pudieron extraer productos', 'error');
     return;

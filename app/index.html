@@ -335,6 +335,16 @@
     </div>
 
     <div class="form-row">
+      <label for="prov-cuit">CUIT (opcional)</label>
+      <input type="text" id="prov-cuit" placeholder="Ej: 30712345678" inputmode="numeric" maxlength="11" oninput="this.value=this.value.replace(/\D/g,'').slice(0,11)">
+    </div>
+
+    <div class="form-row">
+      <label for="prov-email">Email (opcional)</label>
+      <input type="email" id="prov-email" placeholder="contacto@proveedor.com">
+    </div>
+
+    <div class="form-row">
       <label for="prov-precio-tipo">¿Cómo lista los precios?</label>
       <select id="prov-precio-tipo">
         <option value="envase">Por envase (ej: $2.851 por botella de 5lt)</option>
@@ -825,6 +835,8 @@ function abrirModalProv() {
   $('modal-prov-titulo').textContent = 'Nuevo proveedor';
   $('prov-nombre').value = '';
   $('prov-telefono').value = '';
+  $('prov-cuit').value = '';
+  $('prov-email').value = '';
   $('prov-logo-input').value = '';
   resetLogoPreview('', null);
 
@@ -844,6 +856,8 @@ function editarProveedor(id) {
   var telEdit = (p.telefono || '').replace(/^\+54\s?/, '').trim();
   $('prov-telefono').value = telEdit;
   $('prov-precio-tipo').value = p.precio_tipo || 'envase';
+  $('prov-cuit').value = p.cuit || '';
+  $('prov-email').value = p.email || '';
   $('prov-logo-input').value = '';
   resetLogoPreview(p.nombre, p.logo_url);
   $('modal-prov').classList.add('open');
@@ -861,6 +875,8 @@ async function guardarProveedor() {
   var telRaw = $('prov-telefono').value.replace(/\D/g, '').trim();
   var tel = telRaw ? ('+54' + telRaw) : '';
   var precioTipo = $('prov-precio-tipo').value || 'envase';
+  var cuit = $('prov-cuit').value.replace(/\D/g, '').slice(0, 11) || null;
+  var email = $('prov-email').value.trim() || null;
   if (!nombre) {
     showToast('El nombre es obligatorio', 'error');
     return;
@@ -871,7 +887,7 @@ async function guardarProveedor() {
   try {
     if (provEditandoId) {
       // UPDATE
-      var updateData = { nombre: nombre, telefono: tel || null, precio_tipo: precioTipo, actualizado: new Date().toISOString() };
+      var updateData = { nombre: nombre, telefono: tel || null, precio_tipo: precioTipo, cuit: cuit, email: email, actualizado: new Date().toISOString() };
       if (logoQuitado) {
         updateData.logo_url = null;
       } else if (logoFile) {
@@ -889,7 +905,7 @@ async function guardarProveedor() {
       // INSERT: crear primero, luego subir logo con el id real
       var { data: inserted, error: insError } = await supabase
         .from('proveedores')
-        .insert({ user_id: sesion.user.id, nombre: nombre, telefono: tel || null, precio_tipo: precioTipo })
+        .insert({ user_id: sesion.user.id, nombre: nombre, telefono: tel || null, precio_tipo: precioTipo, cuit: cuit, email: email })
         .select()
         .single();
       if (insError) throw insError;

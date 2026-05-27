@@ -61,6 +61,8 @@ create table if not exists public.proveedores (
 
 -- Migración: agregar precio_tipo a proveedores existentes
 alter table public.proveedores add column if not exists precio_tipo text default 'envase' check (precio_tipo in ('envase', 'kglt'));
+alter table public.proveedores add column if not exists cuit text;
+alter table public.proveedores add column if not exists email text;
 
 create index if not exists idx_proveedores_user on public.proveedores(user_id);
 

@@ -1345,21 +1345,24 @@ async function procesarImagen(file, jobId) {
     })
     .filter(function(it) { return it.productoLista && it.precio !== null && it.precio > 0; });
 
-  removeBarraProgreso(jobId);
   if (filasPreview.length === 0) {
+    removeBarraProgreso(jobId);
     showToast('No se detectaron productos. Probá con una foto de mejor calidad', 'error');
     return;
   }
 
   // Etapas 2-5: normalización, agrupamiento, detección de modo, cálculo
+  setProgresoJob(jobId, 'Normalizando productos...', 80);
   try {
     var provId = $('lista-prov-select').value;
-    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provId, null);
+    var pipeEl = document.getElementById('job-txt-' + jobId);
+    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provId, pipeEl);
   } catch(pipeErr) {
     console.warn('[Pipeline] Falló, usando extracción básica:', pipeErr.message);
     showToast('Extraídos sin normalizar (' + pipeErr.message + ')', 'warn');
   }
 
+  removeBarraProgreso(jobId);
   renderPreview();
   showToast('IA extrajo ' + filasPreview.length + ' productos');
 }
@@ -1524,21 +1527,24 @@ async function procesarPDFConColumna(lineas, nombreColumna, ejemploColumna, toda
     });
     renderPreview();
   }
-  removeBarraProgreso(jobId);
   if (filasPreview.length === 0) {
+    removeBarraProgreso(jobId);
     showToast('No se pudieron extraer productos', 'error');
     return;
   }
 
   // Etapas 2-5: normalización, agrupamiento, detección de modo, cálculo
+  setProgresoJob(jobId, 'Normalizando ' + filasPreview.length + ' productos...', 97);
   try {
     var provIdPDF = $('lista-prov-select').value;
-    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provIdPDF, null);
+    var pipeElPDF = document.getElementById('job-txt-' + jobId);
+    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provIdPDF, pipeElPDF);
   } catch(pipeErrPDF) {
     console.warn('[Pipeline PDF] Falló, usando extracción básica:', pipeErrPDF.message);
     showToast('Extraídos sin normalizar (' + pipeErrPDF.message + ')', 'warn');
   }
 
+  removeBarraProgreso(jobId);
   renderPreview();
   var msg = 'IA extrajo ' + filasPreview.length + ' productos';
   if (errores > 0) msg += ' (' + errores + ' partes fallaron)';

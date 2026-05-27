@@ -152,6 +152,7 @@
         <span class="icon-slot" data-icon="search"></span>
         <input type="text" class="buscador" id="buscar-producto" placeholder="Buscar producto... (ej: leche, aceite, harina)" oninput="renderBuscarProducto()">
       </div>
+      <div id="pedido-faltantes-sugerencia" style="margin-bottom:12px;"></div>
       <div id="buscar-content">
         <div class="empty"><div class="empty-emoji"></div><div class="empty-title">Escribí para buscar</div></div>
       </div>
@@ -389,7 +390,7 @@
   <div class="modal">
     <h3>Recepcionar pedido</h3>
     <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;" id="modal-rec-fecha"></div>
-    <p style="font-size:12px;color:var(--text-muted);margin:0 0 14px;">Marcá todo lo que recibiste. Desmarcá lo que no llegó.</p>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 14px;">Marcá lo que recibiste. Desmarcá lo que no llegó. Usá 🔄 si vino algo diferente al pedido.</p>
     <div id="modal-rec-items" style="max-height:55vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
     <div class="modal-actions" style="margin-top:16px;">
       <button class="btn" onclick="cerrarModalRecepcionar()">Cancelar</button>
@@ -843,9 +844,11 @@ function abrirModalRecepcionar(id) {
     porProv[it.proveedorId].items.push(it);
   });
 
-  // Pre-cargar faltantes existentes (para edición)
+  // Pre-cargar faltantes y cambios existentes (para edición)
   var faltantesExistentes = {};
   (h.faltantes || []).forEach(function(f) { faltantesExistentes[f.itemId] = true; });
+  var cambiosExistentes = {};
+  (h.cambios || []).forEach(function(c) { cambiosExistentes[c.itemId] = true; });
 
   var html = '';
   Object.keys(porProv).forEach(function(pid) {
@@ -853,11 +856,18 @@ function abrirModalRecepcionar(id) {
     html += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin:10px 0 4px;">' + escapeHtml(prov.nombre) + '</div>';
     prov.items.forEach(function(it) {
       var noLlego = faltantesExistentes[it.itemId];
-      html += '<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-elev);cursor:pointer;" id="rec-row-' + it.itemId + '">';
-      html += '<input type="checkbox" data-item-id="' + it.itemId + '" ' + (noLlego ? '' : 'checked') + ' onchange="actualizarFilaRecepcion(this)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--emerald);">';
-      html += '<span style="flex:1;font-size:12px;">' + escapeHtml(it.productoLista) + '</span>';
+      var esCambio = cambiosExistentes[it.itemId];
+      var rowBorder = esCambio ? 'rgba(251,191,36,0.4)' : (noLlego ? 'var(--danger-border)' : 'var(--border)');
+      var rowBg    = esCambio ? 'rgba(251,191,36,0.05)' : 'var(--bg-elev)';
+      var rowOpacity = (!esCambio && noLlego) ? '0.45' : '1';
+      var cambioStyle = esCambio ? 'background:rgba(251,191,36,0.12);border-color:rgba(251,191,36,0.5);color:var(--gold-bright);' : '';
+      var cambioActive = esCambio ? 'true' : 'false';
+      html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;border:1px solid ' + rowBorder + ';background:' + rowBg + ';opacity:' + rowOpacity + ';" id="rec-row-' + it.itemId + '">';
+      html += '<input type="checkbox" data-item-id="' + it.itemId + '" ' + (noLlego ? '' : 'checked') + ' onchange="actualizarFilaRecepcion(this)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--emerald);flex-shrink:0;">';
+      html += '<span style="flex:1;font-size:12px;line-height:1.3;">' + escapeHtml(it.productoLista) + '</span>';
       html += '<span style="font-size:11px;color:var(--text-muted);white-space:nowrap;">' + it.qty + ' · $' + formatPrecio(it.precio) + '</span>';
-      html += '</label>';
+      html += '<button data-cambio-id="' + it.itemId + '" data-cambio-active="' + cambioActive + '" onclick="toggleCambioRecepcion(this)" style="flex-shrink:0;background:transparent;border:1px solid var(--border-hi);color:var(--text-muted);padding:3px 8px;border-radius:6px;font-size:10px;cursor:pointer;white-space:nowrap;' + cambioStyle + '" title="Vino diferente al pedido">🔄 Cambio</button>';
+      html += '</div>';
     });
   });
 
@@ -867,10 +877,45 @@ function abrirModalRecepcionar(id) {
 }
 
 function actualizarFilaRecepcion(checkbox) {
-  var row = document.getElementById('rec-row-' + checkbox.getAttribute('data-item-id'));
+  actualizarEstiloFilaRecepcion(checkbox.getAttribute('data-item-id'));
+}
+
+function actualizarEstiloFilaRecepcion(itemId) {
+  var row = document.getElementById('rec-row-' + itemId);
   if (!row) return;
-  row.style.opacity = checkbox.checked ? '1' : '0.45';
-  row.style.borderColor = checkbox.checked ? 'var(--border)' : 'var(--danger-border)';
+  var cb = row.querySelector('input[type="checkbox"]');
+  var cambioBtn = row.querySelector('button[data-cambio-id]');
+  var esCambio = cambioBtn && cambioBtn.getAttribute('data-cambio-active') === 'true';
+  var llego = cb && cb.checked;
+  if (esCambio) {
+    row.style.opacity = '1';
+    row.style.borderColor = 'rgba(251,191,36,0.4)';
+    row.style.background = 'rgba(251,191,36,0.05)';
+  } else if (!llego) {
+    row.style.opacity = '0.45';
+    row.style.borderColor = 'var(--danger-border)';
+    row.style.background = 'var(--bg-elev)';
+  } else {
+    row.style.opacity = '1';
+    row.style.borderColor = 'var(--border)';
+    row.style.background = 'var(--bg-elev)';
+  }
+}
+
+function toggleCambioRecepcion(btn) {
+  var active = btn.getAttribute('data-cambio-active') === 'true';
+  if (active) {
+    btn.setAttribute('data-cambio-active', 'false');
+    btn.style.background = 'transparent';
+    btn.style.borderColor = 'var(--border-hi)';
+    btn.style.color = 'var(--text-muted)';
+  } else {
+    btn.setAttribute('data-cambio-active', 'true');
+    btn.style.background = 'rgba(251,191,36,0.12)';
+    btn.style.borderColor = 'rgba(251,191,36,0.5)';
+    btn.style.color = 'var(--gold-bright)';
+  }
+  actualizarEstiloFilaRecepcion(btn.getAttribute('data-cambio-id'));
 }
 
 function cerrarModalRecepcionar() {
@@ -895,17 +940,31 @@ function guardarRecepcion() {
     }
   });
 
+  // Recopilar items marcados como cambio (llegaron pero diferentes)
+  var cambios = [];
+  $('modal-rec-items').querySelectorAll('button[data-cambio-id]').forEach(function(btn) {
+    if (btn.getAttribute('data-cambio-active') === 'true') {
+      var itemId = btn.getAttribute('data-cambio-id');
+      var it = hist[idx].items.find(function(x) { return x.itemId === itemId; });
+      if (it) cambios.push({ itemId: it.itemId, productoLista: it.productoLista, qty: it.qty, proveedor: it.proveedor });
+    }
+  });
+
   hist[idx].recepcionado = true;
   hist[idx].fechaRecepcion = Date.now();
   hist[idx].faltantes = faltantes;
+  hist[idx].cambios = cambios;
   histSet(hist);
 
   cerrarModalRecepcionar();
   renderHistorial();
   renderIngreso();
 
-  if (faltantes.length > 0) {
-    showToast('Recepción guardada · ' + faltantes.length + ' faltante' + (faltantes.length !== 1 ? 's' : ''));
+  var partes = [];
+  if (faltantes.length > 0) partes.push(faltantes.length + ' faltante' + (faltantes.length !== 1 ? 's' : ''));
+  if (cambios.length > 0) partes.push(cambios.length + ' cambio' + (cambios.length !== 1 ? 's' : ''));
+  if (partes.length > 0) {
+    showToast('Recepción guardada · ' + partes.join(' · '));
   } else {
     showToast('Pedido recepcionado completo ✓');
   }
@@ -913,6 +972,67 @@ function guardarRecepcion() {
 
 function editarRecepcion(id) {
   abrirModalRecepcionar(id);
+}
+
+// ============================================================
+// SUGERENCIA DE FALTANTES EN ARMAR PEDIDO
+// ============================================================
+function renderFaltantesSugerencia() {
+  var cont = $('pedido-faltantes-sugerencia');
+  if (!cont) return;
+  // Buscar el último pedido recepcionado que tenga faltantes
+  var hist = histGet();
+  var ultConFaltantes = null;
+  for (var i = 0; i < hist.length; i++) {
+    if (hist[i].recepcionado && (hist[i].faltantes || []).length > 0) {
+      ultConFaltantes = hist[i];
+      break;
+    }
+  }
+  if (!ultConFaltantes) { cont.innerHTML = ''; return; }
+  // Si ya están todos cargados en el pedido actual, no mostrar
+  var ped = pedidoGet();
+  var faltantes = ultConFaltantes.faltantes;
+  var todosYaCargados = faltantes.every(function(f) {
+    return ped.items && ped.items[f.itemId] && ped.items[f.itemId].qty > 0;
+  });
+  if (todosYaCargados) { cont.innerHTML = ''; return; }
+  var nombres = faltantes.slice(0, 3).map(function(f) { return escapeHtml(f.productoLista); }).join(', ');
+  if (faltantes.length > 3) nombres += ' y ' + (faltantes.length - 3) + ' más';
+  var html = '<div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);border-radius:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">';
+  html += '<div style="min-width:0;">';
+  html += '<div style="font-size:12px;font-weight:600;color:var(--gold-bright);margin-bottom:2px;">⚠️ ' + faltantes.length + ' faltante' + (faltantes.length !== 1 ? 's' : '') + ' del último pedido</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + nombres + '</div>';
+  html += '</div>';
+  html += '<button onclick="cargarFaltantesAlPedido()" style="flex-shrink:0;background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.4);color:var(--gold-bright);padding:6px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Agregar al pedido</button>';
+  html += '</div>';
+  cont.innerHTML = html;
+}
+
+function cargarFaltantesAlPedido() {
+  var hist = histGet();
+  var ultConFaltantes = null;
+  for (var i = 0; i < hist.length; i++) {
+    if (hist[i].recepcionado && (hist[i].faltantes || []).length > 0) {
+      ultConFaltantes = hist[i];
+      break;
+    }
+  }
+  if (!ultConFaltantes) return;
+  var ped = pedidoGet();
+  if (!ped.items) ped.items = {};
+  var count = 0;
+  ultConFaltantes.faltantes.forEach(function(f) {
+    if (f.itemId) {
+      ped.items[f.itemId] = { qty: f.qty };
+      count++;
+    }
+  });
+  pedidoSet(ped);
+  actualizarBadgePedido();
+  renderFaltantesSugerencia();
+  renderBuscarProducto();
+  showToast(count + ' faltante' + (count !== 1 ? 's' : '') + ' agregado' + (count !== 1 ? 's' : '') + ' al pedido');
 }
 
 function cambiarTab(tab) {
@@ -924,7 +1044,7 @@ function cambiarTab(tab) {
   });
   if (tab === 'ingreso') renderIngreso();
   if (tab === 'listas') cargarListas();
-  if (tab === 'pedido') { renderBuscarProducto(); actualizarBadgePedido(); }
+  if (tab === 'pedido') { renderFaltantesSugerencia(); renderBuscarProducto(); actualizarBadgePedido(); }
   if (tab === 'ver-pedido') renderVerPedido();
   if (tab === 'resumen') renderResumen();
   if (tab === 'historial') renderHistorial();
@@ -4464,8 +4584,10 @@ function renderHistorialProveedores() {
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
     html += '<div><div style="font-size:15px;font-weight:600;">' + escapeHtml(h.fecha) + '</div>';
     var faltantesCount = (h.faltantes || []).length;
+    var cambiosCount   = (h.cambios   || []).length;
     var faltantesTag = faltantesCount > 0 ? ' · <span style="color:var(--danger);">' + faltantesCount + ' faltante' + (faltantesCount !== 1 ? 's' : '') + '</span>' : '';
-    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + faltantesTag + '</div></div>';
+    var cambiosTag   = cambiosCount   > 0 ? ' · <span style="color:var(--gold-bright);">🔄 ' + cambiosCount + ' cambio' + (cambiosCount !== 1 ? 's' : '') + '</span>' : '';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + faltantesTag + cambiosTag + '</div></div>';
     html += '<div style="text-align:right;"><div style="font-size:11px;color:var(--text-muted);">Total</div><div style="font-size:18px;font-weight:700;">$' + formatPrecio(h.total) + '</div></div></div>';
 
     // Botones WhatsApp por proveedor

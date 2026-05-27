@@ -1830,6 +1830,15 @@ function renderBuscarProducto(expansionesExtras) {
   // Mostrar/ocultar botón "ver pedido"
   var ped = pedidoGet();
   var totalItems = Object.keys(ped.items || {}).filter(function(k) { return ped.items[k].qty > 0; }).length;
+
+  // IDs del último pedido confirmado (para badge "Última compra")
+  var hist = histGet();
+  var ultimoPedidoIds = {};
+  if (hist.length > 0) {
+    (hist[0].items || []).forEach(function(hit) {
+      ultimoPedidoIds[hit.itemId] = true;
+    });
+  }
   var btnVer = $('btn-ver-pedido');
   if (btnVer) btnVer.style.display = totalItems > 0 ? '' : 'none';
 
@@ -1924,7 +1933,10 @@ function renderBuscarProducto(expansionesExtras) {
       var pb = parsearPrecioBase(it.precio, it.unidad, it.productoLista, precioTipo);
       var precioMostrar = (pb && precioTipo === 'kglt') ? pb.precioTotal : it.precio;
       var pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
-      html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + pbHtml + '</div>';
+      var ultimaBadge = ultimoPedidoIds[it.itemId]
+        ? '<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:rgba(251,191,36,0.15);color:var(--gold-bright);border:1px solid rgba(251,191,36,0.3);margin-left:4px;vertical-align:middle;white-space:nowrap;">Última compra</span>'
+        : '';
+      html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + ultimaBadge + pbHtml + '</div>';
       html += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">';
       html += '<strong style="font-size:13px;white-space:nowrap;color:#4ade80;">$' + formatPrecio(precioMostrar) + '</strong>';
       if (enPed > 0) {

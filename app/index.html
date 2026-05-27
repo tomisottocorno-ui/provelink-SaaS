@@ -429,12 +429,7 @@
     </div>
     <input type="file" id="lista-input-img" accept="image/*,application/pdf" style="display:none;" onchange="procesarArchivo(event)">
 
-    <div id="lista-loading" style="display:none;margin:12px 0;">
-  <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;" id="lista-loading-text">Procesando...</div>
-  <div style="background:var(--bg-elev2);border-radius:8px;height:6px;overflow:hidden;">
-    <div id="lista-loading-bar" style="height:100%;background:var(--accent);border-radius:8px;width:0%;transition:width 0.3s ease;"></div>
-  </div>
-</div>
+    <div id="lista-loading-container"></div>
 
     <div style="margin-bottom:10px;font-size:13px;color:var(--text-muted);" id="preview-info"></div>
 
@@ -1094,7 +1089,6 @@ function abrirModalLista(proveedorId) {
     $('btn-guardar-lista').disabled = true;
   }
 
-  $('lista-loading').style.display = 'none';
   $('modal-lista').classList.add('open');
 }
 
@@ -1134,15 +1128,30 @@ function recuperarItemsTruncados(texto) {
   return items;
 }
 
-function setProgreso(texto, pct) {
-  var box = $('lista-loading');
-  var txt = $('lista-loading-text');
-  var bar = $('lista-loading-bar');
-  if (!box) return;
-  if (pct == null) { box.style.display = 'none'; return; }
-  box.style.display = 'block';
-  if (txt) txt.textContent = texto || '';
+function crearBarraProgreso(jobId) {
+  var container = $('lista-loading-container');
+  if (!container) return;
+  var div = document.createElement('div');
+  div.id = 'job-' + jobId;
+  div.style.cssText = 'background:var(--bg-elev2);border-radius:8px;padding:8px 10px;margin-bottom:6px;';
+  div.innerHTML =
+    '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;" id="job-txt-' + jobId + '">Iniciando...</div>' +
+    '<div style="background:var(--bg-elev3);border-radius:6px;height:5px;overflow:hidden;">' +
+    '<div id="job-bar-' + jobId + '" style="height:100%;background:var(--accent);border-radius:6px;width:0%;transition:width 0.3s;"></div>' +
+    '</div>';
+  container.appendChild(div);
+}
+
+function setProgresoJob(jobId, texto, pct) {
+  var txt = document.getElementById('job-txt-' + jobId);
+  var bar = document.getElementById('job-bar-' + jobId);
+  if (txt) txt.textContent = texto;
   if (bar) bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+}
+
+function removeBarraProgreso(jobId) {
+  var el = document.getElementById('job-' + jobId);
+  if (el) el.remove();
 }
 
 async function procesarArchivo(event) {
@@ -1171,15 +1180,18 @@ async function procesarArchivo(event) {
 
   var esPDF = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
 
+  var jobId = Date.now().toString();
+  crearBarraProgreso(jobId);
+
   try {
     if (esPDF) {
-      await procesarPDF(file);
+      await procesarPDF(file, jobId);
     } else {
-      await procesarImagen(file);
+      await procesarImagen(file, jobId);
     }
   } catch(e) {
     console.error('procesarArchivo error:', e);
-    $('lista-loading').style.display = 'none';
+    removeBarraProgreso(jobId);
     showToast('Error: ' + (e.message || 'no se pudo procesar'), 'error');
   } finally {
     event.target.value = '';
@@ -1189,7 +1201,7 @@ async function procesarArchivo(event) {
 // ============================================================
 // PROCESAR IMAGEN (foto): una sola llamada con visión
 // ============================================================
-async function procesarImagen(file) {
+async function procesarImagen(file, jobId) {
   var tiposValidos = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
   var mimeType = file.type || 'image/jpeg';
   if (mimeType === 'image/jpg') mimeType = 'image/jpeg';
@@ -1197,7 +1209,7 @@ async function procesarImagen(file) {
     throw new Error('Tipo de imagen no soportado. Usá JPG, PNG, GIF o WEBP.');
   }
 
-  setProgreso('Procesando imagen con IA...', 30);
+  setProgresoJob(jobId, 'Procesando imagen con IA...', 30);
   $('btn-guardar-lista').disabled = true;
 
   var base64 = await fileToBase64(file);
@@ -1223,7 +1235,7 @@ async function procesarImagen(file) {
       return { productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta };
     });
 
-  setProgreso('', null);
+  removeBarraProgreso(jobId);
   if (filasPreview.length === 0) {
     showToast('No se detectaron productos. Probá con una foto de mejor calidad', 'error');
     return;
@@ -1235,18 +1247,18 @@ async function procesarImagen(file) {
 // ============================================================
 // PROCESAR PDF: extraer texto local → detectar columnas → chunks
 // ============================================================
-async function procesarPDF(file) {
+async function procesarPDF(file, jobId) {
   if (typeof pdfjsLib === 'undefined') {
     throw new Error('PDF.js no cargó. Recargá la página.');
   }
-  setProgreso('Extrayendo texto del PDF...', 5);
+  setProgresoJob(jobId, 'Extrayendo texto del PDF...', 5);
 
   // 1. Extraer texto del PDF localmente (sin IA)
   var buffer = await file.arrayBuffer();
   var pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
   var lineas = [];
   for (var i = 1; i <= pdf.numPages; i++) {
-    setProgreso('Leyendo página ' + i + ' de ' + pdf.numPages + '...', Math.round(5 + (i / pdf.numPages) * 20));
+    setProgresoJob(jobId, 'Leyendo página ' + i + ' de ' + pdf.numPages + '...', Math.round(5 + (i / pdf.numPages) * 20));
     var page = await pdf.getPage(i);
     var tc = await page.getTextContent();
     var lineasPag = {};
@@ -1268,7 +1280,7 @@ async function procesarPDF(file) {
   console.log('[PDF] Líneas extraídas:', lineas.length);
 
   // 2. Detectar columnas con IA usando una muestra
-  setProgreso('Detectando columnas...', 28);
+  setProgresoJob(jobId, 'Detectando columnas...', 28);
   var muestra = lineas.slice(0, 60).join('\n');
   var columnas = await detectarColumnasPDF(muestra);
 
@@ -1278,10 +1290,10 @@ async function procesarPDF(file) {
 
   // 3. Si hay UNA columna sola, procesar directo. Si hay varias, mostrar selector
   if (columnas.precios.length === 1) {
-    await procesarPDFConColumna(lineas, columnas.precios[0].nombre);
+    await procesarPDFConColumna(lineas, columnas.precios[0].nombre, jobId);
   } else {
-    setProgreso('', null);
-    mostrarSelectorColumnasPDF(lineas, columnas);
+    removeBarraProgreso(jobId);
+    mostrarSelectorColumnasPDF(lineas, columnas, jobId);
   }
 }
 
@@ -1312,7 +1324,7 @@ async function detectarColumnasPDF(muestraTexto) {
   }
 }
 
-function mostrarSelectorColumnasPDF(lineas, columnas) {
+function mostrarSelectorColumnasPDF(lineas, columnas, jobId) {
   // Crear modal dinámico
   var opciones = columnas.precios.map(function(c, idx) {
     return '<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;background:var(--bg-elev2);">' +
@@ -1337,9 +1349,11 @@ function mostrarSelectorColumnasPDF(lineas, columnas) {
     if (!sel) return;
     var nombreCol = sel.value;
     cerrarModalColPDF();
-    procesarPDFConColumna(lineas, nombreCol).catch(function(e) {
+    var newJobId = Date.now().toString();
+    crearBarraProgreso(newJobId);
+    procesarPDFConColumna(lineas, nombreCol, newJobId).catch(function(e) {
       console.error(e);
-      $('lista-loading').style.display = 'none';
+      removeBarraProgreso(newJobId);
       showToast('Error: ' + (e.message || ''), 'error');
     });
   };
@@ -1350,13 +1364,13 @@ function cerrarModalColPDF() {
   if (m) m.remove();
 }
 
-async function procesarPDFConColumna(lineas, nombreColumna) {
+async function procesarPDFConColumna(lineas, nombreColumna, jobId) {
   filasPreview = [];
   var chunkSize = 80;
   var totalChunks = Math.ceil(lineas.length / chunkSize);
   var errores = 0;
   for (var c = 0; c < totalChunks; c++) {
-    setProgreso('Procesando parte ' + (c + 1) + ' de ' + totalChunks + '... (' + filasPreview.length + ' productos)', Math.round(30 + (c / totalChunks) * 65));
+    setProgresoJob(jobId, 'Procesando parte ' + (c + 1) + ' de ' + totalChunks + '... (' + filasPreview.length + ' productos)', Math.round(30 + (c / totalChunks) * 65));
     var chunkLineas = lineas.slice(c * chunkSize, (c + 1) * chunkSize);
     var items = [];
     // Hasta 3 intentos por chunk
@@ -1382,7 +1396,7 @@ async function procesarPDFConColumna(lineas, nombreColumna) {
     });
     renderPreview();
   }
-  setProgreso('', null);
+  removeBarraProgreso(jobId);
   if (filasPreview.length === 0) {
     showToast('No se pudieron extraer productos', 'error');
     return;

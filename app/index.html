@@ -946,6 +946,8 @@ function setProgresoJob(jobId, texto, pct) {
 function removeBarraProgreso(jobId) {
   var el = document.getElementById('job-' + jobId);
   if (el) el.remove();
+}
+
 // Parser tolerante: recorre el texto desde el primer "[" y devuelve TODOS los
 // objetos top-level que estén completos y balanceados, ignorando lo que venga
 // truncado al final. Funciona con objetos anidados y strings con escapes.

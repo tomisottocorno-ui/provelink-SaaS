@@ -292,3 +292,134 @@ drop policy if exists "Provider logos: public read" on storage.objects;
 create policy "Provider logos: public read"
   on storage.objects for select
   using (bucket_id = 'provider-logos');
+
+
+-- ============================================================================
+-- TABLA: pl_auditoria_precios (registro de cada item procesado por el pipeline)
+-- ============================================================================
+create table if not exists public.pl_auditoria_precios (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz default now(),
+  user_id uuid references auth.users(id) on delete cascade not null,
+  proveedor_id text not null,
+  lista_id text,
+  id_original text,
+  nombre_original text,
+  clave_canonica text,
+  tipo text,
+  tamano numeric,
+  unidad_base text,
+  precio_raw numeric,
+  modo_detectado text,
+  precio_total_calculado numeric,
+  precio_unitario_calculado numeric,
+  confianza numeric,
+  razonamiento text,
+  revisado_por_usuario boolean default false,
+  correccion_usuario jsonb,
+  fue_error boolean default false
+);
+
+create index if not exists idx_auditoria_user on public.pl_auditoria_precios(user_id, created_at desc);
+create index if not exists idx_auditoria_clave on public.pl_auditoria_precios(user_id, clave_canonica);
+
+alter table public.pl_auditoria_precios enable row level security;
+
+drop policy if exists "Auditoría: usuarios ven la propia" on public.pl_auditoria_precios;
+create policy "Auditoría: usuarios ven la propia"
+  on public.pl_auditoria_precios for select
+  using (auth.uid() = user_id);
+
+-- La inserción la hace el frontend con anon key (RLS permite insertar datos propios)
+drop policy if exists "Auditoría: usuarios insertan la propia" on public.pl_auditoria_precios;
+create policy "Auditoría: usuarios insertan la propia"
+  on public.pl_auditoria_precios for insert
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Auditoría: usuarios actualizan la propia" on public.pl_auditoria_precios;
+create policy "Auditoría: usuarios actualizan la propia"
+  on public.pl_auditoria_precios for update
+  using (auth.uid() = user_id);
+
+
+-- ============================================================================
+-- TABLA: pl_cache_normalizacion (cache global de nombres normalizados)
+-- ============================================================================
+create table if not exists public.pl_cache_normalizacion (
+  nombre_key text primary key,        -- nombre normalizado para búsqueda (minúsculas, sin puntuación)
+  clave_canonica text not null,
+  tipo text,
+  tamano numeric,
+  unidad_base text,
+  confianza numeric,
+  usos integer default 1,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- Sin RLS: el cache es global (compartido entre todos los usuarios).
+-- Solo se puede leer y upsert, no eliminar.
+alter table public.pl_cache_normalizacion enable row level security;
+
+drop policy if exists "Cache norm: lectura pública autenticada" on public.pl_cache_normalizacion;
+create policy "Cache norm: lectura pública autenticada"
+  on public.pl_cache_normalizacion for select
+  using (auth.role() = 'authenticated');
+
+drop policy if exists "Cache norm: upsert autenticado" on public.pl_cache_normalizacion;
+create policy "Cache norm: upsert autenticado"
+  on public.pl_cache_normalizacion for insert
+  with check (auth.role() = 'authenticated');
+
+drop policy if exists "Cache norm: update autenticado" on public.pl_cache_normalizacion;
+create policy "Cache norm: update autenticado"
+  on public.pl_cache_normalizacion for update
+  using (auth.role() = 'authenticated');
+
+
+-- ============================================================================
+-- TABLA: pl_rangos_precio (rangos de orden de magnitud para detectar bulto/unitario)
+-- ============================================================================
+-- Cachea rangos de precio por tipo de producto (sin tamaño). El rango se
+-- expresa como mediana × factor_min/max, de modo que escala con la inflación.
+-- Es compartida globalmente entre todos los usuarios (como pl_cache_normalizacion).
+-- NUNCA contiene precios de listas específicas, solo el orden de magnitud por tipo.
+--
+-- Defensas implementadas (ver BRIEF DETECCION FINAL):
+--   1. Rango provisional hasta muestras >= 3 (confiable = false)
+--   2. Outliers rechazados antes de actualizar (> 5x o < 0.2x la mediana)
+--   3. Se usa mediana (no promedio), datos manuales pesan el doble
+--   4. Una corrección de usuario recalcula el rango (recuperación)
+-- ============================================================================
+create table if not exists public.pl_rangos_precio (
+  tipo_producto text primary key,        -- clave SIN tamaño: "harina 0000", "aceite girasol"
+  unidad_base text not null,             -- 'kg' | 'L' | 'u'
+  mediana_estimada numeric not null,     -- precio por unidad base, en pesos argentinos
+  factor_min numeric default 0.5,        -- multiplicador para el piso del rango
+  factor_max numeric default 2.5,        -- multiplicador para el techo del rango
+  origen text default 'web',             -- 'web' (estimado inicial) | 'datos' (afinado con listas reales)
+  muestras integer default 0,            -- cuántos precios reales contribuyeron a la mediana
+  confiable boolean default false,       -- true cuando muestras >= 3
+  ultima_actualizacion timestamptz default now(),
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_rangos_origen on public.pl_rangos_precio(origen);
+
+-- Compartido entre todos los usuarios (como pl_cache_normalizacion)
+alter table public.pl_rangos_precio enable row level security;
+
+drop policy if exists "Rangos: lectura pública autenticada" on public.pl_rangos_precio;
+create policy "Rangos: lectura pública autenticada"
+  on public.pl_rangos_precio for select
+  using (auth.role() = 'authenticated');
+
+drop policy if exists "Rangos: upsert autenticado" on public.pl_rangos_precio;
+create policy "Rangos: upsert autenticado"
+  on public.pl_rangos_precio for insert
+  with check (auth.role() = 'authenticated');
+
+drop policy if exists "Rangos: update autenticado" on public.pl_rangos_precio;
+create policy "Rangos: update autenticado"
+  on public.pl_rangos_precio for update
+  using (auth.role() = 'authenticated');

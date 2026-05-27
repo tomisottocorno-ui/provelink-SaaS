@@ -29,6 +29,9 @@ const PRECIOS_SONNET = {
 // Solo imágenes usan Sonnet+thinking (una llamada, puede tardar más)
 // Los chunks de PDF van en Haiku para no multiplicar el tiempo x11 partes
 const TIPOS_CON_THINKING = ['procesar_lista'];
+// Sonnet sin thinking: solo para tareas que requieren visión o razonamiento complejo
+// detectar_modo_precios usa Haiku (es aritmética simple: comparar ratios de precios)
+const TIPOS_SONNET_SIN_THINKING = [];
 
 const LIMITES_IA = { free: 0, pro: 150, business: 500 };
 
@@ -95,7 +98,8 @@ module.exports = async function handler(req, res) {
 
     // Los tipos relacionados con procesar listas NO consumen cuota de IA
     // pero tienen sus propias restricciones por plan
-    const tiposProcesarLista = ['procesar_lista', 'detectar_columnas', 'procesar_chunk'];
+    const tiposProcesarLista = ['procesar_lista', 'detectar_columnas', 'procesar_chunk',
+                               'normalizar_lista', 'detectar_modo_precios'];
     const esProcesarLista = tiposProcesarLista.indexOf(tipo) >= 0;
 
     // expandir_query: usado para expandir abreviaciones en el buscador.
@@ -132,6 +136,100 @@ module.exports = async function handler(req, res) {
         input_tokens: u.input_tokens||0, output_tokens: u.output_tokens||0, costo_usd: costo
       }).then(() => {}).catch(() => {});
       return res.status(200).json({ content: data.content, stop_reason: data.stop_reason });
+    }
+
+    // buscar_rango_web: usa Sonnet con web_search para estimar el rango de
+    // orden de magnitud de un tipo de producto (precio por kg/L/u). No consume
+    // cuota; se cachea en pl_rangos_precio y solo se llama UNA vez por tipo
+    // en toda la vida del sistema (compartido entre usuarios).
+    if (tipo === 'buscar_rango_web') {
+      const tipoProducto = (body.tipo_producto || '').trim();
+      const unidadBase   = (body.unidad_base || 'kg').trim();
+      if (!tipoProducto) {
+        return res.status(400).json({ error: 'Falta tipo_producto' });
+      }
+
+      const promptBusqueda =
+        'Necesito un rango APROXIMADO de precio por unidad para un tipo de producto, en Argentina, ' +
+        'precio mayorista. NO necesito un precio exacto ni actualizado al día: necesito el ORDEN DE ' +
+        'MAGNITUD para distinguir si un precio de lista es por unidad o por bulto completo.\n\n' +
+        'Producto: "' + tipoProducto + '" (unidad base: ' + unidadBase + ')\n\n' +
+        'Buscá en la web precios mayoristas argentinos de este tipo de producto y devolvé una ' +
+        'estimación de la mediana de precio por ' + unidadBase + '. Si no encontrás dato exacto, estimá ' +
+        'por orden de magnitud según productos similares. Un rango amplio está bien.\n\n' +
+        'Devolvé SOLO un JSON:\n' +
+        '{\n' +
+        '  "mediana_estimada": numero (precio por unidad base, en pesos argentinos),\n' +
+        '  "confianza": numero 0-1,\n' +
+        '  "fuente": "breve nota de en qué te basaste"\n' +
+        '}';
+
+      const apiBodyRango = {
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1200,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{ role: 'user', content: promptBusqueda }]
+      };
+
+      const respRango = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify(apiBodyRango)
+      });
+
+      if (!respRango.ok) {
+        const errR = await respRango.json().catch(() => ({}));
+        console.error('Error buscar_rango_web:', respRango.status, errR);
+        return res.status(502).json({ error: 'Error IA', detalle: errR.error && errR.error.message });
+      }
+
+      const dataRango = await respRango.json();
+      // Loguear uso (Sonnet, sin cuota)
+      const uR = dataRango.usage || {};
+      const costoR = ((uR.input_tokens || 0) * PRECIOS_SONNET.input + (uR.output_tokens || 0) * PRECIOS_SONNET.output) / 1_000_000;
+      sb.from('uso_ia').insert({
+        user_id: userId, tipo: 'buscar_rango_web',
+        input_tokens: uR.input_tokens || 0, output_tokens: uR.output_tokens || 0, costo_usd: costoR
+      }).then(() => {}).catch(() => {});
+
+      // Extraer el JSON de los bloques de texto (puede venir entre tool_use)
+      const textoCompleto = (dataRango.content || [])
+        .filter(c => c.type === 'text')
+        .map(c => c.text)
+        .join('\n');
+      let parsed = null;
+      try {
+        const limpio = textoCompleto.replace(/```json|```/g, '').trim();
+        parsed = JSON.parse(limpio);
+      } catch (e) {
+        const i = textoCompleto.indexOf('{');
+        const f = textoCompleto.lastIndexOf('}');
+        if (i >= 0 && f > i) {
+          try { parsed = JSON.parse(textoCompleto.slice(i, f + 1)); } catch (e2) {}
+        }
+      }
+      if (!parsed || typeof parsed.mediana_estimada !== 'number' || parsed.mediana_estimada <= 0) {
+        return res.status(200).json({ rango: null, razon: 'IA no devolvió mediana válida' });
+      }
+
+      return res.status(200).json({
+        rango: {
+          tipo_producto: tipoProducto,
+          unidad_base: unidadBase,
+          mediana_estimada: parsed.mediana_estimada,
+          factor_min: 0.5,
+          factor_max: 2.5,
+          origen: 'web',
+          muestras: 0,
+          confiable: false,
+          confianza_web: parsed.confianza || 0.5,
+          fuente: parsed.fuente || ''
+        }
+      });
     }
 
     if (esProcesarLista) {
@@ -211,10 +309,11 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'Falta el campo messages' });
     }
 
-    // 7) Llamar a Claude — Sonnet+thinking para listas, Haiku para el resto
+    // 7) Llamar a Claude — tres tiers: Sonnet+thinking / Sonnet plain / Haiku
     const usarThinking = TIPOS_CON_THINKING.indexOf(tipo) >= 0;
-    const modelo = usarThinking ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001';
-    const PRECIOS = usarThinking ? PRECIOS_SONNET : PRECIOS_HAIKU;
+    const usarSonnet   = usarThinking || TIPOS_SONNET_SIN_THINKING.indexOf(tipo) >= 0;
+    const modelo = usarSonnet ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001';
+    const PRECIOS = usarSonnet ? PRECIOS_SONNET : PRECIOS_HAIKU;
 
     const apiBody = {
       model: modelo,
@@ -231,23 +330,42 @@ module.exports = async function handler(req, res) {
 
     const betaHeader = usarThinking ? 'interleaved-thinking-2025-05-14' : 'prompt-caching-2024-07-31';
 
-    const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': betaHeader,
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify(apiBody)
-    });
+    // Retry con backoff exponencial para 429 (rate limit) y 529 (overload)
+    const MAX_RETRIES = 4;
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    let claudeResp;
+    let errBody = {};
+    for (let intento = 0; intento <= MAX_RETRIES; intento++) {
+      claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+          'anthropic-beta': betaHeader,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify(apiBody)
+      });
+      if (claudeResp.ok) break;
+      errBody = await claudeResp.json().catch(() => ({}));
+      const status = claudeResp.status;
+      const reintentable = (status === 429 || status === 529 || status === 503);
+      if (!reintentable || intento === MAX_RETRIES) break;
+      // Respetar retry-after si viene; si no, backoff exponencial con jitter
+      const retryAfter = parseFloat(claudeResp.headers.get('retry-after') || '0');
+      const waitMs = retryAfter > 0
+        ? Math.min(retryAfter * 1000, 30000)
+        : Math.min(1000 * Math.pow(2, intento) + Math.random() * 500, 15000);
+      console.warn('[Claude] ' + status + ' — reintentando en ' + waitMs + 'ms (intento ' + (intento + 1) + '/' + MAX_RETRIES + ')');
+      await sleep(waitMs);
+    }
 
     if (!claudeResp.ok) {
-      const errBody = await claudeResp.json().catch(() => ({}));
       console.error('Error Claude:', claudeResp.status, errBody);
       return res.status(502).json({
         error: 'Error al consultar a la IA',
-        detalle: errBody.error && errBody.error.message
+        detalle: errBody.error && errBody.error.message,
+        status: claudeResp.status
       });
     }
 
@@ -260,7 +378,7 @@ module.exports = async function handler(req, res) {
     const cacheReadT = usage.cache_read_input_tokens || 0;
     const cacheCreationT = usage.cache_creation_input_tokens || 0;
 
-    const costo = usarThinking
+    const costo = usarSonnet
       ? ((inputT * PRECIOS_SONNET.input) + (outputT * PRECIOS_SONNET.output)) / 1_000_000
       : ((inputT * PRECIOS_HAIKU.input) + (cacheCreationT * PRECIOS_HAIKU.cache_write) + (cacheReadT * PRECIOS_HAIKU.cache_read) + (outputT * PRECIOS_HAIKU.output)) / 1_000_000;
 

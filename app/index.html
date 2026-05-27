@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="es">
 <head>
 <meta charset="utf-8">
@@ -946,6 +946,39 @@ function setProgresoJob(jobId, texto, pct) {
 function removeBarraProgreso(jobId) {
   var el = document.getElementById('job-' + jobId);
   if (el) el.remove();
+// Parser tolerante: recorre el texto desde el primer "[" y devuelve TODOS los
+// objetos top-level que estén completos y balanceados, ignorando lo que venga
+// truncado al final. Funciona con objetos anidados y strings con escapes.
+function recuperarObjetosJsonArray(texto) {
+  var ini = texto.indexOf('[');
+  if (ini < 0) return [];
+  var objs = [];
+  var depth = 0;
+  var inString = false;
+  var prevWasEscape = false;
+  var objStart = -1;
+
+  for (var i = ini + 1; i < texto.length; i++) {
+    var c = texto[i];
+    if (inString) {
+      if (prevWasEscape) { prevWasEscape = false; }
+      else if (c === '\\') { prevWasEscape = true; }
+      else if (c === '"') { inString = false; }
+      continue;
+    }
+    if (c === '"') { inString = true; continue; }
+    if (c === '{') {
+      if (depth === 0) objStart = i;
+      depth++;
+    } else if (c === '}') {
+      depth--;
+      if (depth === 0 && objStart >= 0) {
+        try { objs.push(JSON.parse(texto.slice(objStart, i + 1))); } catch(e) {}
+        objStart = -1;
+      }
+    }
+  }
+  return objs;
 }
 
 async function procesarArchivo(event) {
@@ -1008,7 +1041,7 @@ async function procesarImagen(file, jobId) {
 
   var base64 = await fileToBase64(file);
   var proveedorId = $('lista-prov-select').value;
-  var prompt = 'Extraé productos de esta lista de precios. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques.\n\nDevolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":numero,"unidad":"...","alerta":false}]\n- nombre: nombre completo (marca, variedad, presentación)\n- precio: número decimal exacto tal como aparece en la imagen\n- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n- alerta: true solo si hay dos precios distintos para el mismo producto y no sabés cuál tomar\n- Ignorá encabezados, totales, fechas y filas que no sean productos';
+  var prompt = 'Extraé productos de esta lista de precios argentina. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques, NUNCA conviertas formato.\n\nDevolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":"texto_exacto","unidad":"...","alerta":false}]\n- nombre: nombre completo (marca, variedad, presentación)\n- precio: STRING con el texto EXACTO del precio tal como aparece en la imagen, conservando puntos y comas del formato argentino (ej: "13.996,53" → devolver "13.996,53"). NO conviertas a número.\n- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n- alerta: true solo si hay dos precios distintos para el mismo producto y no sabés cuál tomar\n- Ignorá encabezados, totales, fechas y filas que no sean productos';
 
   var items = await llamarClaudeProcesarLista({
     tipo: 'procesar_lista',
@@ -1024,16 +1057,28 @@ async function procesarImagen(file, jobId) {
   });
 
   filasPreview = items
-    .filter(function(it) { return it.nombre && it.precio > 0; })
     .map(function(it) {
-      return { productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta };
-    });
+      return { productoLista: String(it.nombre || '').trim(), precio: parsePrecio(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta };
+    })
+    .filter(function(it) { return it.productoLista && it.precio !== null && it.precio > 0; });
 
   removeBarraProgreso(jobId);
   if (filasPreview.length === 0) {
+    loading.style.display = 'none';
     showToast('No se detectaron productos. Probá con una foto de mejor calidad', 'error');
     return;
   }
+
+  // Etapas 2-5: normalización, agrupamiento, detección de modo, cálculo
+  try {
+    var provId = $('lista-prov-select').value;
+    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provId, loading);
+  } catch(pipeErr) {
+    console.warn('[Pipeline] Falló, usando extracción básica:', pipeErr.message);
+    showToast('Extraídos sin normalizar (' + pipeErr.message + ')', 'warn');
+  }
+
+  loading.style.display = 'none';
   renderPreview();
   showToast('IA extrajo ' + filasPreview.length + ' productos');
 }
@@ -1084,7 +1129,7 @@ async function procesarPDF(file, jobId) {
 
   // 3. Si hay UNA columna sola, procesar directo. Si hay varias, mostrar selector
   if (columnas.precios.length === 1) {
-    await procesarPDFConColumna(lineas, columnas.precios[0].nombre, jobId);
+    await procesarPDFConColumna(lineas, columnas.precios[0].nombre, columnas.precios[0].ejemplo, columnas.precios, jobId);
   } else {
     removeBarraProgreso(jobId);
     mostrarSelectorColumnasPDF(lineas, columnas, jobId);
@@ -1108,7 +1153,12 @@ async function detectarColumnasPDF(muestraTexto) {
     })
   });
   var data = await resp.json();
-  if (!resp.ok) throw new Error(data.error || 'Error detectando columnas');
+  if (!resp.ok) {
+    var msg = data.error || 'Error detectando columnas';
+    if (data.detalle) msg += ' — ' + data.detalle;
+    if (data.status) msg += ' [HTTP ' + data.status + ']';
+    throw new Error(msg);
+  }
   var texto = (data.content && data.content[0] && data.content[0].text || '').replace(/```json|```/g, '').trim();
   try { return JSON.parse(texto); }
   catch(e) {
@@ -1142,10 +1192,12 @@ function mostrarSelectorColumnasPDF(lineas, columnas, jobId) {
     var sel = document.querySelector('input[name="sel-col-pdf"]:checked');
     if (!sel) return;
     var nombreCol = sel.value;
+    // Buscar el ejemplo correspondiente a la columna elegida
+    var colObj = columnas.precios.find(function(c) { return c.nombre === nombreCol; }) || {};
     cerrarModalColPDF();
     var newJobId = Date.now().toString();
     crearBarraProgreso(newJobId);
-    procesarPDFConColumna(lineas, nombreCol, newJobId).catch(function(e) {
+    procesarPDFConColumna(lineas, nombreCol, colObj.ejemplo, columnas.precios, newJobId).catch(function(e) {
       console.error(e);
       removeBarraProgreso(newJobId);
       showToast('Error: ' + (e.message || ''), 'error');
@@ -1158,7 +1210,7 @@ function cerrarModalColPDF() {
   if (m) m.remove();
 }
 
-async function procesarPDFConColumna(lineas, nombreColumna, jobId) {
+async function procesarPDFConColumna(lineas, nombreColumna, ejemploColumna, todasLasColumnas, jobId) {
   filasPreview = [];
   var chunkSize = 80;
   var totalChunks = Math.ceil(lineas.length / chunkSize);
@@ -1170,7 +1222,7 @@ async function procesarPDFConColumna(lineas, nombreColumna, jobId) {
     // Hasta 3 intentos por chunk
     for (var intento = 1; intento <= 3; intento++) {
       try {
-        items = await extraerChunkConClaude(chunkLineas, nombreColumna);
+        items = await extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna, todasLasColumnas);
         break;
       } catch(chunkErr) {
         console.warn('[PDF] Chunk ' + (c + 1) + ' intento ' + intento + ' falló:', chunkErr.message);
@@ -1184,28 +1236,69 @@ async function procesarPDFConColumna(lineas, nombreColumna, jobId) {
       }
     }
     items.forEach(function(it) {
-      if (it.nombre && it.precio > 0) {
-        filasPreview.push({ productoLista: String(it.nombre).trim(), precio: parseFloat(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta });
+      var p = parsePrecio(it.precio);
+      if (it.nombre && p !== null && p > 0) {
+        filasPreview.push({ productoLista: String(it.nombre).trim(), precio: p, unidad: String(it.unidad || '').trim(), alerta: !!it.alerta });
       }
     });
     renderPreview();
   }
   removeBarraProgreso(jobId);
   if (filasPreview.length === 0) {
+    loading.style.display = 'none';
     showToast('No se pudieron extraer productos', 'error');
     return;
   }
+
+  // Etapas 2-5: normalización, agrupamiento, detección de modo, cálculo
+  try {
+    var provIdPDF = $('lista-prov-select').value;
+    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provIdPDF, loading);
+  } catch(pipeErrPDF) {
+    console.warn('[Pipeline PDF] Falló, usando extracción básica:', pipeErrPDF.message);
+    showToast('Extraídos sin normalizar (' + pipeErrPDF.message + ')', 'warn');
+  }
+
+  loading.style.display = 'none';
+  renderPreview();
   var msg = 'IA extrajo ' + filasPreview.length + ' productos';
   if (errores > 0) msg += ' (' + errores + ' partes fallaron)';
   showToast(msg, errores > 0 ? 'warn' : 'ok');
 }
 
 // extraerChunkConClaude recibe el array de líneas para poder subdividir si se trunca
-async function extraerChunkConClaude(chunkLineas, nombreColumna) {
+async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna, todasLasColumnas) {
   var textoCrudo = chunkLineas.join('\n');
   // Si el texto es muy largo, reducir a 20000 chars (unas 60-80 líneas = seguro)
   if (textoCrudo.length > 20000) textoCrudo = textoCrudo.slice(0, 20000);
-  var prompt = 'Extraé productos de esta lista de precios. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques.\n\nDevolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":numero,"unidad":"...","alerta":false}]\n- nombre: nombre completo (marca, variedad, presentación)\n- precio: número exacto de la columna "' + nombreColumna + '" sin ningún cálculo\n- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n- alerta: true solo si hay dos precios distintos para el mismo producto y no sabés cuál tomar\n- Ignorá encabezados, totales, líneas vacías. Incluí TODOS los productos.\n\nTexto:\n\n' + textoCrudo;
+
+  // Contexto de columnas: la elegida (con su ejemplo de valor) y las otras
+  // (con sus ejemplos) para que la IA sepa cuáles NO tomar.
+  var ctxColumna = 'COLUMNA OBJETIVO: "' + nombreColumna + '"';
+  if (ejemploColumna) {
+    ctxColumna += ' (valor típico: ' + ejemploColumna + ')';
+  }
+  var otrasCols = (todasLasColumnas || []).filter(function(c) { return c && c.nombre !== nombreColumna; });
+  if (otrasCols.length > 0) {
+    ctxColumna += '\nCOLUMNAS A IGNORAR (estos precios NO los queremos, pero pueden estar en la misma fila):';
+    otrasCols.forEach(function(c) {
+      ctxColumna += '\n  - "' + c.nombre + '"' + (c.ejemplo ? ' (valor típico: ' + c.ejemplo + ')' : '');
+    });
+  }
+
+  var prompt = 'Extraé productos de esta lista de precios argentina. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques, NUNCA conviertas formato.\n\n' +
+    ctxColumna + '\n\n' +
+    'Devolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":"texto_exacto","unidad":"...","alerta":false}]\n' +
+    '- nombre: nombre completo (marca, variedad, presentación)\n' +
+    '- precio: STRING con el texto EXACTO de la COLUMNA OBJETIVO "' + nombreColumna + '" tal como aparece en el PDF.\n' +
+    '  IMPORTANTE: en cada fila puede haber varios números (códigos, stock, distintas columnas de precio).\n' +
+    '  Usá el valor TÍPICO de la columna objetivo (' + (ejemploColumna || 'sin ejemplo') + ') como referencia de qué número buscar.\n' +
+    '  Si el orden de columnas cambia o no estás 100% seguro de cuál es el precio correcto, marcá alerta: true.\n' +
+    '  Conservá puntos y comas (ej: "13.996,53" → devolver "13.996,53" como string). NO conviertas a número.\n' +
+    '- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n' +
+    '- alerta: true si NO estás seguro de cuál es el precio correcto de la columna objetivo (mejor marcar dudoso que adivinar mal)\n' +
+    '- Ignorá encabezados, totales, líneas vacías. Incluí TODOS los productos.\n\n' +
+    'Texto:\n\n' + textoCrudo;
   var proveedorId = $('lista-prov-select').value;
   var resp = await fetch('/api/claude', {
     method: 'POST',
@@ -1221,7 +1314,12 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna) {
     })
   });
   var data = await resp.json();
-  if (!resp.ok) throw new Error(data.error || 'Error en API');
+  if (!resp.ok) {
+    var msg = data.error || 'Error en API';
+    if (data.detalle) msg += ' — ' + data.detalle;
+    if (data.status) msg += ' [HTTP ' + data.status + ']';
+    throw new Error(msg);
+  }
 
   // Si Claude truncó la respuesta por max_tokens, subdividir el chunk y rellamar
   if (data.stop_reason === 'max_tokens' && chunkLineas.length > 10) {
@@ -1262,7 +1360,10 @@ async function llamarClaudeProcesarLista(payload) {
   });
   var data = await resp.json();
   if (!resp.ok) {
-    throw new Error(data.error || 'Error desconocido');
+    var msg = data.error || 'Error desconocido';
+    if (data.detalle) msg += ' — ' + data.detalle;
+    if (data.status) msg += ' [HTTP ' + data.status + ']';
+    throw new Error(msg);
   }
   var texto = data.content && data.content[0] && data.content[0].text || '';
   console.log('[IA] Respuesta length:', texto.length);
@@ -1289,6 +1390,1717 @@ async function llamarClaudeProcesarLista(payload) {
   return items;
 }
 
+// ============================================================
+// PIPELINE DE NORMALIZACIÓN Y COMPARACIÓN (Etapas 2-5)
+// ============================================================
+
+var SYSTEM_NORMALIZACION = [
+  'Normalizás nombres de productos de distintos proveedores para poder agruparlos y compararlos.',
+  'Devolvé SOLO un array JSON, sin texto adicional ni markdown.',
+  '',
+  'Para cada producto generá una "clave_canonica" siguiendo estas reglas ESTRICTAS:',
+  '',
+  '1. SIN MARCA: ignorá la marca completamente.',
+  '   "Cocinero", "Costa del Sol", "Cañuelas", "Chacabuco", "Gallo", "Hellmann\'s",',
+  '   "Noalsa", "Fargo", "La Serenísima", "Mastellone", "Sancor" no van en la clave.',
+  '',
+  '2. TIPO ESPECÍFICO (CRÍTICO): usá el nombre genérico más específico posible.',
+  '   "aceite girasol" ≠ "aceite oliva" ≠ "aceite maíz" (son DISTINTOS)',
+  '   "harina 000" ≠ "harina 0000" ≠ "harina 00" ≠ "harina integral" (son DISTINTOS)',
+  '   "arroz largo fino" ≠ "arroz doble carolina" ≠ "arroz yamaní" (son DISTINTOS)',
+  '   "mayonesa" ≠ "mostaza" ≠ "ketchup"',
+  '',
+  '   PROHIBIDO devolver tipos genéricos de UNA SOLA PALABRA cuando hay subtipos.',
+  '   MAL: "aceite", "vinagre", "aceto", "harina", "arroz", "azucar", "queso",',
+  '        "cobertura", "dulce", "mermelada", "fruto seco", "fruta seca", "semillas",',
+  '        "aditivo", "edulcorante", "cacao", "conserva", "jugo", "levadura",',
+  '        "galletita", "snack", "leche".',
+  '   BIEN: "aceite girasol", "vinagre manzana", "aceto balsamico", "harina 000",',
+  '         "queso cremoso", "cobertura amarga", "dulce de leche", "mermelada frutilla",',
+  '         "cacao amargo", "levadura fresca", "leche entera", etc.',
+  '   Si el nombre del producto NO indica el subtipo específico, usá el tipo más',
+  '   probable dado el contexto. Ej: "ACEITE COCINERO X 5 LT" → "aceite girasol"',
+  '   (Cocinero es marca de aceite girasol).',
+  '   "MIEL" sí es OK (no hay subtipos relevantes en comercios).',
+  '   "SAL" sí es OK genérico salvo que diga "fina", "gruesa", "marina".',
+  '',
+  '3. TAMAÑO NORMALIZADO — convertí TODO a unidades base: kg, L o u.',
+  '   IMPORTANTE: NUNCA dejes "cc", "ml", "gr" como unidad_base. Convertí siempre:',
+  '   - cc, ml (mililitros, centímetros cúbicos = lo mismo) → L dividiendo entre 1000',
+  '   - gr, g (gramos) → kg dividiendo entre 1000',
+  '   - lts, litros, lt, L → L',
+  '   - kg, kgs, kilos → kg',
+  '   - unidades, uds, un, piezas → u',
+  '   Ejemplos OBLIGATORIOS:',
+  '   "500 cc" → tamano: 0.5, unidad_base: "L"  (NO "cc", NO 500)',
+  '   "500 ml" → tamano: 0.5, unidad_base: "L"  (mismo resultado que cc — son iguales)',
+  '   "500 gr" → tamano: 0.5, unidad_base: "kg"',
+  '   "1000 ml" → tamano: 1, unidad_base: "L"',
+  '   "Bolsa x 25 kg" → tamano: 25, unidad_base: "kg"',
+  '   "X KG" sin número → tamano: 1, unidad_base: "kg"',
+  '',
+  '   MULTIPACK "N x M unidad": SOLO interpretar como multipack si hay UNA de estas señales:',
+  '   - Palabra de contenedor explícita: "Pack", "Caja", "Set", "Lote", "Bandeja", "Display".',
+  '   - Unidad pequeña (cc/ml/gr) con N razonable (2-500): tipico de ampollas, sobrecitos.',
+  '   Si SI es multipack, devolvé el TAMAÑO TOTAL (N × M convertido a kg/L):',
+  '   - "Pack 200 x 8cc" → tamano: 1.6, unidad_base: "L" (200 × 8 / 1000)',
+  '   - "Caja 12 x 1lt" → tamano: 12, unidad_base: "L"',
+  '   - "200 x 8cc" (cc pequeño, N razonable) → tamano: 1.6, unidad_base: "L"',
+  '   - "100 x 5gr" → tamano: 0.5, unidad_base: "kg"',
+  '',
+  '   CUIDADO CON CODIGOS DE PRODUCTO: muchos productos tienen un código numérico',
+  '   en el nombre que NO es cantidad. Ejemplos REALES de no-multipack:',
+  '   - "Baño Blanco Aguila 9473 x 10 kg" → 9473 es CODIGO. tamano: 10, unidad: kg.',
+  '   - "Cacao Amargo Fenix 56 x 1 kg" → 56 es CODIGO. tamano: 1, unidad: kg.',
+  '   - "Mermelada Ghelco 5780 x 5.4 kg" → 5780 es CODIGO. tamano: 5.4, unidad: kg.',
+  '   - "Mr. Choc Aceite 927 x 20 kg Calsa" → 927 es CODIGO. tamano: 20, unidad: kg.',
+  '   Señales de que es código y NO conteo:',
+  '   - Sin palabra de pack delante.',
+  '   - Numero grande (más de 3 dígitos) seguido de "x kg" o "x L" → casi siempre código.',
+  '   - El total N×M daría un absurdo (más de 200 kg/L) → casi seguro código.',
+  '',
+  '   "Bolsa x 25 kg" / "Bidón 5lt" sin numero antes de "x": tamaño total directo,',
+  '   no multipack (tamano: 25, unidad_base: "kg").',
+  '',
+  '   IMPORTANTE: números seguidos de "meses", "días" o "años" son tiempo de maduración,',
+  '   NO son peso ni tamaño. "24 meses", "18 meses" → ignorar, NO incluir como tamaño.',
+  '   Ej: "PARMESANO EN BLOQUE 24 MESES" → clave: "queso parmesano 24 meses", tamano: 1, unidad: u',
+  '',
+  '4. FORMATO: "[tipo] [tamaño][unidad]" todo minúsculas sin acentos.',
+  '   Ejemplos: "aceite girasol 5L", "harina 000 25kg", "levadura fresca 0.5kg", "mayonesa 2.9kg"',
+  '',
+  'Devolvé:',
+  '[{',
+  '  "id_original": "el id que te pase",',
+  '  "clave_canonica": "la clave normalizada",',
+  '  "tipo": "categoria: aceite|harina|arroz|azucar|levadura|sal|etc",',
+  '  "tamano": número (ej: 5, 25, 0.5, 1),',
+  '  "unidad_base": "kg" | "L" | "u",',
+  '  "confianza": 0.0 a 1.0',
+  '}]'
+].join('\n');
+
+var SYSTEM_DETECCION_MODO = [
+  'Tu única tarea es determinar si el precio de cada proveedor es UNITARIO o PACK.',
+  'NO hagas ninguna multiplicación ni división en tu respuesta. Solo clasificá.',
+  '',
+  'Definiciones:',
+  '- UNITARIO: el precio es por 1 kg, 1 litro o 1 unidad base.',
+  '- PACK: el precio es el total del bulto/envase completo.',
+  '',
+  'MÉTODO PRINCIPAL (cuando hay 2+ proveedores con precios distintos):',
+  'Si dos precios difieren aproximadamente en un factor igual al tamaño del producto,',
+  'el menor es UNITARIO y el mayor es PACK.',
+  'Ejemplo: aceite girasol 5L → precios 3.580 y 17.900',
+  '→ 17.900 / 3.580 ≈ 5.0 (= tamaño 5L) → 3.580 es UNITARIO, 17.900 es PACK.',
+  'Verificá siempre que la relación sea coherente con el tamaño.',
+  '',
+  'MÉTODO SECUNDARIO (1 solo proveedor o factor no coincide):',
+  '- Presentación con SOLO unidad sin número ("LTS", "KG", "BOT", "UNI", "x kg", "x lt") → UNITARIO con confianza 0.85.',
+  '- Presentación con envase + cantidad ("Bolsa x 25 kg", "Caja x 12 uds", "Bidón x 5 lts"):',
+  '  NO asumas automáticamente PACK. Listas mayoristas frecuentemente cotizan por kg/L aunque',
+  '  mencionen el envase como referencia. Usá rangos esperados del producto como sanity check:',
+  '  * Si el precio (asumiendo PACK) ÷ tamaño da un valor coherente con el rango típico del producto → PACK.',
+  '  * Si ese precio sería absurdamente bajo o alto por unidad → UNITARIO.',
+  '  * Si dudás: PACK con confianza 0.6 (para que quede marcado "para revisar").',
+  '- Rangos típicos en ARS (2025, aprox):',
+  '  aceite girasol 800-1500/L · aceite oliva 5000-15000/L · aceto balsámico 1500-8000/L',
+  '  harina 600-1200/kg · azúcar 700-1300/kg · arroz 1200-2500/kg · sal 200-500/kg',
+  '  productos premium o gourmet pueden ser 2-5x estos valores.',
+  '',
+  'Devolvé SOLO un array JSON:',
+  '[{',
+  '  "clave_canonica": "clave del grupo",',
+  '  "resultados": [{',
+  '    "id_original": "id de la fila",',
+  '    "proveedor_id": "id del proveedor",',
+  '    "modo": "unitario" | "pack",',
+  '    "confianza": 0.0 a 1.0,',
+  '    "razonamiento": "una línea explicando"',
+  '  }]',
+  '}]'
+].join('\n');
+
+// ---- Helpers de código puro (sin IA) ----
+
+// Robusto: maneja AR "1.234,56", US "1,234.56", con/sin símbolos de moneda
+// ("$", "ARS"), y casos ambiguos como "13.996" (3 dígitos después del punto
+// → asume miles AR, porque "$ 13.996" en una lista argentina es 13996, no 13.996).
+function parsePrecio(str) {
+  if (str === null || str === undefined) return null;
+  if (typeof str === 'number') return isFinite(str) ? str : null;
+  var s = String(str).trim();
+  if (!s) return null;
+  // Sacar todo lo que no sea dígito, "." o "," ($ ARS espacios símbolos)
+  s = s.replace(/[^\d.,]/g, '');
+  if (!s) return null;
+
+  var lastDot = s.lastIndexOf('.');
+  var lastComma = s.lastIndexOf(',');
+
+  if (lastDot >= 0 && lastComma >= 0) {
+    // Tiene ambos: el ÚLTIMO es el decimal
+    if (lastComma > lastDot) {
+      // AR: "1.234,56" → punto miles, coma decimal
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+      // US: "1,234.56" → coma miles, punto decimal
+      s = s.replace(/,/g, '');
+    }
+  } else if (lastComma >= 0) {
+    // Solo comas: decimal AR ("13,99"); si hay varias, las primeras son miles
+    s = s.replace(/,(?=.*,)/g, '').replace(',', '.');
+  } else if (lastDot >= 0) {
+    var parts = s.split('.');
+    if (parts.length > 2) {
+      // "1.234.567" → puntos son miles
+      s = s.replace(/\./g, '');
+    } else if (parts[1].length === 3) {
+      // "13.996" ambiguo → en contexto AR asumimos miles → 13996
+      s = s.replace(/\./g, '');
+    }
+    // "13.99" o "13.5" → decimal: dejar tal cual
+  }
+
+  var n = parseFloat(s);
+  return (isNaN(n) || !isFinite(n)) ? null : n;
+}
+
+function redondear(n) { return Math.round(n * 100) / 100; }
+
+// Normaliza unidad_base + tamano a las 3 unidades canonicas: kg, L, u.
+// Esto cubre el caso donde la IA (o el cache) devolvio "cc", "ml", "gr", etc:
+//   { unidad_base: "cc", tamano: 500 }  ->  { unidad_base: "L",  tamano: 0.5 }
+//   { unidad_base: "gr", tamano: 500 }  ->  { unidad_base: "kg", tamano: 0.5 }
+// Tambien re-calcula la clave_canonica si la unidad cambio, para que items con
+// "500cc" y "500ml" caigan en el mismo grupo (cc = mililitros = cm cubicos).
+function canonizarUnidadBase(item) {
+  if (!item || !item.unidad_base) return item;
+  var u = String(item.unidad_base).toLowerCase().trim();
+  var tamano = parseFloat(item.tamano) || 0;
+  var factor = 1;
+  var canon = u;
+
+  if (u === 'cc' || u === 'ml' || u === 'mililitro' || u === 'mililitros') {
+    canon = 'L'; factor = 1/1000;
+  } else if (u === 'lt' || u === 'lts' || u === 'litro' || u === 'litros' || u === 'l') {
+    canon = 'L'; factor = 1;
+  } else if (u === 'gr' || u === 'grs' || u === 'g' || u === 'gramo' || u === 'gramos') {
+    canon = 'kg'; factor = 1/1000;
+  } else if (u === 'kg' || u === 'kgs' || u === 'kilo' || u === 'kilos') {
+    canon = 'kg'; factor = 1;
+  } else if (u === 'u' || u === 'un' || u === 'und' || u === 'uni' || u === 'unidad' || u === 'unidades' || u === 'pieza' || u === 'piezas') {
+    canon = 'u'; factor = 1;
+  }
+
+  if (canon === u && factor === 1) return item; // ya estaba canonica
+
+  var nuevoTamano = tamano > 0 ? tamano * factor : tamano;
+  var nuevaClave = item.clave_canonica;
+  // Reescribir la clave si terminaba en la unidad vieja (ej "coca 500cc" -> "coca 0.5L")
+  if (nuevaClave) {
+    var reUnidad = new RegExp('(\\d+(?:[.,]\\d+)?)\\s*' + u + '$', 'i');
+    if (reUnidad.test(nuevaClave)) {
+      nuevaClave = nuevaClave.replace(reUnidad, function(_, num) {
+        var n = parseFloat(num.replace(',', '.')) * factor;
+        // Formatear sin decimales innecesarios
+        var str = (n % 1 === 0) ? String(n) : String(parseFloat(n.toFixed(3)));
+        return str + canon;
+      });
+    }
+  }
+
+  return Object.assign({}, item, {
+    unidad_base: canon,
+    tamano: nuevoTamano,
+    clave_canonica: nuevaClave
+  });
+}
+
+function agruparPorClaveCanonica(filas) {
+  var grupos = {};
+  filas.forEach(function(fila) {
+    var clave = fila.clave_canonica || ('_raw_' + (fila.id_original || fila.productoLista || '?'));
+    if (!grupos[clave]) {
+      grupos[clave] = {
+        clave_canonica: clave,
+        tipo: fila.tipo || '',
+        tamano: fila.tamano || 0,
+        unidad_base: fila.unidad_base || 'u',
+        proveedores: []
+      };
+    }
+    grupos[clave].proveedores.push({
+      proveedor_id: fila.proveedor_id || '',
+      proveedor_nombre: fila.proveedor_nombre || '',
+      id_original: fila.id_original || '',
+      nombre_original: fila.nombre_original || fila.productoLista || '',
+      precio_raw: typeof fila.precio === 'number' ? fila.precio : (parsePrecio(fila.precio) || 0),
+      presentacion_original: fila.presentacion_original || fila.unidad || '',
+      confianza_normalizacion: fila.confianza || 1
+    });
+  });
+  return Object.values(grupos);
+}
+
+function calcularPrecios(grupos, resultadosModo) {
+  var modoPorId = {};
+  (resultadosModo || []).forEach(function(g) {
+    (g.resultados || []).forEach(function(r) { modoPorId[r.id_original] = r; });
+  });
+  var resultado = [];
+  grupos.forEach(function(grupo) {
+    grupo.proveedores.forEach(function(prov) {
+      var modoInfo = modoPorId[prov.id_original];
+      var precio = prov.precio_raw;
+      var tamano = grupo.tamano;
+      var precio_total = null;
+      var precio_unitario = null;
+      if (modoInfo) {
+        if (modoInfo.modo === 'pack') {
+          precio_total = precio;
+          precio_unitario = (tamano && tamano > 0) ? redondear(precio / tamano) : null;
+        } else {
+          precio_unitario = precio;
+          precio_total = (tamano && tamano > 0) ? redondear(precio * tamano) : null;
+        }
+      }
+      resultado.push({
+        id_original: prov.id_original,
+        clave_canonica: grupo.clave_canonica,
+        tipo: grupo.tipo,
+        tamano: tamano,
+        unidad_base: grupo.unidad_base,
+        proveedor_id: prov.proveedor_id,
+        nombre_original: prov.nombre_original,
+        presentacion_original: prov.presentacion_original,
+        precio_raw: precio,
+        modo: modoInfo ? modoInfo.modo : null,
+        precio_total: precio_total,
+        precio_unitario: precio_unitario,
+        confianza: Math.min(
+          prov.confianza_normalizacion || 1,
+          modoInfo ? (modoInfo.confianza || 0.5) : 0.5
+        ),
+        revisar: !modoInfo || (modoInfo.confianza || 0) < 0.7 || (prov.confianza_normalizacion || 1) < 0.7,
+        precio_alto_envase_chico: modoInfo ? (modoInfo.envase_chico || false) : false,
+        razonamiento: modoInfo ? modoInfo.razonamiento : null
+      });
+    });
+  });
+  return resultado;
+}
+
+// ---- Cache de normalización (Supabase) ----
+
+function normalKey(nombre) {
+  return (nombre || '').toLowerCase().trim().replace(/\s+/g, ' ').replace(/['"´`‘’“”]/g, '');
+}
+
+var _cacheNorm = null; // en memoria para evitar recargar en el mismo tab
+
+async function getCacheNorm() {
+  if (_cacheNorm) return _cacheNorm;
+  try {
+    var res = await supabase.from('pl_cache_normalizacion').select('*');
+    if (res.error) { console.warn('[CacheNorm] Error cargando:', res.error.message); return {}; }
+    var c = {};
+    (res.data || []).forEach(function(row) {
+      // Sanear filas viejas que pueden tener unidad_base = "cc"/"ml"/"gr"
+      c[row.nombre_key] = canonizarUnidadBase(row);
+    });
+    _cacheNorm = c;
+    return c;
+  } catch(e) { console.warn('[CacheNorm] excepción:', e); return {}; }
+}
+
+async function guardarCacheNorm(nuevos) {
+  if (!nuevos || !nuevos.length) return;
+  var filas = nuevos
+    .filter(function(n) { return n.clave_canonica && (n.nombre_original || n.productoLista); })
+    .map(function(n) {
+      return {
+        nombre_key: normalKey(n.nombre_original || n.productoLista || ''),
+        clave_canonica: n.clave_canonica,
+        tipo: n.tipo || null,
+        tamano: n.tamano || null,
+        unidad_base: n.unidad_base || null,
+        confianza: n.confianza || null,
+        updated_at: new Date().toISOString()
+      };
+    })
+    .filter(function(f) { return f.nombre_key; });
+  if (!filas.length) return;
+
+  // Deduplicar por nombre_key (Postgres rechaza un upsert con claves
+  // duplicadas en la misma sentencia: "cannot affect row a second time").
+  // Nos quedamos con la última ocurrencia de cada key.
+  var dedupMap = {};
+  filas.forEach(function(f) { dedupMap[f.nombre_key] = f; });
+  var filasUnicas = Object.keys(dedupMap).map(function(k) { return dedupMap[k]; });
+
+  // Subir en chunks para evitar requests demasiado grandes
+  var CHUNK = 200;
+  var totalGuardados = 0;
+  try {
+    for (var i = 0; i < filasUnicas.length; i += CHUNK) {
+      var chunk = filasUnicas.slice(i, i + CHUNK);
+      var res = await supabase.from('pl_cache_normalizacion').upsert(chunk, { onConflict: 'nombre_key' });
+      if (res.error) {
+        console.warn('[CacheNorm] Error guardando chunk', i / CHUNK, ':', res.error);
+        return;
+      }
+      totalGuardados += chunk.length;
+    }
+    _cacheNorm = null; // invalidar cache en memoria
+    console.log('[CacheNorm] Guardados', totalGuardados, 'items (de', filas.length, 'normalizados,', filasUnicas.length, 'únicos)');
+  } catch(e) { console.warn('[CacheNorm] excepción guardando:', e); }
+}
+
+// ---- Llamadas a la IA ----
+
+// Semaforo de concurrencia: limita cuantas llamadas a /api/claude pueden estar
+// "en vuelo" al mismo tiempo, para no superar el rate limit de Anthropic
+// (10K output tokens/min en cuentas chicas). 3 paralelos da ~ 4500 tok*3 = 13500
+// pedidos a la vez, suficientemente bajo para no disparar 429.
+var _CLAUDE_MAX_CONCURRENT = 2;
+var _claudeEnVuelo = 0;
+var _claudeCola = [];
+function _claudeAcquire() {
+  return new Promise(function(resolve) {
+    var run = function() { _claudeEnVuelo++; resolve(); };
+    if (_claudeEnVuelo < _CLAUDE_MAX_CONCURRENT) run();
+    else _claudeCola.push(run);
+  });
+}
+function _claudeRelease() {
+  _claudeEnVuelo = Math.max(0, _claudeEnVuelo - 1);
+  var next = _claudeCola.shift();
+  if (next) next();
+}
+
+// Wrapper de fetch a /api/claude con concurrencia limitada y parseo seguro de
+// respuestas no-JSON (504 Gateway Timeout devuelve HTML, no JSON).
+async function _fetchClaude(payload) {
+  await _claudeAcquire();
+  try {
+    var resp = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      body: JSON.stringify(payload)
+    });
+    var ct = (resp.headers.get('content-type') || '').toLowerCase();
+    var data = {};
+    if (ct.indexOf('application/json') >= 0) {
+      try { data = await resp.json(); } catch(e) { data = {}; }
+    } else {
+      // 504/502 con HTML, o respuesta vacia: leer texto y construir error util
+      var txt = '';
+      try { txt = await resp.text(); } catch(e) {}
+      data = { error: 'Respuesta no-JSON', detalle: txt.slice(0, 200) };
+    }
+    return { resp: resp, data: data };
+  } finally {
+    _claudeRelease();
+  }
+}
+
+// Red de seguridad: si la IA devuelve un tipo generico de 1 palabra pero el
+// nombre del producto tiene info para inferir el subtipo, refinamos el tipo.
+// Esto evita que "Aceite Girasol Cocinero" se normalice como tipo="aceite"
+// (lo que mata el lookup en pl_rangos_precio).
+var SUBTIPOS_REFINAMIENTO = {
+  'aceite':   ['girasol', 'oliva', 'maiz', 'soja', 'mezcla', 'uva', 'canola', 'arroz', 'coco', 'sesamo', 'lino', 'algodon'],
+  'vinagre':  ['manzana', 'vino', 'alcohol', 'arroz', 'blanco', 'tinto'],
+  'aceto':    ['balsamico', 'modena'],
+  'harina':   ['0000', '000', '00', 'leudante', 'integral', 'maiz', 'mandioca', 'garbanzo', 'almendra', 'coco', 'arroz', 'avena', 'centeno', 'cebada', 'gluten', 'soja', 'lino', 'amaranto', 'quinoa', 'mijo'],
+  'arroz':    ['largo fino', 'doble carolina', 'yamani', 'integral', 'arborio', 'jasmin', 'basmati', 'parboiled', 'largo', 'doble'],
+  'azucar':   ['rubia', 'negra', 'impalpable', 'mascabo', 'organica', 'comun', 'refinada'],
+  'sal':      ['fina', 'gruesa', 'marina', 'parrillera', 'rosada', 'himalaya'],
+  'cacao':    ['amargo', 'dulce', 'puro', 'soluble', 'alcalino'],
+  'leche':    ['entera', 'descremada', 'condensada', 'evaporada', 'polvo', 'almendra', 'coco', 'soja', 'avena'],
+  'levadura': ['fresca', 'seca', 'instantanea'],
+  'crema':    ['leche', 'chantilly', 'pastelera'],
+  'dulce':    ['alfajorero', 'leche alfajorero', 'leche repostero', 'leche', 'batata', 'membrillo', 'frambuesa', 'frutilla', 'durazno'],
+  'cobertura':['amarga', 'leche', 'blanca', 'semiamarga'],
+  'galletita':['agua', 'dulce', 'maria', 'criolla', 'rellena', 'chocolate', 'avena', 'oblea'],
+  'fideos':   ['secos', 'frescos', 'tirabuzon', 'spaghetti', 'mostachol', 'penne', 'fettuccine', 'fusilli'],
+  'jugo':     ['naranja', 'manzana', 'multifruta', 'durazno', 'pomelo', 'limon'],
+  'colorante':['rojo', 'amarillo', 'azul', 'verde', 'negro', 'comestible'],
+  'condimento':['provenzal', 'mixto', 'criollo', 'pollo', 'pescado'],
+  'fruto':    ['seco', 'secos'],
+  'fruta':    ['seca', 'secas', 'desecada'],
+  'semillas': ['sesamo', 'lino', 'chia', 'girasol', 'calabaza', 'amapola'],
+  // Fiambrería
+  'jamon':    ['cocido', 'crudo', 'serrano', 'natural', 'paleta', 'york'],
+  'salame':   ['milan', 'fuet', 'colonia', 'tandilero'],
+  'paleta':   ['cocida', 'cruda'],
+  'mortadela':['comun', 'taco', 'italiana'],
+  'bondiola': ['ahumada', 'cruda'],
+  'morcilla': ['blanca', 'vasca', 'criolla'],
+  'aceituna': ['verde', 'negra', 'rellena', 'descarozada'],
+  'panceta':  ['ahumada', 'fresca', 'salada'],
+  // Repostería avanzada
+  'pulpa':    ['frutilla', 'durazno', 'maracuya', 'mango', 'palta', 'frambuesa', 'manzana', 'naranja'],
+  'premezcla':['brownie', 'cookies', 'muffin', 'torta', 'panettone', 'pan de queso', 'tiramisu', 'bizcochuelo', 'viena', 'polvoron'],
+  'pasta':    ['almendra', 'mani', 'avellana', 'pistacho', 'maracuya', 'mascarpone', 'sambayon', 'caramelo', 'banana', 'mango', 'tiramisu'],
+  'aditivo':  ['cotton', 'formula', 'mejora', 'tentic', 'masa', 'factura'],
+  'syrup':    ['vainilla', 'caramelo', 'avellana', 'canela', 'menta', 'chocolate'],
+  'topping':  ['frutilla', 'durazno', 'frutos del bosque', 'chocolate', 'caramelo'],
+  'gel':      ['brillo', 'neutro', 'frutilla'],
+  'jalea':    ['frio', 'caliente', 'neutro', 'frutilla'],
+  'chocolate':['semiamargo', 'leche', 'blanco', 'amargo', 'rallado'],
+  'mani':     ['fileteado', 'crocante', 'pelado', 'tostado'],
+  'nuez':     ['moscada', 'pelada', 'entera'],
+  'almendra': ['pelada', 'fileteada', 'molida', 'ramillada'],
+  'avellana': ['pelada', 'fileteada', 'molida'],
+  'mozzarella':['barra', 'cilindro', 'bocchino', 'fresca'],
+  'ricota':   ['entera', 'descremada', 'premezcla'],
+  // Carnes
+  'milanesa': ['nalga', 'peceto', 'pollo', 'cerdo'],
+  'chorizo':  ['seco', 'fresco', 'colorado', 'parrillero', 'puro', 'cerdo', 'bombon'],
+  'bife':     ['chorizo', 'lomo', 'costilla', 'ancho'],
+  'pollo':    ['entero', 'pechuga', 'pata', 'muslo', 'suprema'],
+  'lomo':     ['ahumado', 'horneado', 'entero'],
+  'mermelada':['alfajorero', 'arandano alfajorero', 'frutilla', 'durazno', 'damasco', 'damazco', 'higo', 'naranja', 'frambuesa', 'arandano', 'ciruela', 'batata', 'membrillo', 'frutos del bosque', 'manzana'],
+  // Especias
+  'pimienta': ['negra', 'blanca', 'cayena', 'mixta', 'molida'],
+  'esencia':  ['vainilla', 'almendra', 'limon', 'menta', 'naranja', 'azahar', 'banana', 'manteca', 'pan dulce', 'queso'],
+  // Quesos expandido
+  'queso':    ['cremoso', 'parmesano', 'pategrasa', 'pategras', 'rallado', 'mozzarella', 'azul', 'sardo', 'reggianito', 'provolone', 'roquefort', 'gouda', 'cheddar', 'cuartirolo', 'fontina', 'gruyere', 'mascarpone', 'port salut', 'de cabra', 'cabra', 'mar del plata', 'barra', 'fundido', 'emmental', 'danbo'],
+  // Repostería avanzada (fuente: listas de proveedores)
+  'variegato':['frutilla', 'maracuya', 'frutos rojos', 'frutos del bosque', 'avellana', 'marroc', 'caramelo', 'berries'],
+  'ganache':  ['semiamargo', 'blanco', 'mani', 'leche', 'marroc'],
+  'bano':     ['reposteria', 'moldeo', 'semiamargo', 'leche', 'blanco', 'amargo', 'marron'],
+  'mix':      ['cake', 'brownie', 'muffin', 'cookies', 'torta', 'bizcochuelo'],
+  'mousse':   ['chocolate', 'vainilla', 'frutilla', 'maracuya', 'limone'],
+  'micro':    ['galletita', 'cereal']
+};
+
+function refinarTipoGenerico(tipo, nombreOriginal) {
+  if (!tipo || !nombreOriginal) return tipo;
+  var t = String(tipo).toLowerCase().trim();
+  if (t.indexOf(' ') >= 0) return tipo; // ya es especifico (2+ palabras)
+  var n = String(nombreOriginal).toLowerCase();
+
+  // Estrategia 1: subtipos predefinidos (mas exactos)
+  var subs = SUBTIPOS_REFINAMIENTO[t];
+  if (subs) {
+    var subsOrdenados = subs.slice().sort(function(a, b) { return b.length - a.length; });
+    for (var i = 0; i < subsOrdenados.length; i++) {
+      var sub = subsOrdenados[i];
+      var re = new RegExp('\\b' + sub.replace(/\s+/g, '\\s+') + '\\b', 'i');
+      if (re.test(n)) {
+        console.log('[Norm] Tipo refinado: "' + tipo + '" → "' + (t + ' ' + sub) + '" (nombre: "' + nombreOriginal + '")');
+        return t + ' ' + sub;
+      }
+    }
+  }
+
+  // Estrategia 2: patron "tipo de PALABRA" → tipo + PALABRA
+  // Ej: "Harina de Garbanzo" → tipo "harina garbanzo"
+  //     "Aceite de Coco" → tipo "aceite coco"
+  // Cubre casos donde el subtipo no esta en la lista predefinida.
+  var rePatron = new RegExp('\\b' + t + '\\s+de\\s+([a-zñáéíóú]+)', 'i');
+  var m = n.match(rePatron);
+  if (m && m[1]) {
+    var palabra = m[1].toLowerCase();
+    // Filtrar palabras que no son subtipos
+    var stopWords = ['la', 'el', 'los', 'las', 'un', 'una', 'tipo', 'calidad', 'marca', 'segunda', 'primera'];
+    if (stopWords.indexOf(palabra) < 0 && palabra.length >= 3) {
+      console.log('[Norm] Tipo refinado por "de": "' + tipo + '" → "' + (t + ' ' + palabra) + '" (nombre: "' + nombreOriginal + '")');
+      return t + ' ' + palabra;
+    }
+  }
+  return tipo;
+}
+
+async function _normBatch(batch) {
+  var prompt = batch.map(function(p) {
+    return 'ID:' + p.id + ' | NOMBRE: ' + p.nombre_original +
+           ' | PRESENTACION: ' + (p.presentacion_original || 'sin dato');
+  }).join('\n');
+  // max_tokens 6000: con 40 items por batch (~150 chars c/u en output) sobra,
+  // y mantiene la pretension de tokens bajo el rate limit.
+  var r = await _fetchClaude({ tipo: 'normalizar_lista', max_tokens: 6000,
+    system: SYSTEM_NORMALIZACION, messages: [{ role: 'user', content: prompt }] });
+  var resp = r.resp, data = r.data;
+  if (!resp.ok) {
+    var msg = data.error || 'Error normalizando';
+    if (data.detalle) msg += ' — ' + data.detalle;
+    msg += ' [HTTP ' + resp.status + ']';
+    throw new Error(msg);
+  }
+  var txt = ((data.content || [])[0] || {}).text || '';
+  txt = txt.replace(/```json|```/g, '').trim();
+
+  // Si Claude truncó por max_tokens y el batch es grande, subdividir y rellamar
+  // (cada mitad pedirá su propia respuesta completa)
+  if (data.stop_reason === 'max_tokens' && batch.length > 8) {
+    console.warn('[normBatch] truncado por max_tokens, subdividiendo batch de ' + batch.length);
+    var mitad = Math.ceil(batch.length / 2);
+    var a = await _normBatch(batch.slice(0, mitad));
+    var b = await _normBatch(batch.slice(mitad));
+    return a.concat(b);
+  }
+
+  // Indice por id para refinar el tipo con el nombre original del producto
+  var batchPorId = {};
+  batch.forEach(function(p) { batchPorId[p.id] = p; });
+  var refinar = function(arr) {
+    if (!Array.isArray(arr)) return arr;
+    return arr.map(function(item) {
+      if (!item || !item.tipo) return item;
+      var orig = batchPorId[item.id_original];
+      var nombre = orig ? (orig.nombre_original || '') : '';
+      var tipoRef = refinarTipoGenerico(item.tipo, nombre);
+      if (tipoRef !== item.tipo) item.tipo = tipoRef;
+      return item;
+    });
+  };
+
+  // Intento 1: parse directo
+  try {
+    var parsed = JSON.parse(txt);
+    if (Array.isArray(parsed)) return refinar(parsed);
+  } catch(e) {}
+
+  // Intento 2: slice entre primer [ y último ]
+  var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
+  if (ini >= 0 && fin > ini) {
+    try {
+      var parsed2 = JSON.parse(txt.slice(ini, fin + 1));
+      if (Array.isArray(parsed2)) return refinar(parsed2);
+    } catch(e2) {}
+  }
+
+  // Intento 3: recovery — extraer objetos completos de array truncado
+  var recuperados = recuperarObjetosJsonArray(txt);
+  if (recuperados.length > 0) {
+    console.warn('[normBatch] JSON truncado pero recuperados ' + recuperados.length + '/' + batch.length + ' items');
+    return refinar(recuperados);
+  }
+
+  console.error('[normBatch] JSON inválido. Inicio respuesta:', txt.slice(0, 300));
+  throw new Error('IA respondió con JSON inválido (' + txt.length + ' chars)');
+}
+
+// Considera no-reintentable un 4xx que no sea 429: significa que el problema
+// está en el request (token inválido, mal formado, etc.) y reintentar no ayuda.
+function _esNoReintentable(err) {
+  var m = String(err && err.message || '').match(/\[HTTP (\d+)\]/);
+  if (!m) return false;
+  var code = parseInt(m[1], 10);
+  return code >= 400 && code < 500 && code !== 429;
+}
+
+async function _normBatchConRetry(batch, intentos) {
+  intentos = intentos || 3;
+  var lastErr;
+  for (var k = 0; k < intentos; k++) {
+    try { return await _normBatch(batch); }
+    catch(e) {
+      lastErr = e;
+      console.warn('[normBatch] intento ' + (k + 1) + '/' + intentos + ' falló:', e.message);
+      if (_esNoReintentable(e)) throw e;
+      if (k < intentos - 1) await new Promise(function(r) { setTimeout(r, 1500 * (k + 1)); });
+    }
+  }
+  throw lastErr;
+}
+
+async function llamarNormalizarListaIA(items) {
+  // Batches de 40 (antes 50). El semaforo _fetchClaude limita concurrencia a 3,
+  // asi que muchos batches en cola se procesan en olas. Cada batch reintenta
+  // 3 veces y se autosubdivide si max_tokens trunca.
+  // Aplica canonizarUnidadBase a cada item para asegurar cc/ml/gr -> L/kg.
+  var promises = [];
+  var perdidos = [];
+  for (var i = 0; i < items.length; i += 40) {
+    (function(slice) {
+      promises.push(
+        _normBatchConRetry(slice)
+          .then(function(arr) { return arr.map(canonizarUnidadBase); })
+          .catch(function(e) {
+          console.error('[Normalización] Batch perdido (' + slice.length + ' items):', e.message);
+          slice.forEach(function(it) { perdidos.push(it.id); });
+          return [];
+        })
+      );
+    })(items.slice(i, i + 40));
+  }
+  var resultados = await Promise.all(promises);
+  if (perdidos.length > 0 && typeof showToast === 'function') {
+    showToast(perdidos.length + ' producto(s) no pudieron normalizarse — quedan sin clave canónica', 'warn');
+  }
+  return resultados.reduce(function(acc, r) { return acc.concat(r); }, []);
+}
+
+// Detecta modo sin IA usando la columna de presentación — evita llamadas innecesarias.
+// Devuelve {modo, confianza, razonamiento} o null si no puede decidir.
+// Rangos tipicos de precios AR por unidad base (2025).
+// Usados tanto en la decision cliente-side como en el prompt de la IA.
+// Si ambas interpretaciones caen en o ambas fuera del rango -> ambiguo, IA decide.
+var RANGOS_PRECIO_AR = {
+  // tipo -> { min, max, unidad } (precio por unidad_base canonica)
+  // Rangos amplios: incluyen mayorista (low) y premium (high) para que el
+  // algoritmo solo decida cuando UNA de las 2 interpretaciones (pack/unitario)
+  // queda claramente fuera. Si ambas caen dentro -> ambiguo -> IA decide.
+  'aceite girasol':   { min: 600,  max: 4000,  unidad: 'L' },
+  'aceite oliva':     { min: 3000, max: 60000, unidad: 'L' },
+  'aceite maiz':      { min: 800,  max: 5000,  unidad: 'L' },
+  'aceite mezcla':    { min: 600,  max: 4000,  unidad: 'L' },
+  'vinagre':          { min: 300,  max: 5000,  unidad: 'L' },
+  'vinagre manzana':  { min: 500,  max: 8000,  unidad: 'L' },
+  'aceto':            { min: 1000, max: 30000, unidad: 'L' },
+  'aceto balsamico':  { min: 1000, max: 30000, unidad: 'L' },
+  'harina':           { min: 300,  max: 3000,  unidad: 'kg' },
+  'azucar':           { min: 400,  max: 2500,  unidad: 'kg' },
+  'arroz':            { min: 700,  max: 5000,  unidad: 'kg' },
+  'sal':              { min: 80,   max: 1500,  unidad: 'kg' },
+  'levadura':         { min: 1200, max: 12000, unidad: 'kg' },
+  'mayonesa':         { min: 1200, max: 8000,  unidad: 'kg' },
+  'mostaza':          { min: 1200, max: 10000, unidad: 'kg' },
+  'ketchup':          { min: 1200, max: 8000,  unidad: 'kg' },
+  'leche':            { min: 500,  max: 4000,  unidad: 'L' },
+  'agua':             { min: 80,   max: 3000,  unidad: 'L' },
+  'gaseosa':          { min: 300,  max: 4000,  unidad: 'L' },
+  'cerveza':          { min: 600,  max: 8000,  unidad: 'L' }
+};
+
+// Busca el rango típico aplicable a un tipo (matching laxo: "aceite girasol marca x"
+// matchea "aceite girasol").
+// Normaliza tipo para matching laxo (idempotente con _normTipo de la cache DB)
+function _normTipoLite(t) {
+  return String(t || '').toLowerCase().trim()
+    .replace(/\b(de|del|la|el|los|las)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function rangoParaTipo(tipo, unidadBase) {
+  if (!tipo) return null;
+  var t = String(tipo).toLowerCase().trim();
+  var tn = _normTipoLite(t);
+  // 1) Match exacto (raw o normalizado)
+  if (RANGOS_PRECIO_AR[t]  && RANGOS_PRECIO_AR[t].unidad  === unidadBase) return RANGOS_PRECIO_AR[t];
+  if (RANGOS_PRECIO_AR[tn] && RANGOS_PRECIO_AR[tn].unidad === unidadBase) return RANGOS_PRECIO_AR[tn];
+  // 2) Match por prefijo, tambien sobre el tipo normalizado (sin "de")
+  var keys = Object.keys(RANGOS_PRECIO_AR);
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    if (RANGOS_PRECIO_AR[k].unidad !== unidadBase) continue;
+    if (t.indexOf(k) === 0 || tn.indexOf(k) === 0) return RANGOS_PRECIO_AR[k];
+  }
+  return null;
+}
+
+// Decide modo (pack/unitario) usando rangos tipicos del producto.
+// Devuelve null si no puede decidir (tipo desconocido o ambos casos plausibles).
+// Esta heurística es la que el usuario pidió: "que la IA se de cuenta sola".
+function decidirModoPorRangos(grupo) {
+  var propios = grupo.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+  if (propios.length !== 1) return null; // si hay cross-provider, mejor que decida la IA
+  var precio = parseFloat(propios[0].precio_raw) || 0;
+  var tamano = parseFloat(grupo.tamano) || 0;
+  if (precio <= 0 || tamano <= 0) return null;
+  var rango = rangoParaTipo(grupo.tipo, grupo.unidad_base);
+  if (!rango) return null;
+
+  // Calcular el precio por unidad base bajo cada interpretacion
+  var siPack = precio / tamano;       // precio es total del bulto, dividi
+  var siUnit = precio;                // precio ya es por unidad base
+
+  var packEnRango = (siPack >= rango.min && siPack <= rango.max);
+  var unitEnRango = (siUnit >= rango.min && siUnit <= rango.max);
+
+  // Si solo UNA interpretacion cae en el rango tipico, decidimos sin IA
+  if (packEnRango && !unitEnRango) {
+    return { modo: 'pack', confianza: 0.9,
+      razonamiento: 'rango ' + grupo.tipo + ': $' + siPack.toFixed(0) + '/' + rango.unidad + ' (esperado ' + rango.min + '-' + rango.max + ')' };
+  }
+  if (unitEnRango && !packEnRango) {
+    return { modo: 'unitario', confianza: 0.9,
+      razonamiento: 'rango ' + grupo.tipo + ': $' + siUnit.toFixed(0) + '/' + rango.unidad + ' (esperado ' + rango.min + '-' + rango.max + ')' };
+  }
+  // Ambos caen / ninguno cae => ambiguo, dejar para la IA
+  return null;
+}
+
+// ============================================================================
+// SISTEMA DE RANGOS DINÁMICOS (BRIEF DETECCION FINAL)
+// ----------------------------------------------------------------------------
+// Cachea rangos de orden de magnitud (mediana × factor) por tipo de producto en
+// `pl_rangos_precio` (compartido entre todos los usuarios). Permite distinguir
+// bulto vs unitario sin precios exactos: solo el orden de magnitud importa.
+//
+// Flujo (de gratis a caro):
+//   1. Rango cacheado → usar (gratis)
+//   2. Coherencia interna entre filas del mismo tipo → deducir (gratis)
+//   3. Búsqueda web (una sola vez por tipo, se cachea)
+//   4. Decidir con el rango. Si nada da certeza → revisión manual
+//
+// Defensas: provisional hasta 3+ muestras, descarte de outliers (>5x o <0.2x),
+// mediana (no promedio), datos manuales pesan x2, una corrección sana el rango.
+// ============================================================================
+
+// Cache en memoria de rangos cargados desde Supabase (vida = un pipeline)
+var _rangosCache = null;
+
+// Normaliza un tipo para matching: minusculas, sin articulos espanoles, sin
+// espacios extra. Asegura que "aceite de girasol" y "aceite girasol" matcheen.
+function _normTipo(t) {
+  return String(t || '').toLowerCase().trim()
+    .replace(/\b(de|del|la|el|los|las)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function getRangosCacheados() {
+  if (_rangosCache) return _rangosCache;
+  try {
+    var r = await supabase.from('pl_rangos_precio').select('*');
+    if (r.error) { console.warn('[Rangos] No se pudo cargar:', r.error.message); return {}; }
+    var map = {};
+    (r.data || []).forEach(function(row) {
+      var tipo = (row.tipo_producto || '').toLowerCase();
+      map[tipo] = row;                         // clave exacta
+      var norm = _normTipo(tipo);
+      if (norm && norm !== tipo) map[norm] = row;   // alias sin articulos
+    });
+    _rangosCache = map;
+    return map;
+  } catch(e) { console.warn('[Rangos] Excepción:', e); return {}; }
+}
+
+function _invalidarRangosCache() { _rangosCache = null; }
+
+// Lookup robusto. Orden de preferencia:
+//   1. Exact match (raw o normalizado sin "de/del/la/el")
+//   2. Prefix match con origen='manual' (los seeds, la verdad ground-truth)
+//   3. Prefix match con cualquier origen (incluye auto-learned que pueden tener
+//      el brand pegado al tipo si la IA no lo limpio bien)
+// La preferencia de manual evita que una fila polucionada con brand
+// ("aceite de girasol canuelas") gane sobre la seed limpia ("aceite girasol").
+function lookupRangoCacheado(rangosMap, tipo) {
+  if (!tipo || !rangosMap) return null;
+  var t = String(tipo).toLowerCase().trim();
+  if (rangosMap[t]) return rangosMap[t];
+  var n = _normTipo(t);
+  if (n && rangosMap[n]) return rangosMap[n];
+  // Prefix: buscar TODOS los matches y elegir el mejor
+  var keys = Object.keys(rangosMap);
+  var bestManual = null, bestManualLen = 0;
+  var bestOther  = null, bestOtherLen  = 0;
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    var nk = _normTipo(k);
+    if (!nk || n.indexOf(nk) !== 0) continue;
+    var row = rangosMap[k];
+    if (row && row.origen === 'manual') {
+      // Entre las manual, preferir la mas especifica (mas larga)
+      if (nk.length > bestManualLen) { bestManual = row; bestManualLen = nk.length; }
+    } else {
+      if (nk.length > bestOtherLen) { bestOther = row; bestOtherLen = nk.length; }
+    }
+  }
+  return bestManual || bestOther || null;
+}
+
+async function guardarRangoCacheado(rango) {
+  if (!rango || !rango.tipo_producto) return;
+  try {
+    var r = await supabase.from('pl_rangos_precio').upsert({
+      tipo_producto: (rango.tipo_producto || '').toLowerCase(),
+      unidad_base: rango.unidad_base || 'kg',
+      mediana_estimada: rango.mediana_estimada,
+      factor_min: rango.factor_min || 0.5,
+      factor_max: rango.factor_max || 2.5,
+      origen: rango.origen || 'web',
+      muestras: rango.muestras || 0,
+      confiable: !!rango.confiable,
+      ultima_actualizacion: new Date().toISOString()
+    }, { onConflict: 'tipo_producto' });
+    if (r.error) console.warn('[Rangos] Error al guardar:', r.error.message);
+    else _invalidarRangosCache();
+  } catch(e) { console.warn('[Rangos] Excepción al guardar:', e); }
+}
+
+// Helper para sembrar manualmente un rango desde la consola del browser:
+//   _seedRango('aceite girasol', 'L', 1500)
+//   _seedRango('harina 000', 'kg', 800)
+//   _seedRango('aceto balsamico', 'L', 3000)
+// Calcula los factores proporcionales al precio tipico: productos baratos
+// tienen rango mas estrecho (varian menos), caros tienen rango mas amplio
+// (mas variacion entre mayorista y premium).
+async function _seedRango(tipo, unidadBase, precioTipico) {
+  var p = parseFloat(precioTipico);
+  if (!p || p <= 0) { console.warn('[Rangos] precio invalido'); return null; }
+  var fMin, fMax;
+  if (p < 500)        { fMin = 0.5; fMax = 2.0; } // 4x range
+  else if (p < 2000)  { fMin = 0.4; fMax = 3.0; } // 7.5x range
+  else if (p < 10000) { fMin = 0.3; fMax = 4.0; } // 13x range
+  else                { fMin = 0.2; fMax = 5.0; } // 25x range
+  await guardarRangoCacheado({
+    tipo_producto: String(tipo || '').toLowerCase().trim(),
+    unidad_base: unidadBase,
+    mediana_estimada: p,
+    factor_min: fMin,
+    factor_max: fMax,
+    origen: 'manual',
+    muestras: 1,
+    confiable: true   // datos manuales se asumen confiables desde el primer punto
+  });
+  console.log('[Rangos] Sembrado:', tipo, '→ mediana $' + p + ' rango [$' + Math.round(p*fMin) + '-$' + Math.round(p*fMax) + ']/' + unidadBase);
+  return { min: p*fMin, max: p*fMax, mediana: p };
+}
+
+// Sembrar varios rangos de una sola vez. Recibe un array de [tipo, unidad, precio]:
+//   _seedRangos([
+//     ['aceite girasol', 'L', 1500],
+//     ['harina 000', 'kg', 800],
+//     ['aceto balsamico', 'L', 3000]
+//   ])
+async function _seedRangos(filas) {
+  if (!Array.isArray(filas)) return;
+  for (var i = 0; i < filas.length; i++) {
+    var f = filas[i];
+    if (!f || f.length < 3) continue;
+    await _seedRango(f[0], f[1], f[2]);
+  }
+  console.log('[Rangos] Sembrados ' + filas.length + ' rangos. Recargá la página para que el pipeline los use.');
+}
+
+// Multiplica factor_max para envases pequeños que son proporcionalmente más caros.
+// Ejemplos: aceite girasol 500mL vs bidón 5L → el chico cuesta ~2x más por litro.
+// tamano ya viene en unidades canónicas (kg o L).
+function factorPackPequenio(tamano, unidadBase) {
+  if (!tamano || tamano <= 0) return 1.0;
+  var u = (unidadBase || '').toLowerCase();
+  if (u !== 'kg' && u !== 'l') return 1.0; // unidades (u) no aplica
+  if (tamano <= 0.1)  return 4.0;  // ≤100g/mL: sachets, monodosis
+  if (tamano <= 0.25) return 3.0;  // ≤250g/mL: frascos chicos
+  if (tamano <= 0.5)  return 2.5;  // ≤500g/500mL: medio kilo/litro
+  if (tamano <= 1)    return 1.8;  // ≤1kg/L
+  if (tamano <= 2)    return 1.3;  // ≤2kg/L
+  return 1.0;                      // ≥2kg/L: bulk → sin ajuste
+}
+
+// Calcula el rango efectivo a partir de la mediana × factor.
+// tamano (opcional) activa el ajuste de envase pequeño sobre factor_max.
+function rangoEfectivo(rangoRow, tamano) {
+  if (!rangoRow || !rangoRow.mediana_estimada) return null;
+  var fMin = rangoRow.factor_min != null ? rangoRow.factor_min : 0.5;
+  var fMax = rangoRow.factor_max != null ? rangoRow.factor_max : 2.5;
+  var mult = factorPackPequenio(tamano, rangoRow.unidad_base);
+  return {
+    min:      rangoRow.mediana_estimada * fMin,
+    max:      rangoRow.mediana_estimada * fMax * mult,  // ajustado por envase chico
+    maxBase:  rangoRow.mediana_estimada * fMax,          // máximo sin ajuste (bulk)
+    mediana:  rangoRow.mediana_estimada,
+    confiable: !!rangoRow.confiable,
+    unidad:   rangoRow.unidad_base,
+    multPack: mult
+  };
+}
+
+// Detecta bulto vs unitario para una fila dada usando un rango cacheado.
+// Devuelve {modo, confianza, razonamiento, envase_chico} o null si no se puede decidir.
+// envase_chico=true indica que el precio es alto pero válido por ser envase pequeño.
+function detectarPorRangoDinamico(fila, rangoRow) {
+  var tamano = parseFloat(fila.tamano) || 0;
+  var rango = rangoEfectivo(rangoRow, tamano > 0 ? tamano : null);
+  if (!rango) return null;
+  var precioRaw = parseFloat(fila.precio_raw || fila.precio) || 0;
+  if (precioRaw <= 0) return null;
+  var precioSiUnitario = precioRaw;
+  var precioSiPack = tamano > 0 ? precioRaw / tamano : null;
+  var enRango     = function(v) { return v != null && v >= rango.min && v <= rango.max; };
+  var enRangoBase = function(v) { return v != null && v >= rango.min && v <= rango.maxBase; };
+  var uOk     = enRango(precioSiUnitario);
+  var pOk     = precioSiPack != null && enRango(precioSiPack);
+  var uOkBase = enRangoBase(precioSiUnitario);
+  var pOkBase = precioSiPack != null && enRangoBase(precioSiPack);
+  // confianza base depende de si el rango es confiable (3+ muestras) o provisional
+  var confBase = rango.confiable ? 0.9 : 0.65;
+  // true si entra en rango sólo gracias al ajuste de envase chico
+  var soloXEnvaseChico = function(esUnitario) {
+    return rango.multPack > 1 && (esUnitario ? (!uOkBase && uOk) : (!pOkBase && pOk));
+  };
+  if (uOk && !pOk) {
+    var ec = soloXEnvaseChico(true);
+    return { modo: 'unitario', confianza: ec ? confBase * 0.85 : confBase, envase_chico: ec,
+      razonamiento: '$' + Math.round(precioSiUnitario) + '/' + rango.unidad +
+        (ec ? ' (precio alto — envase chico)' : ' en rango') +
+        ' (mediana $' + Math.round(rango.mediana) + ')' };
+  }
+  if (pOk && !uOk) {
+    var ec = soloXEnvaseChico(false);
+    return { modo: 'pack', confianza: ec ? confBase * 0.85 : confBase, envase_chico: ec,
+      razonamiento: 'precio/u=$' + Math.round(precioSiPack) + '/' + rango.unidad +
+        (ec ? ' (precio alto — envase chico)' : ' en rango') +
+        ' (mediana $' + Math.round(rango.mediana) + ')' };
+  }
+  if (uOk && pOk) {
+    // Ambos caen (rango muy amplio o tamaño chico) → desempatar por cercanía
+    var dU = Math.abs(precioSiUnitario - rango.mediana);
+    var dP = Math.abs(precioSiPack - rango.mediana);
+    return dU <= dP
+      ? { modo: 'unitario', confianza: 0.5, envase_chico: false, razonamiento: 'ambos en rango, unitario más cerca de mediana' }
+      : { modo: 'pack',     confianza: 0.5, envase_chico: false, razonamiento: 'ambos en rango, pack más cerca de mediana' };
+  }
+  return null;
+}
+
+// Detección por coherencia interna: agrupar filas por tipo dentro de la misma
+// lista. Si hay dos tamaños muy distintos (≥2x) pero precios parecidos, el
+// grande tiene precio por unidad. Sin IA, sin DB.
+// Recibe un array de grupos { clave_canonica, tipo, tamano, unidad_base, proveedores }
+// y devuelve un map { id_original → { modo, confianza, razonamiento } }.
+function detectarPorCoherenciaInterna(grupos) {
+  var porTipo = {};
+  var det = {};
+  grupos.forEach(function(g) {
+    if (!g.tipo || !g.tamano) return;
+    var k = (g.tipo + '|' + (g.unidad_base || '')).toLowerCase();
+    (porTipo[k] = porTipo[k] || []).push(g);
+  });
+  Object.keys(porTipo).forEach(function(k) {
+    var grupo = porTipo[k];
+    if (grupo.length < 2) return;
+    for (var i = 0; i < grupo.length; i++) {
+      for (var j = 0; j < grupo.length; j++) {
+        if (i === j) continue;
+        var a = grupo[i], b = grupo[j];
+        if (a.tamano === b.tamano) continue;
+        // Tomar el primer proveedor propio de cada grupo para comparar
+        var pa = (a.proveedores || []).find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+        var pb = (b.proveedores || []).find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+        if (!pa || !pb) continue;
+        var precioA = parseFloat(pa.precio_raw) || 0;
+        var precioB = parseFloat(pb.precio_raw) || 0;
+        if (precioA <= 0 || precioB <= 0) continue;
+        var rT = Math.max(a.tamano, b.tamano) / Math.min(a.tamano, b.tamano);
+        var rP = Math.max(precioA, precioB) / Math.min(precioA, precioB);
+        // Tamaños muy distintos (≥2x) pero precios parecidos (< 60% del ratio
+        // de tamaños) → el grande es unitario (no escala con el tamaño)
+        if (rT >= 2 && rP < rT * 0.6) {
+          var grande = a.tamano > b.tamano ? a : b;
+          var pGrande = a.tamano > b.tamano ? pa : pb;
+          det[pGrande.id_original] = {
+            clave_canonica: grande.clave_canonica,
+            modo: 'unitario', confianza: 0.85,
+            razonamiento: 'coherencia interna: tamaño ' + grande.tamano + '× pero precio similar a ' + (a === grande ? b.tamano : a.tamano) + '×'
+          };
+        }
+      }
+    }
+  });
+  return det;
+}
+
+// Circuit breaker para web_search: si fallan N llamadas seguidas, cortamos
+// para no quemar tiempo cuando Anthropic esta caido (típicamente 502s).
+var _webSearchFails = 0;
+var _WEB_SEARCH_DISABLED = false;
+var _WEB_SEARCH_MAX_FAILS = 3; // bajar de 5 a 3 para cortar mas rapido
+var _webSearchAvisado = false; // para loguear "deshabilitado" una sola vez
+
+function _avisarWebSearchDeshabilitado() {
+  if (_webSearchAvisado) return;
+  _webSearchAvisado = true;
+  console.warn('[Rangos] web_search deshabilitado tras ' + _webSearchFails + ' fallos consecutivos (probable problema en Anthropic)');
+}
+
+// Llama al endpoint backend que busca el rango en la web (una sola vez por tipo).
+// IMPORTANTE: hay DOS checks de _WEB_SEARCH_DISABLED:
+//   1. Al inicio (sincronico, antes del semaforo) — para llamadas nuevas que
+//      llegan despues de que se deshabilito.
+//   2. Despues del _claudeAcquire (asincronico) — para llamadas que ya estaban
+//      encoladas en el semaforo cuando el flag se seteo. Sin este segundo
+//      check, todas las llamadas que Promise.all disparo en paralelo pasarian
+//      el primer check sincronicamente y harian fetch.
+async function buscarRangoWebCliente(tipoProducto, unidadBase) {
+  if (_WEB_SEARCH_DISABLED) return null;
+  // Defensa: NO buscar rango para tipos genericos cuando hay manuales especificas
+  var tipoNorm = _normTipo(tipoProducto);
+  if (tipoNorm && tipoNorm.indexOf(' ') < 0) {
+    var rangos = _rangosCache || {};
+    var hayManualMasEspecifica = Object.keys(rangos).some(function(k) {
+      var row = rangos[k];
+      if (!row || row.origen !== 'manual') return false;
+      var nk = _normTipo(k);
+      return nk !== tipoNorm && nk.indexOf(tipoNorm + ' ') === 0;
+    });
+    if (hayManualMasEspecifica) {
+      console.warn('[Rangos] web_search bloqueado por generico:', tipoProducto, '(hay manuales mas especificas)');
+      return null;
+    }
+  }
+  // Adquirir semaforo MANUALMENTE para poder rechequear DISABLED post-acquire
+  await _claudeAcquire();
+  try {
+    // SEGUNDO check: otra llamada paralela puede haber deshabilitado en el mientras
+    if (_WEB_SEARCH_DISABLED) return null;
+    var resp = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      body: JSON.stringify({
+        tipo: 'buscar_rango_web',
+        tipo_producto: tipoProducto,
+        unidad_base: unidadBase
+      })
+    });
+    if (!resp.ok) {
+      _webSearchFails++;
+      if (_webSearchFails >= _WEB_SEARCH_MAX_FAILS) {
+        _WEB_SEARCH_DISABLED = true;
+        _avisarWebSearchDeshabilitado();
+      }
+      return null;
+    }
+    _webSearchFails = 0;
+    var data = {};
+    try { data = await resp.json(); } catch(e) {}
+    return data.rango || null;
+  } catch(e) {
+    _webSearchFails++;
+    if (_webSearchFails >= _WEB_SEARCH_MAX_FAILS) {
+      _WEB_SEARCH_DISABLED = true;
+      _avisarWebSearchDeshabilitado();
+    }
+    console.warn('[Rangos] Búsqueda web falló:', e);
+    return null;
+  } finally {
+    _claudeRelease();
+  }
+}
+
+// Defensa anti-outliers: un precio no actualiza el rango si está absurdamente
+// lejos de la mediana actual. El threshold se amplía para envases chicos (ej:
+// un sachets de 100mL puede costar 4x más/L que un bidón de 5L → no es outlier).
+function esOutlier(precioUnit, rangoRow, tamano) {
+  if (!rangoRow || !rangoRow.muestras || rangoRow.muestras === 0) return false;
+  var ratio = precioUnit / rangoRow.mediana_estimada;
+  var mult  = factorPackPequenio(tamano, rangoRow.unidad_base);
+  return ratio > 5 * mult || ratio < 0.2;
+}
+
+function _mediana(arr) {
+  if (!arr || !arr.length) return 0;
+  var s = arr.slice().sort(function(x, y) { return x - y; });
+  var m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+// Afina los rangos con los precios detectados. Solo data con confianza >= 0.7
+// alimenta. Outliers se descartan. La mediana nueva se suaviza con la anterior
+// dándole más peso a lo nuevo (refleja inflación real).
+async function actualizarRangosConDetecciones(filasDetectadas) {
+  if (!filasDetectadas || !filasDetectadas.length) return;
+  var rangosActuales = await getRangosCacheados();
+  var preciosPorTipo = {};
+  filasDetectadas.forEach(function(f) {
+    if (!f.tipo || !f.modo || (f.confianza || 0) < 0.7) return;
+    var tipoIA = String(f.tipo || '').toLowerCase().trim();
+    if (!tipoIA) return;
+    // Si ya hay un rango similar en cache (con o sin "de"), usar SU clave para
+    // que las actualizaciones se acumulen ahi. Esto evita crear "aceite girasol"
+    // y "aceite de girasol" como filas separadas. Pero NO normaliza ciegamente:
+    // "dulce de leche" (donde "de" es parte del nombre) queda igual si esa es
+    // la clave que ya existe.
+    var rangoExistente = lookupRangoCacheado(rangosActuales, tipoIA);
+    var tipo = rangoExistente ? rangoExistente.tipo_producto : tipoIA;
+
+    // Defensa 4: NO crear entradas genericas si ya hay tipos mas especificos
+    // de origen manual. Ej: la IA devuelve "aceite" → si ya existen "aceite
+    // girasol", "aceite oliva" como manuales, NO guardar "aceite" como
+    // entrada nueva (seria demasiado generica y contaminaria el lookup).
+    if (!rangoExistente) {
+      var tipoNorm = _normTipo(tipo);
+      var prefijoDeManual = Object.keys(rangosActuales).some(function(k) {
+        var row = rangosActuales[k];
+        if (!row || row.origen !== 'manual') return false;
+        var nk = _normTipo(k);
+        // existe un manual que EMPIEZA con este tipo (osea es mas especifico)
+        return nk !== tipoNorm && nk.indexOf(tipoNorm + ' ') === 0;
+      });
+      if (prefijoDeManual) {
+        console.warn('[Rangos] Tipo demasiado generico, no guardado (hay manuales mas especificos):', tipo);
+        return;
+      }
+    }
+
+    var precioRaw = parseFloat(f.precio_raw || f.precio) || 0;
+    var tamano = parseFloat(f.tamano) || 0;
+    if (precioRaw <= 0) return;
+    var precioUnit = f.modo === 'pack' && tamano > 0 ? precioRaw / tamano : precioRaw;
+    if (precioUnit <= 0) return;
+    // Defensa 2: descartar outliers (tamano amplía el umbral para envases chicos)
+    if (esOutlier(precioUnit, rangoExistente, tamano)) {
+      console.warn('[Rangos] Outlier descartado:', tipo, precioUnit);
+      return;
+    }
+    // Defensa 3: datos confirmados manualmente pesan el doble
+    var peso = f.confirmado_manual ? 2 : 1;
+    var arr = (preciosPorTipo[tipo] = preciosPorTipo[tipo] || { precios: [], unidad: f.unidad_base || 'kg' });
+    for (var i = 0; i < peso; i++) arr.precios.push(precioUnit);
+  });
+  var updates = [];
+  Object.keys(preciosPorTipo).forEach(function(tipo) {
+    var data = preciosPorTipo[tipo];
+    var ex = lookupRangoCacheado(rangosActuales, tipo);
+    var medianaNueva = _mediana(data.precios);
+    // Suavizar: 70% peso a nuevo, 30% a anterior (refleja inflación real)
+    var medianaFinal = ex && ex.muestras > 0
+      ? medianaNueva * 0.7 + ex.mediana_estimada * 0.3
+      : medianaNueva;
+    var muestras = (ex && ex.muestras ? ex.muestras : 0) + data.precios.length;
+    // Preservar factors existentes (especialmente los sembrados con formula
+    // proporcional). Si no hay, usar 0.5 / 2.5 default.
+    var fMin = (ex && ex.factor_min != null) ? ex.factor_min : 0.5;
+    var fMax = (ex && ex.factor_max != null) ? ex.factor_max : 2.5;
+    updates.push({
+      tipo_producto: tipo,
+      unidad_base: data.unidad,
+      mediana_estimada: Math.round(medianaFinal * 100) / 100,
+      factor_min: fMin,
+      factor_max: fMax,
+      origen: 'datos',
+      muestras: muestras,
+      confiable: muestras >= 3, // Defensa 1
+      ultima_actualizacion: new Date().toISOString()
+    });
+  });
+  if (!updates.length) return;
+  try {
+    var r = await supabase.from('pl_rangos_precio').upsert(updates, { onConflict: 'tipo_producto' });
+    if (r.error) console.warn('[Rangos] Error en upsert:', r.error.message);
+    else { console.log('[Rangos] Afinados', updates.length, 'rangos'); _invalidarRangosCache(); }
+  } catch(e) { console.warn('[Rangos] Excepción en upsert:', e); }
+}
+
+// ============================================================================
+
+function detectarModoHeuristico(grupo) {
+  // Si hay 2+ proveedores propios con precios distintos → dejar para la IA (comparativa)
+  var propios = grupo.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+  var externos = grupo.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') === 0; });
+  if (externos.length > 0) return null; // hay datos cross-proveedor, la IA los aprovecha mejor
+  if (propios.length !== 1) return null;
+
+  var pres = (propios[0].presentacion_original || '').trim();
+  var tamano = grupo.tamano || 0;
+
+  // ÚNICO caso 100% inequívoco: la presentación es solo la unidad SIN número
+  // ("KG", "LTS", "X KG", "X LT", "BOT", "UNI"). En este caso es claro que
+  // el precio es por unidad base.
+  var esUnitarioPuro = /^(kg|kgs?|kilos?|lts?|litros?|l|ml|cc|grs?|gramos?|bot(?:ella)?s?|uni(?:dad(?:es)?)?|u)\s*$/i.test(pres) ||
+                       /^x\s*(kg|kgs?|lt|lts?|l|g|grs?|kilos?)\s*$/i.test(pres);
+
+  if (esUnitarioPuro) {
+    return { modo: 'unitario', confianza: 0.85,
+      razonamiento: 'heurístico: presentación indica unidad base (' + pres + ')' };
+  }
+
+  // TODO el resto (incluyendo "Bolsa x 25 kg", "Bidón 5lt", "x 5 lt", "500 ml")
+  // es AMBIGUO: una palabra de envase no garantiza que el precio sea del bulto
+  // (mayoristas suelen cotizar por kg/L aunque pongan el envase como referencia).
+  // → null = la IA decide con contexto, y si no hay contexto queda "para revisar"
+  return null;
+}
+
+// Umbral de confianza para USAR un entry del cache. Bajo umbral = más hits =
+// menos llamadas IA. Los entries siempre se guardan con su confianza original.
+var CACHE_HIT_MIN_CONFIANZA = 0.6;
+
+// Detecta patron multipack en el texto. Devuelve { total, unidad } o null.
+// CUIDADO: muchos productos tienen CODIGOS numericos en el nombre (ej
+// "Baño Blanco Aguila 9473 x 10 kg") que NO son conteos. Por eso solo
+// consideramos multipack cuando:
+//   A) Hay palabra de contenedor explicita (Pack/Caja/Set/etc.) + N x M unidad
+//   B) Unidad pequeña (cc/ml/gr) + N razonable (2-500) — son las que casi
+//      siempre son multipack real (vitaminas, ampollas, sobrecitos)
+// Para "kg" y "L" sin palabra explicita: NO tocar (riesgo de codigo).
+function _multipackResultado(n, size, unit) {
+  if (!n || !size) return null;
+  var total, unidad;
+  if (unit === 'cc' || unit === 'ml') { total = n * size / 1000; unidad = 'L'; }
+  else if (unit === 'gr' || unit === 'g') { total = n * size / 1000; unidad = 'kg'; }
+  else if (unit === 'kg') { total = n * size; unidad = 'kg'; }
+  else if (unit === 'l' || unit === 'lt' || unit === 'lts' || unit === 'litro' || unit === 'litros') { total = n * size; unidad = 'L'; }
+  else return null;
+  // Sanity check: totales absurdos (> 200 kg/L) probablemente son codigos
+  if (total > 200) return null;
+  return { total: total, unidad: unidad };
+}
+function detectarMultipack(texto) {
+  var s = String(texto || '');
+  // Caso A: palabra explicita de contenedor antes del numero
+  var contWord = '(?:pack|caja|set|lote|bandeja|carton|cart[oó]n|display|bulto|estuche|cartoneria|cart[oó]neria)';
+  var reA = new RegExp('\\b' + contWord + '\\s*(?:de\\s+)?(\\d+)\\s*x\\s*(\\d+(?:[.,]\\d+)?)\\s*(cc|ml|gr|g|kg|lts?|litros?|l)\\b', 'i');
+  var mA = s.match(reA);
+  if (mA) {
+    var rA = _multipackResultado(parseInt(mA[1], 10), parseFloat(mA[2].replace(',', '.')), mA[3].toLowerCase());
+    if (rA) return rA;
+  }
+  // Caso B: unidad pequeña (cc/ml/gr) + N razonable (2-500)
+  // Estas casi siempre son multipack real, no codigos (un codigo "200" + "8cc"
+  // es muy improbable).
+  var reB = /(?:^|\s)(\d{1,3})\s*x\s*(\d+(?:[.,]\d+)?)\s*(cc|ml|gr|g)\b/i;
+  var mB = s.match(reB);
+  if (mB) {
+    var n = parseInt(mB[1], 10);
+    if (n >= 2 && n <= 500) {
+      var rB = _multipackResultado(n, parseFloat(mB[2].replace(',', '.')), mB[3].toLowerCase());
+      if (rB) return rB;
+    }
+  }
+  return null;
+}
+
+async function normalizarConCache(itemsConId, loadingEl) {
+  var cache = await getCacheNorm();
+  var sinCache = [];
+  var resultado = [];
+
+  itemsConId.forEach(function(p) {
+    var key = normalKey(p.nombre_original || p.productoLista || '');
+    var cached = cache[key];
+    if (cached && (cached.confianza || 0) >= CACHE_HIT_MIN_CONFIANZA) {
+      // Sanity check: si el item es multipack ("200 x 8cc") pero el cache tiene
+      // un tamano muy chico que NO coincide con el calculo del multipack,
+      // el cache tiene data vieja y errónea. Forzar re-normalización.
+      var nombreCompleto = (p.nombre_original || '') + ' ' + (p.presentacion_original || p.unidad || '');
+      var mp = detectarMultipack(nombreCompleto);
+      var cacheTamano = parseFloat(cached.tamano) || 0;
+      if (mp && Math.abs(cacheTamano - mp.total) > 0.01) {
+        console.warn('[Norm] Cache desactualizado para multipack:', p.nombre_original,
+          '— cache:', cacheTamano, cached.unidad_base, '· esperado:', mp.total, mp.unidad);
+        sinCache.push(p);
+        return;
+      }
+      resultado.push(Object.assign({}, p, {
+        clave_canonica: cached.clave_canonica,
+        tipo: cached.tipo,
+        tamano: cached.tamano,
+        unidad_base: cached.unidad_base,
+        confianza: cached.confianza,
+        desde_cache: true
+      }));
+    } else {
+      sinCache.push(p);
+    }
+  });
+
+  if (sinCache.length > 0) {
+    if (loadingEl) loadingEl.textContent = 'Normalizando ' + sinCache.length + ' productos nuevos...';
+    var itemsIA = sinCache.map(function(p, j) {
+      return { id: p.id_original || ('i' + j),
+               nombre_original: p.nombre_original || p.productoLista || '',
+               presentacion_original: p.presentacion_original || p.unidad || '' };
+    });
+    var normIA = await llamarNormalizarListaIA(itemsIA);
+
+    // Índice sinCache por el mismo id que recibió la IA (p.id_original || 'i'+j)
+    var sinCacheByAIId = {};
+    sinCache.forEach(function(p, j) { sinCacheByAIId[p.id_original || ('i' + j)] = p; });
+
+    // Validación: ¿la IA devolvió ids que no pertenecen al batch?
+    var idsEsperados = {};
+    sinCache.forEach(function(p, j) { idsEsperados[p.id_original || ('i' + j)] = true; });
+    var idsExtra = normIA.filter(function(n) { return !idsEsperados[n.id_original]; });
+    if (idsExtra.length > 0) {
+      console.warn('[Normalización] IA devolvió', idsExtra.length, 'ids no esperados:',
+        idsExtra.slice(0, 5).map(function(n) { return n.id_original; }));
+    }
+
+    // Construir paraNuevosCache filtrando ids inválidos y items sin clave_canonica
+    var paraNuevosCache = normIA
+      .filter(function(n) { return sinCacheByAIId[n.id_original] && n.clave_canonica; })
+      .map(function(n) {
+        var orig = sinCacheByAIId[n.id_original];
+        return Object.assign({ nombre_original: orig.nombre_original || orig.productoLista || '' }, n);
+      });
+
+    // Ahora bloqueante: si falla queremos enterarnos en el mismo flujo
+    try {
+      await guardarCacheNorm(paraNuevosCache);
+    } catch(e) {
+      console.warn('[CacheNorm] error guardando (no bloqueante):', e);
+      if (typeof showToast === 'function') showToast('No se pudo guardar el cache de normalización (se sigue procesando)', 'warn');
+    }
+
+    // Indexar por id_original para merge
+    var normIdx = {};
+    normIA.forEach(function(n) { normIdx[n.id_original] = n; });
+    var sinNormalizar = 0;
+    sinCache.forEach(function(p, j) {
+      var aiId = p.id_original || ('i' + j);
+      var norm = normIdx[aiId];
+      if (!norm) {
+        sinNormalizar++;
+        // Item no devuelto por la IA: lo dejamos sin clave_canonica para que
+        // el resto del pipeline pueda marcarlo "para revisar" (no perderlo).
+        resultado.push(Object.assign({}, p, {
+          id_original: p.id_original,
+          nombre_original: p.nombre_original || p.productoLista || '',
+          desde_cache: false,
+          revisar_norm: true
+        }));
+      } else {
+        resultado.push(Object.assign({}, p, norm, {
+          id_original: p.id_original,
+          nombre_original: p.nombre_original || p.productoLista || '',
+          desde_cache: false
+        }));
+      }
+    });
+    if (sinNormalizar > 0) {
+      console.warn('[Normalización] ' + sinNormalizar + ' items quedaron sin clave canónica (IA no los devolvió)');
+      if (typeof showToast === 'function') showToast(sinNormalizar + ' producto(s) sin clave canónica — marcados para revisar', 'warn');
+    }
+  }
+
+  var nCache = resultado.filter(function(r) { return r.desde_cache; }).length;
+  console.log('[Normalización] Cache: ' + nCache + '/' + itemsConId.length + ' · IA: ' + sinCache.length);
+  return resultado;
+}
+
+async function llamarDetectarModoIA(grupos) {
+  var textoGrupos = grupos.map(function(g) {
+    var provStr = g.proveedores.map(function(p) {
+      return '  ID:' + p.id_original +
+             ' | Proveedor: ' + (p.proveedor_nombre || p.proveedor_id) +
+             ' | Precio: ' + p.precio_raw +
+             ' | Presentacion: ' + (p.presentacion_original || 'sin dato');
+    }).join('\n');
+    return 'PRODUCTO: ' + g.clave_canonica + ' | Tamaño: ' + g.tamano + ' ' + g.unidad_base + '\n' + provStr;
+  }).join('\n\n');
+
+  // max_tokens 4500: con 15 grupos por batch (~250 chars c/u en output incluyendo
+  // razonamiento) sobra. Mantiene pretension baja para no disparar rate limit.
+  var r = await _fetchClaude({ tipo: 'detectar_modo_precios', max_tokens: 4500,
+    system: SYSTEM_DETECCION_MODO, messages: [{ role: 'user', content: textoGrupos }] });
+  var resp = r.resp, data = r.data;
+  if (!resp.ok) {
+    var msg = data.error || 'Error detectando modo';
+    if (data.detalle) msg += ' — ' + data.detalle;
+    msg += ' [HTTP ' + resp.status + ']';
+    throw new Error(msg);
+  }
+  var txt = ((data.content || [])[0] || {}).text || '';
+  txt = txt.replace(/```json|```/g, '').trim();
+
+  // Si truncó y el batch es grande, subdividir y rellamar
+  if (data.stop_reason === 'max_tokens' && grupos.length > 4) {
+    console.warn('[detectarModo] truncado por max_tokens, subdividiendo batch de ' + grupos.length);
+    var mitad = Math.ceil(grupos.length / 2);
+    var a = await llamarDetectarModoIA(grupos.slice(0, mitad));
+    var b = await llamarDetectarModoIA(grupos.slice(mitad));
+    return a.concat(b);
+  }
+
+  try {
+    var parsed = JSON.parse(txt);
+    if (Array.isArray(parsed)) return parsed;
+  } catch(e) {}
+
+  var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
+  if (ini >= 0 && fin > ini) {
+    try {
+      var parsed2 = JSON.parse(txt.slice(ini, fin + 1));
+      if (Array.isArray(parsed2)) return parsed2;
+    } catch(e2) {}
+  }
+
+  // Recovery de objetos completos en array truncado
+  var recuperados = recuperarObjetosJsonArray(txt);
+  if (recuperados.length > 0) {
+    console.warn('[detectarModo] JSON truncado pero recuperados ' + recuperados.length + '/' + grupos.length + ' grupos');
+    return recuperados;
+  }
+
+  console.error('[detectarModo] JSON inválido. Inicio respuesta:', txt.slice(0, 300));
+  throw new Error('IA respondió con JSON inválido (' + txt.length + ' chars)');
+}
+
+async function llamarDetectarModoIAConRetry(grupos, intentos) {
+  intentos = intentos || 3;
+  var lastErr;
+  for (var k = 0; k < intentos; k++) {
+    try { return await llamarDetectarModoIA(grupos); }
+    catch(e) {
+      lastErr = e;
+      console.warn('[detectarModo] intento ' + (k + 1) + '/' + intentos + ' falló:', e.message);
+      if (_esNoReintentable(e)) throw e;
+      if (k < intentos - 1) await new Promise(function(r) { setTimeout(r, 2000 * (k + 1)); });
+    }
+  }
+  throw lastErr;
+}
+
+// ---- Auditoría ----
+
+async function guardarAuditoriaPrecios(items, listaId, proveedorId) {
+  if (!items || !items.length) return;
+  var filas = items
+    .filter(function(p) { return p.clave_canonica; })
+    .map(function(p) {
+      return {
+        user_id: sesion.user.id,
+        proveedor_id: proveedorId,
+        lista_id: listaId,
+        id_original: p.id_original || null,
+        nombre_original: p.productoLista || p.nombre_original || null,
+        clave_canonica: p.clave_canonica || null,
+        tipo: p.tipo || null,
+        tamano: p.tamano || null,
+        unidad_base: p.unidad_base || null,
+        precio_raw: p.precio || p.precio_raw || null,
+        modo_detectado: p.modo || null,
+        precio_total_calculado: p.precio_total || null,
+        precio_unitario_calculado: p.precio_unitario || null,
+        confianza: p.confianza || null,
+        razonamiento: p.razonamiento || null
+      };
+    });
+  if (!filas.length) return;
+  var res = await supabase.from('pl_auditoria_precios').insert(filas);
+  if (res.error) console.warn('[Auditoría] Error:', res.error.message);
+  else console.log('[Auditoría] Guardados', filas.length, 'items');
+}
+
+// ---- Orquestador principal: Etapas 2-5 ----
+
+async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) {
+  var provNombre = (proveedores.find(function(p) { return p.id === proveedorId; }) || {}).nombre || '';
+
+  // Preparar items con IDs y campos estandarizados
+  var ts = Date.now();
+  var itemsConId = filasBase.map(function(it, idx) {
+    return Object.assign({}, it, {
+      id_original: 'n' + ts + '_' + idx,
+      nombre_original: it.productoLista || '',
+      presentacion_original: it.unidad || '',
+      proveedor_id: proveedorId,
+      proveedor_nombre: provNombre
+    });
+  });
+
+  // Etapa 2: Normalización con cache
+  if (loadingEl) loadingEl.textContent = 'Normalizando nombres de productos...';
+  var normalizadas = await normalizarConCache(itemsConId, loadingEl);
+
+  // Etapa 3: Agrupar por clave canónica (solo proveedor actual)
+  var gruposPropios = agruparPorClaveCanonica(normalizadas);
+
+  // Enriquecer con datos de OTROS proveedores para comparación cross-proveedor
+  var gruposConComparacion = gruposPropios.map(function(g) {
+    var enriquecido = Object.assign({}, g, { proveedores: g.proveedores.slice() });
+    // Solo buscar si la clave no empieza con "_raw_" (sin normalizar)
+    if (g.clave_canonica.indexOf('_raw_') === 0) return enriquecido;
+    listas.forEach(function(l) {
+      if (l.proveedor_id === proveedorId) return; // saltar proveedor actual
+      var otroProvNombre = (proveedores.find(function(p) { return p.id === l.proveedor_id; }) || {}).nombre || '';
+      (l.items || []).forEach(function(it) {
+        if (it.clave_canonica && it.clave_canonica === g.clave_canonica) {
+          enriquecido.proveedores.push({
+            proveedor_id: l.proveedor_id,
+            proveedor_nombre: otroProvNombre,
+            id_original: 'ext_' + l.proveedor_id + '_' + (it.id_original || it.productoLista || ''),
+            nombre_original: it.productoLista || '',
+            precio_raw: it.precio || 0,
+            presentacion_original: it.unidad || '',
+            confianza_normalizacion: 1
+          });
+        }
+      });
+    });
+    return enriquecido;
+  });
+
+  // Etapa 4: Detectar modo (orden de prioridad: gratis → caro)
+  //   1. Heurística estructural (presentación = solo unidad sin número) → unitario
+  //   2. Rango cacheado en pl_rangos_precio (compartido entre usuarios) → pack/unitario
+  //   3. Coherencia interna (dos tamaños del mismo tipo en la lista) → pack/unitario
+  //   4. Rangos hardcodeados (fallback) → pack/unitario
+  //   5. Búsqueda web (solo si no hay rango y es un tipo común) → cachea y decide
+  //   6. IA en paralelo solo para lo que queda ambiguo
+  if (loadingEl) loadingEl.textContent = 'Detectando modo de precio...';
+  var todosLosModos = [];
+  var gruposParaIA = [];
+  var nRangos = 0, nRangosDinamicos = 0, nCoherencia = 0, nWeb = 0;
+
+  // Cargar rangos dinámicos (gratis, una consulta)
+  var rangosCacheados = await getRangosCacheados();
+  // Pre-calcular coherencia interna para todos los grupos
+  var coherenciaMap = detectarPorCoherenciaInterna(gruposConComparacion);
+
+  var aplicar = function(g, h) {
+    var propios = g.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+    todosLosModos.push({
+      clave_canonica: g.clave_canonica,
+      resultados: propios.map(function(p) {
+        return { id_original: p.id_original, proveedor_id: p.proveedor_id,
+                 modo: h.modo, confianza: h.confianza, razonamiento: h.razonamiento };
+      })
+    });
+  };
+
+  // Cola de tipos que faltan en pl_rangos_precio (para buscar web en paralelo)
+  var tiposParaBuscarWeb = {};
+
+  for (var iG = 0; iG < gruposConComparacion.length; iG++) {
+    var g = gruposConComparacion[iG];
+
+    // 1) Heurística estructural
+    var h = detectarModoHeuristico(g);
+    if (h) { aplicar(g, h); continue; }
+
+    var tipoKey = (g.tipo || '').toLowerCase().trim();
+    var rangoRow = tipoKey ? lookupRangoCacheado(rangosCacheados, tipoKey) : null;
+    var primerPropio = g.proveedores.find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+
+    // 2) Rango cacheado (dinámico, de pl_rangos_precio)
+    if (rangoRow && primerPropio) {
+      var det = detectarPorRangoDinamico(
+        { precio_raw: primerPropio.precio_raw, tamano: g.tamano },
+        rangoRow
+      );
+      if (det) { aplicar(g, det); nRangosDinamicos++; continue; }
+    }
+
+    // 3) Coherencia interna
+    if (primerPropio && coherenciaMap[primerPropio.id_original]) {
+      aplicar(g, coherenciaMap[primerPropio.id_original]);
+      nCoherencia++;
+      continue;
+    }
+
+    // 4) Rangos hardcodeados (fallback)
+    var r = decidirModoPorRangos(g);
+    if (r) { aplicar(g, r); nRangos++; continue; }
+
+    // 5) Si no hay rango cacheado y el tipo es no-trivial, marcar para buscar web
+    if (!rangoRow && tipoKey && tipoKey.length >= 3 && g.unidad_base) {
+      tiposParaBuscarWeb[tipoKey] = { tipo: tipoKey, unidad_base: g.unidad_base };
+    }
+
+    gruposParaIA.push(g);
+  }
+
+  // 5b) Buscar rangos web en paralelo para TODOS los tipos faltantes.
+  // El semaforo de _fetchClaude (_CLAUDE_MAX_CONCURRENT) limita la concurrencia
+  // automaticamente para no saturar rate limit. Sin tope: aprendemos lo que
+  // haga falta. Una vez en cache, futuras subidas lo usan sin re-fetchear.
+  var tiposABuscar = Object.values(tiposParaBuscarWeb);
+  if (tiposABuscar.length) {
+    if (loadingEl) loadingEl.textContent = 'Buscando rangos de referencia (' + tiposABuscar.length + ' tipos)...';
+    var completados = 0;
+    var promesasWeb = tiposABuscar.map(function(t) {
+      return buscarRangoWebCliente(t.tipo, t.unidad_base).then(function(rango) {
+        completados++;
+        if (loadingEl) loadingEl.textContent = 'Buscando rangos (' + completados + '/' + tiposABuscar.length + ')...';
+        if (rango) { rangosCacheados[t.tipo] = rango; guardarRangoCacheado(rango); return rango; }
+        return null;
+      }).catch(function() { completados++; return null; });
+    });
+    var resultadosWeb = await Promise.all(promesasWeb);
+    nWeb = resultadosWeb.filter(Boolean).length;
+    // Re-evaluar los grupos pendientes con los rangos recién obtenidos
+    var pendientes = gruposParaIA.slice();
+    gruposParaIA = [];
+    pendientes.forEach(function(g2) {
+      var tk = (g2.tipo || '').toLowerCase().trim();
+      var rr = tk ? lookupRangoCacheado(rangosCacheados, tk) : null;
+      var pp = g2.proveedores.find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+      if (rr && pp) {
+        var det2 = detectarPorRangoDinamico({ precio_raw: pp.precio_raw, tamano: g2.tamano }, rr);
+        if (det2) { aplicar(g2, det2); nRangosDinamicos++; return; }
+      }
+      gruposParaIA.push(g2);
+    });
+  }
+
+  console.log('[Pipeline] Modo — heurística: ' + (todosLosModos.length - nRangos - nRangosDinamicos - nCoherencia) +
+    ' · rangos DB: ' + nRangosDinamicos +
+    ' · coherencia: ' + nCoherencia +
+    ' · rangos hardcoded: ' + nRangos +
+    ' · web cacheadas: ' + nWeb +
+    ' · IA: ' + gruposParaIA.length + ' grupos');
+
+  // Batches de 25 en PARALELO (cada grupo lleva varios proveedores, baja TPM)
+  // Cada batch reintenta hasta 3 veces. Si falla definitivamente, contamos los
+  // grupos perdidos para reportar al usuario.
+  if (gruposParaIA.length > 0) {
+    var modoPromises = [];
+    var modoPerdidos = 0;
+    var BATCH_MODO = 15;
+    var hacerBatch = function(slice) {
+      modoPromises.push(
+        llamarDetectarModoIAConRetry(slice).catch(function(e) {
+          modoPerdidos += slice.length;
+          console.error('[Pipeline] Batch modo perdido (' + slice.length + ' grupos):', e.message);
+          return [];
+        })
+      );
+    };
+    for (var j = 0; j < gruposParaIA.length; j += BATCH_MODO) {
+      hacerBatch(gruposParaIA.slice(j, j + BATCH_MODO));
+    }
+    var modoResultados = await Promise.all(modoPromises);
+    modoResultados.forEach(function(r) { todosLosModos = todosLosModos.concat(r); });
+    if (modoPerdidos > 0 && typeof showToast === 'function') {
+      showToast(modoPerdidos + ' grupo(s) sin modo detectado tras 3 reintentos — quedan para revisar', 'warn');
+    }
+  }
+
+  // Etapa 5: Calcular precios finales (código puro)
+  var productosFinales = calcularPrecios(gruposPropios, todosLosModos);
+
+  // Mapear de vuelta al formato de filasPreview, conservando campos editables originales
+  var idxPorId = {};
+  itemsConId.forEach(function(it, idx) { idxPorId[it.id_original] = idx; });
+
+  var resultado = productosFinales.map(function(p) {
+    var idx = idxPorId[p.id_original];
+    var orig = idx !== undefined ? filasBase[idx] : {};
+    return Object.assign({}, orig, {
+      productoLista: orig.productoLista || p.nombre_original || '',
+      precio: orig.precio || p.precio_raw || 0,
+      unidad: orig.unidad || p.presentacion_original || '',
+      // Mantener alerta original O marcar si revisar
+      alerta: orig.alerta || false,
+      // Campos del pipeline
+      id_original: p.id_original,
+      clave_canonica: (p.clave_canonica && p.clave_canonica.indexOf('_raw_') !== 0) ? p.clave_canonica : '',
+      tipo: p.tipo || '',
+      tamano: p.tamano || 0,
+      unidad_base: p.unidad_base || 'u',
+      modo: p.modo || null,
+      precio_total: p.precio_total || null,
+      precio_unitario: p.precio_unitario || null,
+      confianza: p.confianza || 0,
+      revisar: p.revisar || false,
+      razonamiento: p.razonamiento || null
+    });
+  });
+
+  console.log('[Pipeline] Completado: ' + resultado.length + ' items · ' +
+    resultado.filter(function(r){return r.modo;}).length + ' con modo detectado · ' +
+    resultado.filter(function(r){return r.revisar;}).length + ' para revisar');
+
+  // Etapa 6: Afinar rangos en pl_rangos_precio con los datos detectados
+  // (defensas anti-outlier internas; solo data con confianza >= 0.7 alimenta).
+  // Se ejecuta en background sin bloquear el retorno al usuario.
+  actualizarRangosConDetecciones(resultado).catch(function(e) {
+    console.warn('[Rangos] Error al afinar rangos:', e);
+  });
+
+  return resultado;
+}
+
 function renderPreview() {
   var tabla = $('preview-tabla');
   if (filasPreview.length === 0) {
@@ -1297,18 +3109,89 @@ function renderPreview() {
     $('btn-guardar-lista').disabled = true;
     return;
   }
-  var alertas = filasPreview.filter(function(it) { return it.alerta; }).length;
-  $('preview-info').textContent = alertas > 0
-    ? 'La IA marcó ' + alertas + ' producto(s) con precio dudoso (fondo naranja). Revisalos antes de guardar.'
-    : 'Revisá y editá si hace falta. Después tocá "Guardar".';
+  var alertas  = filasPreview.filter(function(it) { return it.alerta; }).length;
+  var revisares = filasPreview.filter(function(it) { return it.revisar; }).length;
+  var conModo  = filasPreview.filter(function(it) { return it.modo; }).length;
+
+  var infoMsg = '';
+  if (conModo > 0) {
+    infoMsg = '✅ Pipeline: ' + conModo + ' productos normalizados';
+    if (revisares > 0) infoMsg += ' · ⚠️ ' + revisares + ' para revisar (fondo naranja)';
+    infoMsg += '. Editá si hace falta y guardá.';
+  } else if (alertas > 0) {
+    infoMsg = 'La IA marcó ' + alertas + ' producto(s) con precio dudoso. Revisalos antes de guardar.';
+  } else {
+    infoMsg = 'Revisá y editá si hace falta. Después tocá "Guardar".';
+  }
+  $('preview-info').textContent = infoMsg;
+
   var html = '';
   filasPreview.forEach(function(it, idx) {
-    var alertStyle = it.alerta ? ' style="background:var(--warn-soft);border-color:var(--warn-border);border-width:1px;border-style:solid;"' : '';
-    html += '<div class="preview-fila"' + alertStyle + '>' +
-      '<input type="text" class="nombre" value="' + escapeHtmlAttr(it.productoLista) + '" oninput="editarFilaPreview(' + idx + ',\'nombre\',this.value)" placeholder="Nombre">' +
-      '<input type="text" class="unidad-input" value="' + escapeHtmlAttr(it.unidad || '') + '" oninput="editarFilaPreview(' + idx + ',\'unidad\',this.value)" placeholder="Ej: 1 kg">' +
-      '<input type="number" step="0.01" class="precio" value="' + it.precio + '" oninput="editarFilaPreview(' + idx + ',\'precio\',this.value)">' +
+    var necesitaFlag = it.alerta || it.revisar;
+    var alertStyle = necesitaFlag
+      ? 'background:var(--warn-soft);border-color:var(--warn-border);border-width:1px;border-style:solid;'
+      : '';
+
+    // Info del pipeline (clave canónica + modo + precios siempre visibles)
+    var pipelineHtml = '';
+    if (it.clave_canonica) {
+      var precio = parseFloat(it.precio) || 0;
+      var tamano = parseFloat(it.tamano) || 0;
+      var ub = it.unidad_base || '';
+      var fmt = function(n) { return Number(n).toLocaleString('es-AR', { maximumFractionDigits: 2 }); };
+
+      // Calcular AMBAS interpretaciones para que el usuario las vea siempre.
+      // "Si BULTO": precio raw es el total → /tamaño da el unitario.
+      // "Si UNITARIO": precio raw es por unidad → ×tamaño da el total.
+      var infoModoHtml = '';
+      if (tamano > 0 && ub && ub !== 'u') {
+        var siBulto = '<strong>$' + fmt(precio / tamano) + '/' + ub + '</strong> (asume bulto)';
+        var siUnit  = '<strong>$' + fmt(precio * tamano) + '</strong> total (asume x ' + ub + ')';
+        var lblPack = '📦 bulto';
+        var lblUnit = '⚖️ x ' + ub;
+        var actModo = it.modo || '?';
+        var bgPack = (actModo === 'pack') ? 'background:rgba(96,165,250,0.18);border-color:#60a5fa;' : '';
+        var bgUnit = (actModo === 'unitario') ? 'background:rgba(96,165,250,0.18);border-color:#60a5fa;' : '';
+        infoModoHtml =
+          '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">' +
+            '<button onclick="setModoPreview(' + idx + ',\'pack\')" title="El precio es del bulto entero" ' +
+              'style="background:transparent;border:1px solid var(--border-hi);' + bgPack +
+              'color:inherit;padding:2px 7px;border-radius:6px;font-size:10.5px;cursor:pointer;font-family:inherit;">' +
+              lblPack + ' → ' + siBulto + '</button>' +
+            '<button onclick="setModoPreview(' + idx + ',\'unitario\')" title="El precio es por unidad base" ' +
+              'style="background:transparent;border:1px solid var(--border-hi);' + bgUnit +
+              'color:inherit;padding:2px 7px;border-radius:6px;font-size:10.5px;cursor:pointer;font-family:inherit;">' +
+              lblUnit + ' → ' + siUnit + '</button>' +
+          '</div>';
+      } else {
+        // Sin tamaño o producto por unidad: solo mostrar el modo si la IA lo decidió
+        var lbl = it.modo === 'pack' ? '📦 bulto' : it.modo === 'unitario' ? '⚖️ x unidad' : '❓ sin modo';
+        infoModoHtml = '<span style="font-size:10.5px;">' + lbl + '</span>';
+      }
+
+      var confStr = it.confianza != null ? '<span style="opacity:0.7;">' + Math.round(it.confianza * 100) + '%</span>' : '';
+      var revisarStr = it.revisar ? '<span style="color:var(--warn);font-weight:600;">⚠️ revisar</span>' : '';
+      var envChicoStr = (!it.revisar && it.precio_alto_envase_chico)
+        ? '<span style="color:#f59e0b;font-size:10px;font-weight:600;" title="El precio por kg/L es alto porque es un envase pequeño — es normal">📦 precio alto (envase pequeño)</span>'
+        : '';
+      pipelineHtml =
+        '<div style="flex-basis:100%;font-size:10.5px;color:var(--text-muted);margin-top:3px;' +
+        'padding:2px 4px 0;line-height:1.4;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">' +
+        '<span style="color:var(--text-2);font-weight:500;">' + escapeHtml(it.clave_canonica) + '</span>' +
+        infoModoHtml + confStr + revisarStr + envChicoStr +
+        '</div>';
+    }
+
+    var filaStyle = 'style="' + alertStyle + (it.clave_canonica ? 'flex-wrap:wrap;' : '') + '"';
+    html += '<div class="preview-fila" ' + filaStyle + '>' +
+      '<input type="text" class="nombre" value="' + escapeHtmlAttr(it.productoLista) + '" ' +
+        'oninput="editarFilaPreview(' + idx + ',\'nombre\',this.value)" placeholder="Nombre">' +
+      '<input type="text" class="unidad-input" value="' + escapeHtmlAttr(it.unidad || '') + '" ' +
+        'oninput="editarFilaPreview(' + idx + ',\'unidad\',this.value)" placeholder="Ej: 1 kg">' +
+      '<input type="number" step="0.01" class="precio" value="' + it.precio + '" ' +
+        'oninput="editarFilaPreview(' + idx + ',\'precio\',this.value)">' +
       '<button class="btn-icon" onclick="borrarFilaPreview(' + idx + ')" title="Borrar">' + Icon.trash() + '</button>' +
+      pipelineHtml +
     '</div>';
   });
   tabla.innerHTML = html;
@@ -1323,6 +3206,36 @@ function editarFilaPreview(idx, campo, valor) {
     var p = parseFloat(valor);
     filasPreview[idx].precio = isNaN(p) ? 0 : p;
   }
+}
+
+// Setea el modo (pack | unitario) de un item. Recalcula precio_total y
+// precio_unitario según el tamaño. El precio crudo (it.precio) NO se toca:
+// solo cambia la interpretación de qué significa ese precio.
+function setModoPreview(idx, modo) {
+  var it = filasPreview[idx];
+  if (!it) return;
+  if (modo !== 'pack' && modo !== 'unitario') return;
+  if (it.modo === modo) return; // ya está así
+  var precio = parseFloat(it.precio) || 0;
+  var tamano = parseFloat(it.tamano) || 1;
+  it.modo = modo;
+  it.razonamiento = 'corregido manualmente';
+  it.revisar = false;
+  it.confianza = 1;
+  if (modo === 'pack') {
+    it.precio_total = precio;
+    it.precio_unitario = (tamano > 0) ? redondear(precio / tamano) : null;
+  } else {
+    it.precio_unitario = precio;
+    it.precio_total = (tamano > 0) ? redondear(precio * tamano) : null;
+  }
+  renderPreview();
+}
+// Alias backwards-compat (por si algún render viejo lo usó)
+function flipModoPreview(idx) {
+  var it = filasPreview[idx];
+  if (!it) return;
+  setModoPreview(idx, (it.modo === 'pack') ? 'unitario' : 'pack');
 }
 
 function borrarFilaPreview(idx) {
@@ -1385,6 +3298,14 @@ async function guardarLista() {
           items: items
         });
       if (error) throw error;
+    }
+
+    // Auditoría asíncrona (no bloquea el guardado)
+    var itemsNormalizados = items.filter(function(it) { return it.clave_canonica; });
+    if (itemsNormalizados.length > 0) {
+      var listaAuditId = Date.now().toString();
+      guardarAuditoriaPrecios(itemsNormalizados, listaAuditId, proveedorId)
+        .catch(function(e) { console.warn('[Auditoría] error:', e); });
     }
 
     showToast('Lista guardada (' + items.length + ' items)', 'success');
@@ -1658,14 +3579,32 @@ function todosLosItems() {
     var prov = proveedores.find(function(p) { return p.id === l.proveedor_id; });
     if (!prov) return;
     (l.items || []).forEach(function(it) {
+      // precio = "cuánto cuesta comprar 1 envase de este producto".
+      // - Modo pack: el precio del PDF YA es el total → precio = it.precio
+      // - Modo unitario: el precio del PDF es por kg/L → precio = it.precio × tamaño
+      // El pipeline calcula esto en precio_total. Si no esta disponible (items
+      // viejos sin pipeline), caemos al precio crudo.
+      var precioFinal = (it.precio_total != null && it.precio_total > 0)
+        ? it.precio_total
+        : it.precio;
       out.push({
         listaId: l.id,
         proveedorId: l.proveedor_id,
         proveedor: prov.nombre,
         provTel: prov.telefono || '',
         productoLista: it.productoLista,
-        precio: it.precio,
+        precio: precioFinal,          // ← total para 1 envase (usado en pedidos)
+        precioRaw: it.precio,         // ← el numero crudo del PDF (referencia)
         unidad: it.unidad || '',
+        // Preservar datos del pipeline para el display y modo toggle
+        clave_canonica: it.clave_canonica || null,
+        tipo: it.tipo || null,
+        tamano: it.tamano || null,
+        unidad_base: it.unidad_base || null,
+        modo: it.modo || null,
+        precio_total: (it.precio_total != null) ? it.precio_total : null,
+        precio_unitario: (it.precio_unitario != null) ? it.precio_unitario : null,
+        confianza: (it.confianza != null) ? it.confianza : null,
         itemId: l.id + '|' + (it.productoLista || '')
       });
     });
@@ -1925,8 +3864,6 @@ function renderBuscarProducto(expansionesExtras) {
 
   provsOrden.forEach(function(pid) {
     var prov = porProv[pid];
-    var provObj = proveedores.find(function(p) { return p.id === pid; });
-    var precioTipo = provObj ? (provObj.precio_tipo || 'envase') : 'envase';
     html += '<div style="background:var(--bg-elev);border:2px solid var(--border-hi);border-radius:12px;padding:14px;">';
     html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);">';
     html += '<div><div style="font-weight:600;font-size:15px;">' + escapeHtml(prov.nombre) + '</div>';
@@ -1937,8 +3874,28 @@ function renderBuscarProducto(expansionesExtras) {
       var enPed = enPedido[it.itemId] || 0;
       var bg = enPed > 0 ? 'background:rgba(96,165,250,0.08);border-color:#60a5fa;' : '';
       html += '<div style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);' + bg + 'display:flex;align-items:center;justify-content:space-between;gap:8px;">';
-      var pb = parsearPrecioBase(it.precio, it.unidad, it.productoLista, precioTipo);
-      var precioMostrar = (pb && precioTipo === 'kglt') ? pb.precioTotal : it.precio;
+      // Mostrar el precio crudo siempre. Para "$/unidad":
+      // - Si el item tiene modo + precio_unitario guardados del pipeline → usar esos
+      // - Sino, calcular asumiendo envase (compatibilidad con items sin pipeline)
+      var pb;
+      if (it.modo && it.precio_unitario != null && it.unidad_base && it.unidad_base !== 'u') {
+        pb = { precioBase: it.precio_unitario, precioTotal: it.precio_total || it.precio, unidadBase: it.unidad_base };
+      } else {
+        pb = parsearPrecioBase(it.precio, it.unidad, it.productoLista, 'envase');
+      }
+      var precioMostrar = it.precio;
+      // Mostrar la unidad/presentacion solo si NO esta ya incluida en el nombre
+      // (para no duplicar "Aceite 5L · 5L"). Match case-insensitive sin espacios.
+      var nombre = String(it.productoLista || '');
+      var unidadStr = String(it.unidad || '').trim();
+      var mostrarUnidad = '';
+      if (unidadStr) {
+        var normNombre = nombre.toLowerCase().replace(/\s+/g, '');
+        var normUnidad = unidadStr.toLowerCase().replace(/\s+/g, '');
+        if (normNombre.indexOf(normUnidad) < 0) {
+          mostrarUnidad = ' <span style="color:var(--text-muted);font-weight:500;">· ' + escapeHtml(unidadStr) + '</span>';
+        }
+      }
       var pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
       var ultimaBadge = ultimoPedidoIds[it.itemId]
         ? '<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:rgba(251,191,36,0.15);color:var(--gold-bright);border:1px solid rgba(251,191,36,0.3);margin-left:4px;vertical-align:middle;white-space:nowrap;">Última compra</span>'

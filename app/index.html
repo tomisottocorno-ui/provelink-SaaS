@@ -1733,6 +1733,16 @@ var SYSTEM_NORMALIZACION = [
   '   - "200 x 8cc" (cc pequeño, N razonable) → tamano: 1.6, unidad_base: "L"',
   '   - "100 x 5gr" → tamano: 0.5, unidad_base: "kg"',
   '',
+  '   ⚠️ MULTIPACK ANIDADO "N CAJA (M×P gr)" — MUY IMPORTANTE:',
+  '   Cuando el formato es "N CAJA (M×P gr/cc)" o "NCAJA (M×P GR)", el precio en la lista',
+  '   es SIEMPRE de la unidad interior más pequeña (P gr/cc), NO del total del lote.',
+  '   El "N CAJA" y "M×" describen la presentación comercial, no la unidad de precio.',
+  '   Regla: usá tamano = P (la unidad interior, en kg o L).',
+  '   - "LEVADURA FRESCA LEVEX 12CAJA (20X50 GR)" → tamano: 0.05, unidad_base: "kg"  (50gr = la unidad)',
+  '   - "SAL 6CAJA (24X1KG)" → tamano: 1, unidad_base: "kg"  (1kg = la unidad)',
+  '   - "ACEITE 12CAJA (6X900CC)" → tamano: 0.9, unidad_base: "L"  (900cc = 0.9L = la unidad)',
+  '   Señal clave: si hay paréntesis con (MxP unidad) al final, P es el tamano.',
+  '',
   '   CUIDADO CON CODIGOS DE PRODUCTO: muchos productos tienen un código numérico',
   '   en el nombre que NO es cantidad. Ejemplos REALES de no-multipack:',
   '   - "Baño Blanco Aguila 9473 x 10 kg" → 9473 es CODIGO. tamano: 10, unidad: kg.',
@@ -1751,16 +1761,25 @@ var SYSTEM_NORMALIZACION = [
   '   NO son peso ni tamaño. "24 meses", "18 meses" → ignorar, NO incluir como tamaño.',
   '   Ej: "PARMESANO EN BLOQUE 24 MESES" → clave: "queso parmesano 24 meses", tamano: 1, unidad: u',
   '',
-  '   ⚠️ ERROR FRECUENTE DE OCR — "CC" LEÍDO EN VEZ DE "KG":',
-  '   En PDFs con fuentes especiales, la letra K puede leerse como C, haciendo que "KG" aparezca como "CC".',
-  '   Si ves "X.Xcc" pero el producto es sólido o semisólido y NO existe en presentaciones de pocos mL',
-  '   (mayonesa, mostaza, dulce de leche, manteca, harina, mermelada, pasta, ganache, etc.),',
-  '   Y el número antes de "CC" es > 0.5 (ej: 2.9cc, 5cc, 10cc para esos productos),',
-  '   interpretalo como KG, no como cc/mL.',
-  '   Ejemplo: "MAYONESA HELLMANN\'S X 2.9CC" → tamano: 2.9, unidad_base: "kg"  (NO 0.0029L)',
-  '   Ejemplo: "MOSTAZA X 1.5CC" → tamano: 1.5, unidad_base: "kg"  (NO 0.0015L)',
-  '   Regla práctica: si tamano_en_cc < 100 y el producto no es líquido de uso habitual en mL',
-  '   (bebidas, aceites, esencias, licores sí son líquidos → esos sí en L), usá KG.',
+  '   ⚠️ ERROR FRECUENTE DE OCR — "CC" LEÍDO EN VEZ DE "KG" o "LT":',
+  '   En PDFs con fuentes especiales, la K puede leerse como C → "KG" aparece como "CC".',
+  '   También "LT" puede aparecer como "U" o "LT" confundido con otra cosa.',
+  '   Regla: si ves "X.Xcc" Y el valor en cc resultante es absurdamente pequeño para ese producto,',
+  '   reinterpretá la unidad:',
+  '   PRODUCTOS SÓLIDOS (tamano en cc → probablemente KG):',
+  '   - mayonesa, mostaza, dulce de leche, manteca, harina, mermelada, pasta, ganache,',
+  '     arvejas, choclo, legumbres, cereales, queso, fiambres, carnes, verduras → usá KG',
+  '   - Ejemplo: "MAYONESA X 2.9CC" → tamano: 2.9, unidad_base: "kg"',
+  '   - Ejemplo: "ARVEJAS X 5CC" → tamano: 5, unidad_base: "kg"',
+  '   - Ejemplo: "CHOCLO EN GRANO X 2.5CC" → tamano: 2.5, unidad_base: "kg"',
+  '   PRODUCTOS LÍQUIDOS QUE VIENEN EN LT (tamano en cc → probablemente LT):',
+  '   - vinagre, vino, cerveza, jugos, gaseosas, caldos → si el valor > 0.5 y la presentación',
+  '     comercial no existe en pocos cc, usá L (dividí por 1000 si el valor parece estar en mL,',
+  '     o interpretá directamente como L si el valor es 1, 2, 5, etc.)',
+  '   - Ejemplo: "VINAGRE X 5CC" → tamano: 5, unidad_base: "L"  (5 litros, no 5cc)',
+  '   - Ejemplo: "VINAGRE X 0.5CC" → tamano: 0.5, unidad_base: "L"  (500mL)',
+  '   Regla práctica: si tamano_en_cc < 100 y el producto no es esencia/colorante/extracto concentrado,',
+  '   reinterpretá la unidad (KG para sólidos, L para líquidos a granel).',
   '',
   '4. FORMATO: "[tipo] [tamaño][unidad]" todo minúsculas sin acentos.',
   '   Ejemplos: "aceite girasol 5L", "harina 000 25kg", "levadura fresca 0.5kg", "mayonesa 2.9kg"',
@@ -3463,9 +3482,15 @@ function renderPreview() {
       // "Si UNITARIO": precio raw es por unidad → ×tamaño da el total.
       var infoModoHtml = '';
       if (tamano > 0 && ub && ub !== 'u') {
-        var siBulto = '<strong>$' + fmt(precio / tamano) + '/' + ub + '</strong> (asume bulto)';
-        var siUnit  = '<strong>$' + fmt(precio * tamano) + '</strong> total (asume x ' + ub + ')';
-        var lblPack = '📦 bulto';
+        // Formatear el tamaño en unidad legible: 0.45kg→450g, 0.5L→500mL, 10kg→10kg
+        var tamStr = (function(t, u) {
+          if (u === 'kg') return t >= 1 ? (t === Math.floor(t) ? t + 'kg' : t + 'kg') : Math.round(t * 1000) + 'g';
+          if (u === 'L')  return t >= 1 ? (t === Math.floor(t) ? t + 'L'  : t + 'L')  : Math.round(t * 1000) + 'mL';
+          return t + (u || '');
+        })(tamano, ub);
+        var siBulto = '$' + fmt(precio / tamano) + '/' + ub;
+        var siUnit  = '$' + fmt(precio * tamano) + ' total';
+        var lblPack = '📦 ' + tamStr;
         var lblUnit = '⚖️ x ' + ub;
         var actModo = it.modo || '?';
         var bgPack = (actModo === 'pack') ? 'background:rgba(96,165,250,0.18);border-color:#60a5fa;' : '';

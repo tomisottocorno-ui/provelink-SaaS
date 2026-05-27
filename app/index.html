@@ -881,6 +881,10 @@ async function guardarProveedor() {
     showToast('El nombre es obligatorio', 'error');
     return;
   }
+  if (cuit && cuit.length !== 11) {
+    showToast('El CUIT debe tener 11 dígitos', 'error');
+    return;
+  }
   var btn = $('btn-guardar-prov');
   btn.disabled = true;
   btn.textContent = 'Guardando...';

@@ -242,14 +242,6 @@
       <input type="email" id="prov-email" placeholder="contacto@proveedor.com">
     </div>
 
-    <div class="form-row">
-      <label for="prov-precio-tipo">¿Cómo lista los precios?</label>
-      <select id="prov-precio-tipo">
-        <option value="envase">Por envase (ej: $2.851 por botella de 5lt)</option>
-        <option value="kglt">Por kg/lt (ej: $570 por litro)</option>
-      </select>
-    </div>
-
     <div class="modal-actions">
       <button class="btn" onclick="cerrarModalProv()">Cancelar</button>
       <button class="btn primary" id="btn-guardar-prov" onclick="guardarProveedor()">Guardar</button>
@@ -650,7 +642,6 @@ function editarProveedor(id) {
   $('prov-nombre').value = p.nombre || '';
   var telEdit = (p.telefono || '').replace(/^\+54\s?/, '').trim();
   $('prov-telefono').value = telEdit;
-  $('prov-precio-tipo').value = p.precio_tipo || 'envase';
   $('prov-cuit').value = p.cuit || '';
   $('prov-email').value = p.email || '';
   $('prov-logo-input').value = '';
@@ -669,7 +660,7 @@ async function guardarProveedor() {
   var nombre = $('prov-nombre').value.trim();
   var telRaw = $('prov-telefono').value.replace(/\D/g, '').trim();
   var tel = telRaw ? ('+54' + telRaw) : '';
-  var precioTipo = $('prov-precio-tipo').value || 'envase';
+  var precioTipo = 'envase';
   var cuit = $('prov-cuit').value.replace(/\D/g, '').slice(0, 11) || null;
   var email = $('prov-email').value.trim() || null;
   if (!nombre) {

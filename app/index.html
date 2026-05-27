@@ -1751,6 +1751,17 @@ var SYSTEM_NORMALIZACION = [
   '   NO son peso ni tamaño. "24 meses", "18 meses" → ignorar, NO incluir como tamaño.',
   '   Ej: "PARMESANO EN BLOQUE 24 MESES" → clave: "queso parmesano 24 meses", tamano: 1, unidad: u',
   '',
+  '   ⚠️ ERROR FRECUENTE DE OCR — "CC" LEÍDO EN VEZ DE "KG":',
+  '   En PDFs con fuentes especiales, la letra K puede leerse como C, haciendo que "KG" aparezca como "CC".',
+  '   Si ves "X.Xcc" pero el producto es sólido o semisólido y NO existe en presentaciones de pocos mL',
+  '   (mayonesa, mostaza, dulce de leche, manteca, harina, mermelada, pasta, ganache, etc.),',
+  '   Y el número antes de "CC" es > 0.5 (ej: 2.9cc, 5cc, 10cc para esos productos),',
+  '   interpretalo como KG, no como cc/mL.',
+  '   Ejemplo: "MAYONESA HELLMANN\'S X 2.9CC" → tamano: 2.9, unidad_base: "kg"  (NO 0.0029L)',
+  '   Ejemplo: "MOSTAZA X 1.5CC" → tamano: 1.5, unidad_base: "kg"  (NO 0.0015L)',
+  '   Regla práctica: si tamano_en_cc < 100 y el producto no es líquido de uso habitual en mL',
+  '   (bebidas, aceites, esencias, licores sí son líquidos → esos sí en L), usá KG.',
+  '',
   '4. FORMATO: "[tipo] [tamaño][unidad]" todo minúsculas sin acentos.',
   '   Ejemplos: "aceite girasol 5L", "harina 000 25kg", "levadura fresca 0.5kg", "mayonesa 2.9kg"',
   '',
@@ -1971,6 +1982,7 @@ function calcularPrecios(grupos, resultadosModo) {
         ),
         revisar: !modoInfo || (modoInfo.confianza || 0) < 0.7 || (prov.confianza_normalizacion || 1) < 0.7,
         precio_alto_envase_chico: modoInfo ? (modoInfo.envase_chico || false) : false,
+        tamano_sospechoso: modoInfo ? (modoInfo.tamano_sospechoso || false) : false,
         razonamiento: modoInfo ? modoInfo.razonamiento : null
       });
     });
@@ -2603,18 +2615,36 @@ function detectarPorRangoDinamico(fila, rangoRow) {
   if (precioRaw <= 0) return null;
   var precioSiUnitario = precioRaw;
   var precioSiPack = tamano > 0 ? precioRaw / tamano : null;
+
+  // ── Detección de tamano sospechoso (típico: OCR lee "KG" como "CC") ──────────
+  // Si dividir por tamano da un precio absurdo (>500× la mediana), es casi seguro
+  // que el tamano fue mal leído. Ej: "2.9CC" = 0.0029L → $10.492/0.0029 = $3.6M/L
+  // En ese caso marcamos tamano_sospechoso y no usamos la interpretación PACK.
+  var UMBRAL_ABSURDO = 500;
+  var packEsAbsurdo = precioSiPack != null && precioSiPack > rango.mediana * UMBRAL_ABSURDO;
+
   var enRango     = function(v) { return v != null && v >= rango.min && v <= rango.max; };
   var enRangoBase = function(v) { return v != null && v >= rango.min && v <= rango.maxBase; };
   var uOk     = enRango(precioSiUnitario);
-  var pOk     = precioSiPack != null && enRango(precioSiPack);
+  var pOk     = !packEsAbsurdo && precioSiPack != null && enRango(precioSiPack);
   var uOkBase = enRangoBase(precioSiUnitario);
-  var pOkBase = precioSiPack != null && enRangoBase(precioSiPack);
+  var pOkBase = !packEsAbsurdo && precioSiPack != null && enRangoBase(precioSiPack);
+
   // confianza base depende de si el rango es confiable (3+ muestras) o provisional
   var confBase = rango.confiable ? 0.9 : 0.65;
   // true si entra en rango sólo gracias al ajuste de envase chico
   var soloXEnvaseChico = function(esUnitario) {
     return rango.multPack > 1 && (esUnitario ? (!uOkBase && uOk) : (!pOkBase && pOk));
   };
+
+  // Si el pack da precio absurdo y unitario entra en rango → unitario pero con aviso
+  if (packEsAbsurdo && uOk) {
+    var ec = soloXEnvaseChico(true);
+    return { modo: 'unitario', confianza: 0.45, envase_chico: ec, tamano_sospechoso: true,
+      razonamiento: 'pack daría $' + Math.round(precioSiPack) + '/' + rango.unidad +
+        ' (absurdo, posible error "CC" por "KG" en OCR) — tratando como unitario' };
+  }
+
   if (uOk && !pOk) {
     var ec = soloXEnvaseChico(true);
     return { modo: 'unitario', confianza: ec ? confBase * 0.85 : confBase, envase_chico: ec,
@@ -3462,11 +3492,14 @@ function renderPreview() {
       var envChicoStr = (!it.revisar && it.precio_alto_envase_chico)
         ? '<span style="color:#f59e0b;font-size:10px;font-weight:600;" title="El precio por kg/L es alto porque es un envase pequeño — es normal">📦 precio alto (envase pequeño)</span>'
         : '';
+      var tamSospechosoStr = it.tamano_sospechoso
+        ? '<span style="color:#f87171;font-size:10px;font-weight:600;" title="El tamaño parece mal leído (posible OCR: \'CC\' en vez de \'KG\'). Verificá la presentación.">⚠️ verificar presentación</span>'
+        : '';
       pipelineHtml =
         '<div style="flex-basis:100%;font-size:10.5px;color:var(--text-muted);margin-top:3px;' +
         'padding:2px 4px 0;line-height:1.4;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">' +
         '<span style="color:var(--text-2);font-weight:500;">' + escapeHtml(it.clave_canonica) + '</span>' +
-        infoModoHtml + confStr + revisarStr + envChicoStr +
+        infoModoHtml + confStr + revisarStr + envChicoStr + tamSospechosoStr +
         '</div>';
     }
 

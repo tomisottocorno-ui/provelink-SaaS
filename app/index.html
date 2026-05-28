@@ -1634,7 +1634,13 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna,
     '  Usá el valor TÍPICO de la columna objetivo (' + (ejemploColumna || 'sin ejemplo') + ') como referencia de qué número buscar.\n' +
     '  Si el orden de columnas cambia o no estás 100% seguro de cuál es el precio correcto, marcá alerta: true.\n' +
     '  Conservá puntos y comas (ej: "13.996,53" → devolver "13.996,53" como string). NO conviertas a número.\n' +
-    '- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n' +
+    '- unidad: tamaño del bulto/envase, extraído SIEMPRE del NOMBRE del producto (buscá "X N UNIDAD", ej: "X 5 LTS", "X 1 KG", "X 500 GR" → "5 lt", "1 kg", "500 g").\n' +
+    '  ⚠️ COLUMNA DE TIPO DE ENVASE: muchas listas tienen una columna con códigos abreviados junto al precio\n' +
+    '  (KG, LTS, BOL, CAJ, PAQ, LAT, FCO, POT, POM, BOT, UN., etc.).\n' +
+    '  ESOS CÓDIGOS NO SON LA UNIDAD DE TAMAÑO — son el tipo de envase o la forma de cotización.\n' +
+    '  NUNCA pongas solo "KG", "LTS", "BOL", "CAJ", "PAQ" en el campo unidad.\n' +
+    '  Extraé el tamaño numerico SOLO del nombre: "X 5 LTS" → "5 lt", "X 2.9 KG" → "2.9 kg", "X 500 GR" → "500 g".\n' +
+    '  Si el nombre no tiene tamaño explícito, usá ""\n' +
     '- alerta: true si NO estás seguro de cuál es el precio correcto de la columna objetivo (mejor marcar dudoso que adivinar mal)\n' +
     '- Ignorá encabezados, totales, líneas vacías. Incluí TODOS los productos.\n\n' +
     'Texto:\n\n' + textoCrudo;
@@ -1835,6 +1841,18 @@ var SYSTEM_NORMALIZACION = [
   '   Regla práctica: si tamano_en_cc < 100 y el producto no es esencia/colorante/extracto concentrado,',
   '   reinterpretá la unidad (KG para sólidos, L para líquidos a granel).',
   '',
+  '   ⚠️ CAMPO "unidad" llega como código sin número — COLUMNA :UNI: del PDF:',
+  '   Algunas listas mayoristas tienen una columna de tipo de envase (:UNI:, UNIDAD, PRES) con códigos:',
+  '     KG / LTS → el precio es POR KG o POR LITRO (precio unitario). El tamaño del bulto está en el nombre.',
+  '     BOL / CAJ / PAQ / LAT / FCO / POT / POM / BOT / UN → el precio es POR ENVASE. Tamaño en el nombre.',
+  '   Si el campo `unidad` que recibes es SOLO un código (sin número), buscá el tamaño en el nombre:',
+  '   - Patrón "X N LTS/KG/GR/CC" → extraé N como tamano (ej: "X 5 LTS" → tamano: 5, unidad_base: "L")',
+  '   - Ejemplo: nombre="ACEITE GIRASOL X 5 LTS.", unidad="LTS" → tamano: 5, unidad_base: "L"',
+  '   - Ejemplo: nombre="EXTRACTO DE MALTA X 6 KG", unidad="KG"  → tamano: 6, unidad_base: "kg"',
+  '   - Ejemplo: nombre="MAYONESA X 2.9CC", unidad="BOL"         → tamano: 2.9, unidad_base: "kg" (CC→KG regla sólidos)',
+  '   - Ejemplo: nombre="LEVADURA LEVASAF X 500GR", unidad="PAQ" → tamano: 0.5, unidad_base: "kg"',
+  '   NUNCA defaultees tamano=1 si el nombre contiene "X N" con N > 1.',
+  '',
   '4. FORMATO: "[tipo] [tamaño][unidad]" todo minúsculas sin acentos.',
   '   Ejemplos: "aceite girasol 5L", "harina 000 25kg", "levadura fresca 0.5kg", "mayonesa 2.9kg"',
   '',
@@ -1865,7 +1883,11 @@ var SYSTEM_DETECCION_MODO = [
   'Verificá siempre que la relación sea coherente con el tamaño.',
   '',
   'MÉTODO SECUNDARIO (1 solo proveedor o factor no coincide):',
-  '- Presentación con SOLO unidad sin número ("LTS", "KG", "BOT", "UNI", "x kg", "x lt") → UNITARIO con confianza 0.85.',
+  '- COLUMNA :UNI: de listas mayoristas: algunos PDFs tienen una columna especial con el tipo de cotización.',
+  '  Cuando el campo `unidad` es SOLO un código sin número, aplicá directamente:',
+  '  * "KG" o "LTS" solos → UNITARIO (precio ya es por kg o litro). confianza: 0.9',
+  '  * "BOL", "CAJ", "PAQ", "LAT", "FCO", "POT", "POM", "BOT", "UN." solos → PACK (precio por envase). confianza: 0.85',
+  '- Presentación con SOLO unidad sin número explícito ("x kg", "x lt", "por litro") → UNITARIO con confianza 0.85.',
   '- Presentación con envase + cantidad ("Bolsa x 25 kg", "Caja x 12 uds", "Bidón x 5 lts"):',
   '  NO asumas automáticamente PACK. Listas mayoristas frecuentemente cotizan por kg/L aunque',
   '  mencionen el envase como referencia. Usá rangos esperados del producto como sanity check:',

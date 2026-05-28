@@ -74,9 +74,28 @@ module.exports = async function handler(req, res) {
     if (userError || !userData || !userData.user) {
       return res.status(401).json({ error: 'Token inválido' });
     }
-    const userId = userData.user.id;
+    const authUserId = userData.user.id;
 
-    // 3) Cargar profile del usuario
+    // Detectar si el caller es un empleado. Si lo es, el "owner" es quien paga
+    // y a quien se le imputa la cuota y los logs de uso.
+    let userId = authUserId; // user_id efectivo (owner_id si es empleado, propio si no)
+    let empleadoPermisos = null; // null si es owner, array si es empleado
+    {
+      const { data: empFila } = await sb
+        .from('empleados')
+        .select('owner_id, permisos, activo')
+        .eq('empleado_id', authUserId)
+        .maybeSingle();
+      if (empFila) {
+        if (!empFila.activo) {
+          return res.status(403).json({ error: 'Tu cuenta de empleado está desactivada', codigo: 'EMPLEADO_INACTIVO' });
+        }
+        userId = empFila.owner_id;
+        empleadoPermisos = empFila.permisos || [];
+      }
+    }
+
+    // 3) Cargar profile del usuario (siempre el del OWNER)
     const { data: profile, error: profileError } = await sb
       .from('profiles')
       .select('plan, plan_estado, consultas_ia_mes, consultas_ia_reset')
@@ -101,6 +120,18 @@ module.exports = async function handler(req, res) {
     const tiposProcesarLista = ['procesar_lista', 'detectar_columnas', 'procesar_chunk',
                                'normalizar_lista', 'detectar_modo_precios'];
     const esProcesarLista = tiposProcesarLista.indexOf(tipo) >= 0;
+
+    // Si es empleado, validar permiso para el tipo de llamada
+    if (empleadoPermisos !== null) {
+      if (esProcesarLista && empleadoPermisos.indexOf('listas') < 0) {
+        return res.status(403).json({ error: 'No tenés permiso para procesar listas', codigo: 'SIN_PERMISO_LISTAS' });
+      }
+      // expandir_query es libre. Cualquier otro tipo (chat) requiere 'ia'.
+      const requiereIA = !esProcesarLista && tipo !== 'expandir_query';
+      if (requiereIA && empleadoPermisos.indexOf('ia') < 0) {
+        return res.status(403).json({ error: 'No tenés permiso para usar el asistente IA', codigo: 'SIN_PERMISO_IA' });
+      }
+    }
 
     // expandir_query: usado para expandir abreviaciones en el buscador.
     // No consume cuota, no requiere plan específico, disponible para todos.

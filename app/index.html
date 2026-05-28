@@ -224,11 +224,30 @@
   #print-overlay { position:static !important; }
   #print-overlay > div:first-child { display:none !important; }
 }
+
+/* Empleados — checkboxes de permisos */
+.emp-perm-chk{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev);cursor:pointer;font-size:13px;font-weight:500;color:var(--text);user-select:none;}
+.emp-perm-chk:hover{border-color:var(--border-hi);}
+.emp-perm-chk input{width:auto;margin:0;cursor:pointer;}
+.emp-perm-chk input:checked + span,.emp-perm-chk:has(input:checked){border-color:var(--accent,#5b8def);}
+
+/* Fila de empleado en la lista */
+.empleado-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:var(--bg-elev);flex-wrap:wrap;}
+.empleado-row .nombre{font-weight:600;font-size:14px;}
+.empleado-row .email{font-size:12px;color:var(--text-muted);}
+.empleado-row .perms-tags{display:flex;flex-wrap:wrap;gap:4px;flex:1;min-width:160px;}
+.perm-tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border);color:var(--text-muted);}
+.empleado-row .acciones{display:flex;gap:6px;}
+.empleado-row.inactivo{opacity:0.5;}
+
+/* Badge de rol "empleado" en el header */
+.role-badge-emp{display:inline-block;font-size:10px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;padding:2px 7px;border-radius:6px;background:var(--accent-soft,rgba(91,141,239,0.15));color:var(--accent,#5b8def);margin-left:6px;vertical-align:middle;}
 </style>
 
 <!-- Menú desplegable global (mobile: top-right, desktop: junto al sidebar-user) -->
 <div class="menu" id="menu">
-  <div class="menu-item" onclick="abrirPlanes()"><span class="icon-slot" data-icon="star"></span> Cambiar plan</div>
+  <div class="menu-item" id="menu-planes" onclick="abrirPlanes()"><span class="icon-slot" data-icon="star"></span> Cambiar plan</div>
+  <div class="menu-item" id="menu-empleados" onclick="abrirEmpleados()"><span class="icon-slot" data-icon="user"></span> Empleados</div>
   <div class="menu-item" onclick="abrirConfig()"><span class="icon-slot" data-icon="settings"></span> Configuración</div>
   <div class="menu-divider"></div>
   <div class="menu-item danger" onclick="cerrarSesion()"><span class="icon-slot" data-icon="logout"></span> Cerrar sesión</div>
@@ -316,9 +335,72 @@
       <button class="btn" type="button" onclick="cambiarPassword()" style="width:100%;justify-content:flex-start;gap:8px;"><span class="icon-slot" data-icon="settings"></span> Cambiar contraseña</button>
     </div>
 
-    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+    <div id="config-zona-peligro" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
       <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--danger);margin-bottom:10px;">Zona de peligro</div>
       <button class="btn" type="button" onclick="eliminarCuenta()" style="width:100%;justify-content:flex-start;gap:8px;color:var(--danger);border-color:var(--danger-border);"><span class="icon-slot" data-icon="trash"></span> Eliminar mi cuenta</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Empleados (gestión de sub-usuarios) -->
+<div class="modal-overlay modal-lg" id="modal-empleados">
+  <div class="modal">
+    <h3>Empleados</h3>
+    <p style="font-size:13px;color:var(--text-muted);margin:6px 0 16px;">
+      Creá cuentas para tu equipo. Cada empleado se loguea con su propio email y ve solo lo que vos le permitas.
+    </p>
+
+    <div id="empleados-resumen" style="font-size:13px;color:var(--text-muted);margin-bottom:14px;"></div>
+
+    <div style="display:flex;justify-content:flex-end;margin-bottom:14px;">
+      <button class="btn primary" id="btn-nuevo-empleado" onclick="abrirModalEmpleado()">+ Nuevo empleado</button>
+    </div>
+
+    <div id="empleados-lista"></div>
+
+    <div class="modal-actions" style="margin-top:18px;">
+      <button class="btn" onclick="cerrarEmpleados()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Crear/Editar empleado -->
+<div class="modal-overlay" id="modal-empleado">
+  <div class="modal">
+    <h3 id="modal-empleado-titulo">Nuevo empleado</h3>
+
+    <div class="form-row">
+      <label for="emp-nombre">Nombre</label>
+      <input type="text" id="emp-nombre" placeholder="Ej: María">
+    </div>
+
+    <div class="form-row">
+      <label for="emp-email">Email <span id="emp-email-help" style="font-size:11px;color:var(--text-muted);font-weight:normal;text-transform:none;letter-spacing:0;">(con este email va a loguearse)</span></label>
+      <input type="email" id="emp-email" placeholder="empleado@email.com">
+    </div>
+
+    <div class="form-row">
+      <label for="emp-password">Contraseña <span id="emp-pass-help" style="font-size:11px;color:var(--text-muted);font-weight:normal;text-transform:none;letter-spacing:0;">(mínimo 6 caracteres)</span></label>
+      <input type="text" id="emp-password" placeholder="Contraseña" autocomplete="new-password">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Compartile estos datos al empleado por mano. No se envía email automático.</div>
+    </div>
+
+    <div class="form-row">
+      <label>Permisos</label>
+      <div id="emp-permisos-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <label class="emp-perm-chk"><input type="checkbox" data-perm="proveedores"> Proveedores</label>
+        <label class="emp-perm-chk"><input type="checkbox" data-perm="listas"> Listas de precios</label>
+        <label class="emp-perm-chk"><input type="checkbox" data-perm="pedido" checked> Armar pedido</label>
+        <label class="emp-perm-chk"><input type="checkbox" data-perm="historial" checked> Ver pedidos</label>
+        <label class="emp-perm-chk"><input type="checkbox" data-perm="verificar"> Verificar recepción</label>
+        <label class="emp-perm-chk"><input type="checkbox" data-perm="ia"> Asistente IA</label>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn" id="btn-borrar-empleado" onclick="borrarEmpleadoActual()" style="color:var(--danger);border-color:var(--danger-border);display:none;">Eliminar empleado</button>
+      <button class="btn" onclick="cerrarModalEmpleado()">Cancelar</button>
+      <button class="btn primary" id="btn-guardar-empleado" onclick="guardarEmpleado()">Guardar</button>
     </div>
   </div>
 </div>
@@ -438,11 +520,38 @@ var listaEditandoId = null;  // id del proveedor cuya lista estamos editando
 var filasPreview = [];  // [{productoLista, precio}, ...] del preview de la nueva lista
 var verListaItems = [];  // items en la modal de ver lista (para filtrar)
 
+// ============================================================
+// SISTEMA DE EMPLEADOS
+// ============================================================
+// Si el usuario logueado es un EMPLEADO, "effectiveUserId" apunta al OWNER
+// (cuenta principal) y las queries/storage del owner son las que ve.
+// Si es owner, effectiveUserId === sesion.user.id.
+//
+// empleadoInfo = null         → es owner (cuenta principal)
+// empleadoInfo = { owner_id, nombre, permisos:['pedido','historial',...], activo } → es empleado
+var empleadoInfo = null;
+var PERMISOS_ALL = ['proveedores', 'listas', 'pedido', 'historial', 'verificar', 'ia', 'produccion'];
+
+function effectiveUserId() {
+  if (empleadoInfo && empleadoInfo.owner_id) return empleadoInfo.owner_id;
+  return sesion && sesion.user ? sesion.user.id : null;
+}
+
+function esEmpleado() { return empleadoInfo !== null; }
+function esOwner()    { return empleadoInfo === null; }
+
+// canAccess('pedido') → true si owner, o si empleado con permiso 'pedido'
+function canAccess(perm) {
+  if (esOwner()) return true;
+  if (!empleadoInfo || !Array.isArray(empleadoInfo.permisos)) return false;
+  return empleadoInfo.permisos.indexOf(perm) >= 0;
+}
+
 // Límites por plan (espejo de la función SQL)
 var LIMITES = {
-  free:     { proveedores: 3,   consultasIA: 0 },
-  pro:      { proveedores: 999, consultasIA: 150 },
-  business: { proveedores: 999, consultasIA: 500 }
+  free:     { proveedores: 3,   consultasIA: 0,   empleados: 0 },
+  pro:      { proveedores: 999, consultasIA: 150, empleados: 2 },
+  business: { proveedores: 999, consultasIA: 500, empleados: 10 }
 };
 
 // ============================================================
@@ -494,10 +603,36 @@ async function verificarSesion() {
 
 async function cargarProfile() {
   try {
+    // 1) Detectar si el usuario logueado es un EMPLEADO
+    //    (consulta a empleados; si está, cargamos owner_id y permisos)
+    var { data: empFila } = await supabase
+      .from('empleados')
+      .select('owner_id, nombre, permisos, activo')
+      .eq('empleado_id', sesion.user.id)
+      .maybeSingle();
+    if (empFila) {
+      if (!empFila.activo) {
+        showToast('Tu cuenta de empleado está desactivada. Contactá al dueño.', 'error');
+        await supabase.auth.signOut();
+        window.location.href = '/login.html';
+        return false;
+      }
+      empleadoInfo = {
+        owner_id: empFila.owner_id,
+        nombre: empFila.nombre,
+        permisos: empFila.permisos || [],
+        activo: true
+      };
+    } else {
+      empleadoInfo = null;
+    }
+
+    // 2) Cargar el profile (siempre el del OWNER, que es donde está el plan)
+    var ownerIdReal = effectiveUserId();
     var { data, error } = await supabase
       .from('profiles')
       .select('*')
-      .eq('id', sesion.user.id)
+      .eq('id', ownerIdReal)
       .single();
     if (error) throw error;
     profile = data;
@@ -526,13 +661,27 @@ function renderHeader() {
   var negocio = profile.nombre_negocio || profile.email || 'Mi negocio';
   var planClass = 'header-plan ' + (profile.plan || 'free');
   var planText = (profile.plan || 'free').toUpperCase();
+  // Si es empleado, mostrar su nombre + badge "EMPLEADO" en lugar del nombre del negocio
   ['header-negocio', 'header-negocio-desktop'].forEach(function(id){
     var el = document.getElementById(id);
-    if (el) el.textContent = negocio;
+    if (!el) return;
+    if (esEmpleado()) {
+      el.innerHTML = esc(empleadoInfo.nombre || 'Empleado') + ' <span class="role-badge-emp">EMPLEADO</span>';
+    } else {
+      el.textContent = negocio;
+    }
   });
+  // Plan: solo se muestra al owner. Al empleado le ocultamos
   ['header-plan', 'header-plan-desktop'].forEach(function(id){
     var el = document.getElementById(id);
-    if (el) { el.textContent = planText; el.className = planClass; }
+    if (!el) return;
+    if (esEmpleado()) {
+      el.style.display = 'none';
+    } else {
+      el.style.display = '';
+      el.textContent = planText;
+      el.className = planClass;
+    }
   });
 }
 
@@ -656,7 +805,8 @@ function quitarLogoProveedor() {
 
 async function subirLogoAStorage(file, proveedorId) {
   var ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
-  var path = sesion.user.id + '/' + proveedorId + '.' + ext;
+  // Logos van en la carpeta del owner (un empleado sube logos del negocio del owner)
+  var path = effectiveUserId() + '/' + proveedorId + '.' + ext;
   var { error } = await supabase.storage
     .from('provider-logos')
     .upload(path, file, { upsert: true, contentType: file.type });
@@ -753,7 +903,7 @@ async function guardarProveedor() {
       // INSERT: crear primero, luego subir logo con el id real
       var { data: inserted, error: insError } = await supabase
         .from('proveedores')
-        .insert({ user_id: sesion.user.id, nombre: nombre, telefono: tel || null, precio_tipo: precioTipo, cuit: cuit, email: email })
+        .insert({ user_id: effectiveUserId(), nombre: nombre, telefono: tel || null, precio_tipo: precioTipo, cuit: cuit, email: email })
         .select()
         .single();
       if (insError) throw insError;
@@ -1094,7 +1244,30 @@ function cargarFaltantesAlPedido() {
   showToast(count + ' faltante' + (count !== 1 ? 's' : '') + ' agregado' + (count !== 1 ? 's' : '') + ' al pedido');
 }
 
+// Map tab -> permiso requerido (null = libre para todos, incluso empleados)
+var TAB_PERM_MAP = {
+  'ingreso':    null,
+  'proveedores':'proveedores',
+  'listas':     'listas',
+  'pedido':     'pedido',
+  'ver-pedido': 'pedido',
+  'resumen':    'pedido',
+  'historial':  'historial',
+  'verif-hist': 'verificar'
+};
+
+function tabPermitida(tab) {
+  if (esOwner()) return true;
+  var perm = TAB_PERM_MAP[tab];
+  if (perm === null || typeof perm === 'undefined') return true;
+  return canAccess(perm);
+}
+
 function cambiarTab(tab) {
+  if (!tabPermitida(tab)) {
+    showToast('No tenés permiso para esta sección', 'error');
+    return;
+  }
   document.querySelectorAll('.tab-btn, .sidebar-link').forEach(function(b) {
     if (b.dataset.tab) b.classList.toggle('active', b.dataset.tab === tab);
   });
@@ -1108,6 +1281,48 @@ function cambiarTab(tab) {
   if (tab === 'resumen') renderResumen();
   if (tab === 'historial') renderHistorial();
   window.scrollTo(0, 0);
+}
+
+// Esconde tabs/menu según rol y permisos del empleado.
+// Se llama al final de cargarProfile / init.
+function aplicarPermisosUI() {
+  // 1) Tabs (sidebar + mobile)
+  var tabs = [
+    { tab: 'proveedores', side: 'side-link-prov' },
+    { tab: 'listas',      side: 'side-link-listas' },
+    { tab: 'pedido',      side: 'side-link-pedido' },
+    { tab: 'historial',   side: 'side-link-historial' }
+  ];
+  tabs.forEach(function(t) {
+    var allowed = tabPermitida(t.tab);
+    document.querySelectorAll('[data-tab="' + t.tab + '"]').forEach(function(el) {
+      el.style.display = allowed ? '' : 'none';
+    });
+  });
+
+  // 2) Menu items que solo el owner ve
+  var menuEmp = $('menu-empleados');
+  var menuPlan = $('menu-planes');
+  if (menuEmp) menuEmp.style.display = esOwner() ? '' : 'none';
+  if (menuPlan) menuPlan.style.display = esOwner() ? '' : 'none';
+
+  // 3) Banner del plan: solo owner
+  var banner = $('plan-banner');
+  if (banner && esEmpleado()) banner.style.display = 'none';
+
+  // 4) Si el empleado NO puede editar negocio (siempre), deshabilitar inputs de config
+  //    El email queda visible pero solo lectura
+  if (esEmpleado()) {
+    ['config-nombre', 'config-telefono'].forEach(function(id) {
+      var el = $(id);
+      if (el) { el.disabled = true; el.style.opacity = '0.55'; }
+    });
+    var btnGuardar = $('btn-guardar-config');
+    if (btnGuardar) btnGuardar.style.display = 'none';
+    // Ocultar "Zona de peligro" — la cuenta del empleado la maneja el owner
+    var zona = $('config-zona-peligro');
+    if (zona) zona.style.display = 'none';
+  }
 }
 
 // ============================================================
@@ -3385,7 +3600,7 @@ async function guardarAuditoriaPrecios(items, listaId, proveedorId) {
     .filter(function(p) { return p.clave_canonica; })
     .map(function(p) {
       return {
-        user_id: sesion.user.id,
+        user_id: effectiveUserId(),
         proveedor_id: proveedorId,
         lista_id: listaId,
         id_original: p.id_original || null,
@@ -3818,7 +4033,7 @@ async function guardarLista() {
       var { error: snapError } = await supabase
         .from('snapshots_precios')
         .insert({
-          user_id: sesion.user.id,
+          user_id: effectiveUserId(),
           proveedor_id: proveedorId,
           items: listaExistente.items
         });
@@ -3839,7 +4054,7 @@ async function guardarLista() {
       var { error } = await supabase
         .from('listas_precios')
         .insert({
-          user_id: sesion.user.id,
+          user_id: effectiveUserId(),
           proveedor_id: proveedorId,
           items: items
         });
@@ -3967,6 +4182,10 @@ function cerrarConfig() {
 }
 
 async function guardarConfig() {
+  if (esEmpleado()) {
+    showToast('Solo el dueño de la cuenta puede editar la configuración del negocio', 'error');
+    return;
+  }
   var nombre = $('config-nombre').value.trim();
   var tel = $('config-telefono').value.trim();
   var btn = $('btn-guardar-config');
@@ -3989,6 +4208,184 @@ async function guardarConfig() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Guardar';
+  }
+}
+
+// ============================================================
+// EMPLEADOS (sub-usuarios)
+// ============================================================
+// Solo accesible para owners (no para empleados). El backend valida todo
+// de nuevo, pero el frontend también esconde la UI.
+
+var empleadosCache = [];   // último listado cargado del API
+var empleadoEditandoId = null;
+
+async function abrirEmpleados() {
+  $('menu').classList.remove('open');
+  if (esEmpleado()) {
+    showToast('Solo el dueño puede gestionar empleados', 'error');
+    return;
+  }
+  $('modal-empleados').classList.add('open');
+  await cargarEmpleados();
+}
+
+function cerrarEmpleados() {
+  $('modal-empleados').classList.remove('open');
+}
+
+async function cargarEmpleados() {
+  var resumen = $('empleados-resumen');
+  var lista = $('empleados-lista');
+  resumen.textContent = 'Cargando…';
+  lista.innerHTML = '';
+  try {
+    var resp = await fetch('/api/empleados', {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + sesion.access_token }
+    });
+    var data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Error cargando empleados');
+    empleadosCache = data.empleados || [];
+    var usados = data.usados || 0;
+    var limite = data.limite || 0;
+    resumen.innerHTML = '<strong>' + usados + ' / ' + limite + '</strong> empleados usados · Plan <strong>' + (data.plan || 'free').toUpperCase() + '</strong>';
+    var btnNuevo = $('btn-nuevo-empleado');
+    btnNuevo.disabled = limite === 0 || usados >= limite;
+    if (limite === 0) {
+      btnNuevo.title = 'Tu plan no incluye empleados';
+    } else if (usados >= limite) {
+      btnNuevo.title = 'Llegaste al límite de tu plan';
+    } else {
+      btnNuevo.title = '';
+    }
+    renderEmpleadosList();
+  } catch(e) {
+    console.error('cargarEmpleados', e);
+    resumen.textContent = 'Error: ' + (e.message || '');
+  }
+}
+
+function renderEmpleadosList() {
+  var cont = $('empleados-lista');
+  if (!empleadosCache.length) {
+    cont.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Todavía no tenés empleados. Creá uno con el botón de arriba.</div>';
+    return;
+  }
+  var rows = empleadosCache.map(function(e) {
+    var perms = (e.permisos || []).map(function(p) { return '<span class="perm-tag">' + p + '</span>'; }).join('');
+    if (!perms) perms = '<span class="perm-tag" style="color:var(--danger);">sin permisos</span>';
+    var inactivoClass = e.activo ? '' : ' inactivo';
+    var inactivoLabel = e.activo ? '' : ' <span class="perm-tag" style="color:var(--danger);">desactivado</span>';
+    return '<div class="empleado-row' + inactivoClass + '">' +
+      '<div style="min-width:140px;">' +
+        '<div class="nombre">' + esc(e.nombre) + inactivoLabel + '</div>' +
+        '<div class="email">' + esc(e.email) + '</div>' +
+      '</div>' +
+      '<div class="perms-tags">' + perms + '</div>' +
+      '<div class="acciones">' +
+        '<button class="btn" onclick="abrirModalEmpleado(\'' + esc(e.id) + '\')">Editar</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+  cont.innerHTML = rows;
+}
+
+function abrirModalEmpleado(id) {
+  empleadoEditandoId = id || null;
+  var emp = id ? empleadosCache.find(function(e) { return e.id === id; }) : null;
+  $('modal-empleado-titulo').textContent = emp ? 'Editar empleado' : 'Nuevo empleado';
+  $('emp-nombre').value = emp ? emp.nombre : '';
+  $('emp-email').value = emp ? emp.email : '';
+  $('emp-password').value = '';
+  // Email solo se puede setear al crear
+  $('emp-email').disabled = !!emp;
+  $('emp-email').style.opacity = emp ? '0.55' : '1';
+  $('emp-pass-help').textContent = emp ? '(dejar vacío para no cambiar)' : '(mínimo 6 caracteres)';
+  // Permisos
+  var setPerms = emp ? (emp.permisos || []) : ['pedido', 'historial'];
+  document.querySelectorAll('#emp-permisos-grid input[type=checkbox]').forEach(function(chk) {
+    chk.checked = setPerms.indexOf(chk.dataset.perm) >= 0;
+  });
+  // Botón borrar visible solo al editar
+  $('btn-borrar-empleado').style.display = emp ? '' : 'none';
+  $('modal-empleado').classList.add('open');
+  setTimeout(function() { $('emp-nombre').focus(); }, 100);
+}
+
+function cerrarModalEmpleado() {
+  $('modal-empleado').classList.remove('open');
+  empleadoEditandoId = null;
+}
+
+async function guardarEmpleado() {
+  var nombre = $('emp-nombre').value.trim();
+  var email = $('emp-email').value.trim().toLowerCase();
+  var password = $('emp-password').value;
+  var permisos = [];
+  document.querySelectorAll('#emp-permisos-grid input[type=checkbox]:checked').forEach(function(chk) {
+    permisos.push(chk.dataset.perm);
+  });
+  if (!nombre) { showToast('Falta el nombre', 'error'); return; }
+  if (!empleadoEditandoId) {
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) { showToast('Email inválido', 'error'); return; }
+    if (!password || password.length < 6) { showToast('La contraseña debe tener al menos 6 caracteres', 'error'); return; }
+  }
+  if (password && password.length < 6) { showToast('La contraseña debe tener al menos 6 caracteres', 'error'); return; }
+
+  var btn = $('btn-guardar-empleado');
+  btn.disabled = true;
+  btn.textContent = 'Guardando…';
+  try {
+    var body = { nombre: nombre, permisos: permisos };
+    var method;
+    var url = '/api/empleados';
+    if (empleadoEditandoId) {
+      method = 'PUT';
+      url += '?id=' + encodeURIComponent(empleadoEditandoId);
+      if (password) body.password = password;
+    } else {
+      method = 'POST';
+      body.email = email;
+      body.password = password;
+    }
+    var resp = await fetch(url, {
+      method: method,
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      body: JSON.stringify(body)
+    });
+    var data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Error guardando empleado');
+    showToast(empleadoEditandoId ? 'Empleado actualizado' : 'Empleado creado', 'success');
+    cerrarModalEmpleado();
+    await cargarEmpleados();
+  } catch(e) {
+    console.error('guardarEmpleado', e);
+    showToast('Error: ' + (e.message || ''), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Guardar';
+  }
+}
+
+async function borrarEmpleadoActual() {
+  if (!empleadoEditandoId) return;
+  var emp = empleadosCache.find(function(e) { return e.id === empleadoEditandoId; });
+  if (!emp) return;
+  if (!confirm('¿Eliminar el empleado "' + emp.nombre + '"?\n\nSu cuenta de email + contraseña va a dejar de funcionar inmediatamente.')) return;
+  try {
+    var resp = await fetch('/api/empleados?id=' + encodeURIComponent(empleadoEditandoId), {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + sesion.access_token }
+    });
+    var data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Error eliminando empleado');
+    showToast('Empleado eliminado', 'success');
+    cerrarModalEmpleado();
+    await cargarEmpleados();
+  } catch(e) {
+    console.error('borrarEmpleado', e);
+    showToast('Error: ' + (e.message || ''), 'error');
   }
 }
 
@@ -4072,12 +4469,16 @@ function renderPlanesGrid() {
 // SISTEMA DE PEDIDOS
 // ============================================================
 
-// Claves de localStorage escopadas por usuario para evitar que se mezclen datos entre cuentas
+// Claves de localStorage escopadas por OWNER (no por user logueado) para que
+// el empleado y el owner compartan el caché local del pedido/historial — están
+// trabajando con los mismos datos.
 function getPedidoKey() {
-  return 'pl_pedido_' + (sesion && sesion.user ? sesion.user.id : 'anon');
+  var uid = effectiveUserId();
+  return 'pl_pedido_' + (uid || 'anon');
 }
 function getHistKey() {
-  return 'pl_historial_' + (sesion && sesion.user ? sesion.user.id : 'anon');
+  var uid = effectiveUserId();
+  return 'pl_historial_' + (uid || 'anon');
 }
 
 function pedidoGet() {
@@ -5093,12 +5494,22 @@ function escapeHtml(s) {
     ok = await cargarProfile();
     if (!ok) { window.location.href = '/login'; return; }
     renderHeader();
+    aplicarPermisosUI(); // esconder tabs/menu según rol y permisos
     await cargarProveedores();
     await cargarListas();
     renderHistorial();
     actualizarBadgePedido();
     renderIngreso();
-    cambiarTab('ingreso');
+    // Empleados: si entran a "ingreso" pero no tienen permiso a nada útil,
+    // los llevamos a la primera tab a la que sí pueden acceder.
+    var tabInicial = 'ingreso';
+    if (esEmpleado()) {
+      var orden = ['pedido', 'historial', 'proveedores', 'listas'];
+      for (var i = 0; i < orden.length; i++) {
+        if (tabPermitida(orden[i])) { tabInicial = orden[i]; break; }
+      }
+    }
+    cambiarTab(tabInicial);
     $('loader').style.display = 'none';
     $('app-shell').style.display = 'flex';
   } catch(e) {

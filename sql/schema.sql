@@ -423,3 +423,181 @@ drop policy if exists "Rangos: update autenticado" on public.pl_rangos_precio;
 create policy "Rangos: update autenticado"
   on public.pl_rangos_precio for update
   using (auth.role() = 'authenticated');
+
+
+-- ============================================================================
+-- SISTEMA DE EMPLEADOS (sub-usuarios bajo una cuenta principal)
+-- ============================================================================
+-- Un "owner" (cuenta principal con plan pago) puede crear empleados que tienen
+-- su propio login (email + password Supabase Auth), pero acceden a los DATOS
+-- del owner (proveedores, listas, pedidos, etc.) con permisos granulares.
+--
+-- Límites por plan: Free=0, Pro=2, Business=10
+-- ============================================================================
+
+create table if not exists public.empleados (
+  id uuid default gen_random_uuid() primary key,
+  owner_id uuid references auth.users(id) on delete cascade not null,
+  empleado_id uuid references auth.users(id) on delete cascade not null unique,
+  nombre text not null,
+  email text not null,
+  -- Permisos posibles: 'proveedores','listas','pedido','historial','verificar','ia','produccion'
+  permisos text[] not null default '{}',
+  activo boolean default true not null,
+  creado timestamptz default now() not null,
+  unique (owner_id, email)
+);
+
+create index if not exists idx_empleados_owner on public.empleados(owner_id);
+create index if not exists idx_empleados_empleado on public.empleados(empleado_id);
+
+
+-- Helper: dado un user_id, devuelve el owner_id (= sí mismo si no es empleado).
+-- Esta función se usa en todas las políticas RLS para resolver "qué cuenta es la dueña de los datos".
+create or replace function public.get_owner_id(uid uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(
+    (select owner_id from public.empleados where empleado_id = uid and activo = true limit 1),
+    uid
+  );
+$$;
+
+
+-- Límite de empleados según plan
+create or replace function public.limite_empleados(plan_text text)
+returns int
+language plpgsql
+immutable
+as $$
+begin
+  case plan_text
+    when 'free' then return 0;
+    when 'pro' then return 2;
+    when 'business' then return 10;
+    else return 0;
+  end case;
+end;
+$$;
+
+
+-- RLS para tabla empleados
+alter table public.empleados enable row level security;
+
+-- Owner puede CRUD sobre sus propios empleados
+drop policy if exists "Empleados: owner CRUD" on public.empleados;
+create policy "Empleados: owner CRUD"
+  on public.empleados for all
+  using (auth.uid() = owner_id)
+  with check (auth.uid() = owner_id);
+
+-- Empleado puede leer su propia fila (para saber quién es su owner y sus permisos)
+drop policy if exists "Empleados: read own" on public.empleados;
+create policy "Empleados: read own"
+  on public.empleados for select
+  using (auth.uid() = empleado_id);
+
+
+-- ============================================================================
+-- ACTUALIZAR RLS DE TABLAS EXISTENTES: que empleados accedan a datos del owner
+-- ============================================================================
+-- Lógica: cada política antes decía `auth.uid() = user_id`. Ahora decimos
+-- `user_id = get_owner_id(auth.uid())`:
+--   - Si auth.uid() es owner: get_owner_id devuelve auth.uid() → user_id = auth.uid()
+--   - Si auth.uid() es empleado: get_owner_id devuelve el owner_id → user_id = owner_id
+-- Esto cubre ambos casos sin tocar el código del frontend (que sigue usando owner_id en las queries).
+
+-- proveedores
+drop policy if exists "Proveedores: CRUD propios" on public.proveedores;
+create policy "Proveedores: CRUD propios"
+  on public.proveedores for all
+  using (user_id = public.get_owner_id(auth.uid()))
+  with check (user_id = public.get_owner_id(auth.uid()));
+
+-- listas_precios
+drop policy if exists "Listas: CRUD propias" on public.listas_precios;
+create policy "Listas: CRUD propias"
+  on public.listas_precios for all
+  using (user_id = public.get_owner_id(auth.uid()))
+  with check (user_id = public.get_owner_id(auth.uid()));
+
+-- snapshots_precios
+drop policy if exists "Snapshots: CRUD propios" on public.snapshots_precios;
+create policy "Snapshots: CRUD propios"
+  on public.snapshots_precios for all
+  using (user_id = public.get_owner_id(auth.uid()))
+  with check (user_id = public.get_owner_id(auth.uid()));
+
+-- pedido_actual
+drop policy if exists "Pedido: CRUD propio" on public.pedido_actual;
+create policy "Pedido: CRUD propio"
+  on public.pedido_actual for all
+  using (user_id = public.get_owner_id(auth.uid()))
+  with check (user_id = public.get_owner_id(auth.uid()));
+
+-- historial_pedidos
+drop policy if exists "Historial: CRUD propio" on public.historial_pedidos;
+create policy "Historial: CRUD propio"
+  on public.historial_pedidos for all
+  using (user_id = public.get_owner_id(auth.uid()))
+  with check (user_id = public.get_owner_id(auth.uid()));
+
+-- uso_ia: el empleado VE el log del owner; las inserciones las hace el backend con service_role
+drop policy if exists "Uso IA: usuarios ven su propio uso" on public.uso_ia;
+create policy "Uso IA: usuarios ven su propio uso"
+  on public.uso_ia for select
+  using (user_id = public.get_owner_id(auth.uid()));
+
+-- pl_auditoria_precios
+drop policy if exists "Auditoría: usuarios ven la propia" on public.pl_auditoria_precios;
+create policy "Auditoría: usuarios ven la propia"
+  on public.pl_auditoria_precios for select
+  using (user_id = public.get_owner_id(auth.uid()));
+
+drop policy if exists "Auditoría: usuarios insertan la propia" on public.pl_auditoria_precios;
+create policy "Auditoría: usuarios insertan la propia"
+  on public.pl_auditoria_precios for insert
+  with check (user_id = public.get_owner_id(auth.uid()));
+
+drop policy if exists "Auditoría: usuarios actualizan la propia" on public.pl_auditoria_precios;
+create policy "Auditoría: usuarios actualizan la propia"
+  on public.pl_auditoria_precios for update
+  using (user_id = public.get_owner_id(auth.uid()));
+
+
+-- ============================================================================
+-- STORAGE: provider-logos - permitir a empleados acceder a la carpeta del owner
+-- ============================================================================
+-- Las políticas viejas usaban `(storage.foldername(name))[1] = auth.uid()::text`.
+-- Ahora usamos get_owner_id para que el empleado vea/edite logos en la carpeta del owner.
+
+drop policy if exists "Provider logos: upload own" on storage.objects;
+create policy "Provider logos: upload own"
+  on storage.objects for insert
+  with check (
+    bucket_id = 'provider-logos'
+    AND auth.role() = 'authenticated'
+    AND (storage.foldername(name))[1] = public.get_owner_id(auth.uid())::text
+  );
+
+drop policy if exists "Provider logos: update own" on storage.objects;
+create policy "Provider logos: update own"
+  on storage.objects for update
+  using (
+    bucket_id = 'provider-logos'
+    AND auth.role() = 'authenticated'
+    AND (storage.foldername(name))[1] = public.get_owner_id(auth.uid())::text
+  );
+
+drop policy if exists "Provider logos: delete own" on storage.objects;
+create policy "Provider logos: delete own"
+  on storage.objects for delete
+  using (
+    bucket_id = 'provider-logos'
+    AND (storage.foldername(name))[1] = public.get_owner_id(auth.uid())::text
+  );
+-- La política "Provider logos: public read" sigue igual (bucket público).

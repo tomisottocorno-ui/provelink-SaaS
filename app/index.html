@@ -148,9 +148,13 @@
         <h2>Armar pedido</h2>
         <button class="btn primary" id="btn-ver-pedido" onclick="verPedidoActual()" style="display:none;"><span class="icon-slot" data-icon="check"></span> Ver pedido</button>
       </div>
-      <div class="buscador-wrap" style="margin-bottom:16px;">
+      <div class="buscador-wrap" style="margin-bottom:8px;">
         <span class="icon-slot" data-icon="search"></span>
         <input type="text" class="buscador" id="buscar-producto" placeholder="Buscar producto... (ej: leche, aceite, harina)" oninput="renderBuscarProducto()">
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+        <button class="btn" id="btn-busqueda-especifica" onclick="toggleBusquedaEspecifica()" style="font-size:12px;padding:5px 12px;">🎯 Búsqueda específica</button>
+        <span id="busqueda-especifica-hint" style="font-size:11px;color:var(--text-muted);">Trae todo lo que contenga la palabra</span>
       </div>
       <div id="pedido-faltantes-sugerencia" style="margin-bottom:12px;"></div>
       <div id="buscar-content">
@@ -1402,7 +1406,7 @@ async function procesarImagen(file, jobId) {
 
   filasPreview = items
     .map(function(it) {
-      return { productoLista: String(it.nombre || '').trim(), precio: parsePrecio(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta };
+      return { productoLista: limpiarNombreProducto(it.nombre), precio: parsePrecio(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta };
     })
     .filter(function(it) { return it.productoLista && it.precio !== null && it.precio > 0; });
 
@@ -1649,7 +1653,7 @@ async function procesarPDFConColumna(lineas, nombreColumna, ejemploColumna, toda
     items.forEach(function(it) {
       var p = parsePrecio(it.precio);
       if (it.nombre && p !== null && p > 0) {
-        filasPreview.push({ productoLista: String(it.nombre).trim(), precio: p, unidad: String(it.unidad || '').trim(), alerta: !!it.alerta });
+        filasPreview.push({ productoLista: limpiarNombreProducto(it.nombre), precio: p, unidad: String(it.unidad || '').trim(), alerta: !!it.alerta });
       }
     });
     renderPreview();
@@ -1701,7 +1705,7 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna,
   var prompt = 'Extraé productos de esta lista de precios argentina. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques, NUNCA conviertas formato.\n\n' +
     ctxColumna + '\n\n' +
     'Devolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":"texto_exacto","unidad":"...","alerta":false}]\n' +
-    '- nombre: nombre completo (marca, variedad, presentación)\n' +
+    '- nombre: nombre completo (marca, variedad, presentación). QUITÁ las comillas dobles (" “ ”) del texto — ej: SALAME "42" → SALAME 42, QUESO 24" → QUESO 24.\n' +
     '- precio: STRING con el texto EXACTO de la COLUMNA OBJETIVO "' + nombreColumna + '" tal como aparece en el PDF.\n' +
     '  IMPORTANTE: en cada fila puede haber varios números (códigos, stock, distintas columnas de precio).\n' +
     '  Usá el valor TÍPICO de la columna objetivo (' + (ejemploColumna || 'sin ejemplo') + ') como referencia de qué número buscar.\n' +
@@ -4101,12 +4105,15 @@ function todosLosItems() {
       var precioFinal = (it.precio_total != null && it.precio_total > 0)
         ? it.precio_total
         : it.precio;
+      // Limpiar comillas del nombre ANTES de armar el itemId, así listas viejas
+      // con comillas (ej: SALAME "42") se pueden agregar igual en el buscador.
+      var nombreLimpio = limpiarNombreProducto(it.productoLista);
       out.push({
         listaId: l.id,
         proveedorId: l.proveedor_id,
         proveedor: prov.nombre,
         provTel: prov.telefono || '',
-        productoLista: it.productoLista,
+        productoLista: nombreLimpio,
         precio: precioFinal,          // ← total para 1 envase (usado en pedidos)
         precioRaw: it.precio,         // ← el numero crudo del PDF (referencia)
         unidad: it.unidad || '',
@@ -4243,24 +4250,40 @@ async function expandirQueryIA(q) {
   }
 }
 
+// Quita comillas dobles (rectas y tipográficas) de nombres de productos. Las
+// comillas (ej: SALAME "42") rompían el itemId y dejaban productos sin poder
+// agregarse en el buscador.
+function limpiarNombreProducto(s) {
+  return String(s || '').replace(/["“”„‟]/g, '').replace(/\s+/g, ' ').trim();
+}
+// Normaliza para búsqueda: minúsculas y espacios colapsados a uno solo.
+function _normBusq(s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+
 function itemMatcheaQuery(texto, query) {
   // 1) La frase completa como substring: "dulce de leche" en "dulce de leche sancor"
   if (texto.indexOf(query) >= 0) return true;
   // 2) Palabras largas (>2 chars) todas presentes: evita falsos positivos con "de", "el", etc.
   var palabras = query.split(/\s+/).filter(function(p) { return p.length > 2; });
   if (palabras.length > 0 && palabras.every(function(p) { return texto.indexOf(p) >= 0; })) return true;
+  // 3) Sin espacios: "queso 44 %" matchea "queso 44%" (el espacio no interrumpe)
+  var qd = query.replace(/\s+/g, '');
+  if (qd.length > 1 && texto.replace(/\s+/g, '').indexOf(qd) >= 0) return true;
   return false;
 }
 
 function buscarEnListas(q, terminosExtra) {
   if (!q) return [];
   var qLower = q.toLowerCase().trim();
-  // Construir lista de queries: el original + expansiones
+  var especifico = busquedaEspecifica;
+  // Construir lista de queries: el original + expansiones.
+  // En modo ESPECÍFICO ignoramos las expansiones IA (buscamos literal).
   var queries = [qLower];
-  (terminosExtra || []).forEach(function(t) {
-    var tl = t.toLowerCase().trim();
-    if (tl && queries.indexOf(tl) < 0) queries.push(tl);
-  });
+  if (!especifico) {
+    (terminosExtra || []).forEach(function(t) {
+      var tl = t.toLowerCase().trim();
+      if (tl && queries.indexOf(tl) < 0) queries.push(tl);
+    });
+  }
   var todos = todosLosItems();
   var vistos = {};
   var resultados = [];
@@ -4268,11 +4291,20 @@ function buscarEnListas(q, terminosExtra) {
     todos.forEach(function(it) {
       var key = it.itemId;
       if (vistos[key]) return;
-      var texto = (it.productoLista + ' ' + it.proveedor).toLowerCase();
-      if (itemMatcheaQuery(texto, query)) {
-        vistos[key] = true;
-        resultados.push(it);
+      var ok;
+      if (especifico) {
+        // El NOMBRE (o el tipo canónico) debe EMPEZAR por el query.
+        // Así "manteca" NO trae "esencia de manteca". Espacios no interrumpen.
+        var nom = _normBusq(it.productoLista);
+        var qy  = _normBusq(query);
+        var tipo = _normBusq(it.tipo || '');
+        ok = nom.indexOf(qy) === 0 ||
+             nom.replace(/\s+/g, '').indexOf(qy.replace(/\s+/g, '')) === 0 ||
+             (tipo && tipo === qy);
+      } else {
+        ok = itemMatcheaQuery(_normBusq(it.productoLista + ' ' + it.proveedor), _normBusq(query));
       }
+      if (ok) { vistos[key] = true; resultados.push(it); }
     });
   });
 
@@ -4296,6 +4328,18 @@ function buscarEnListas(q, terminosExtra) {
 // Estado de la expansión IA del buscador
 var buscarExpansiones = [];   // términos actuales expandidos
 var buscarQueryActual = '';   // query al que corresponden las expansiones
+var busquedaEspecifica = false;  // modo "solo lo que empieza por la query"
+
+function toggleBusquedaEspecifica() {
+  busquedaEspecifica = !busquedaEspecifica;
+  var btn = $('btn-busqueda-especifica');
+  var hint = $('busqueda-especifica-hint');
+  if (btn) btn.classList.toggle('primary', busquedaEspecifica);
+  if (hint) hint.textContent = busquedaEspecifica
+    ? 'Solo productos que empiezan por lo que buscás'
+    : 'Trae todo lo que contenga la palabra';
+  renderBuscarProducto();
+}
 
 function renderBuscarProducto(expansionesExtras) {
   var cont = $('buscar-content');
@@ -4335,8 +4379,9 @@ function renderBuscarProducto(expansionesExtras) {
     buscarQueryActual = q;
     buscarExpansiones = expandirQueryLocal(q);
     clearTimeout(expandIATimer);
-    // Lanzar expansión IA con debounce (500ms) para queries cortos ≤6 chars
-    if (q.length <= 6) {
+    // Lanzar expansión IA con debounce (500ms) para queries cortos ≤6 chars.
+    // En modo específico NO expandimos (la búsqueda es literal por prefijo).
+    if (q.length <= 6 && !busquedaEspecifica) {
       expandIATimer = setTimeout(function() {
         if ($('buscar-producto').value.trim() !== q) return; // query cambió
         expandirQueryIA(q).then(function(terminos) {
@@ -4354,7 +4399,9 @@ function renderBuscarProducto(expansionesExtras) {
 
   // IMPORTANTE: no usar || porque [] es truthy en JS.
   // Si no nos pasaron expansiones desde afuera, usar las del diccionario local.
-  var terminosActivos = (expansionesExtras != null) ? expansionesExtras : buscarExpansiones;
+  // En modo específico no usamos expansiones (búsqueda literal).
+  var terminosActivos = busquedaEspecifica ? []
+    : (expansionesExtras != null) ? expansionesExtras : buscarExpansiones;
   var resultados = buscarEnListas(q, terminosActivos);
 
   if (!resultados.length) {

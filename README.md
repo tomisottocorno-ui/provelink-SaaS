@@ -13,7 +13,7 @@ provelink-saas/
 │   └── index.html          # Landing page pública (no requiere login)
 ├── app/
 │   ├── index.html          # App principal (requiere login) — ~3900 líneas
-│   ├── login.html          # Login + registro
+│   ├── login.html          # Login + registro + recuperación de contraseña
 │   ├── styles.css          # Design system completo (paleta midnight, glassmorphism)
 │   └── icons.js            # SVG icons inline (Icon.box, Icon.list, Icon.factory, etc.)
 ├── api/
@@ -61,11 +61,12 @@ provelink-saas/
 | `proveedores`              | Nombre, teléfono, `logo_url`. (`precio_tipo` queda en la DB por compat pero ya no se usa) |
 | `listas_precios`           | Items JSON `[{productoLista, precio, unidad, clave_canonica, tipo, tamano, unidad_base, modo, precio_total, precio_unitario, confianza, revisar, razonamiento}]` por proveedor. 1 lista por proveedor. |
 | `snapshots_precios`        | Versiones históricas de listas (antes de cada update)                       |
-| `pedido_actual`            | Pedido en construcción del usuario (sincronizado con Supabase)              |
-| `historial_pedidos`        | Pedidos confirmados con totales y desglose                                  |
+| ~~`pedido_actual`~~        | ⚠️ El pedido en construcción se persiste en **localStorage** scoped por `user_id` (`pl_pedido_<id>`), **no** en Supabase. |
+| ~~`historial_pedidos`~~    | ⚠️ El historial de pedidos confirmados (+ datos de recepción) se persiste en **localStorage** scoped por `user_id` (`pl_historial_<id>`), **no** en Supabase. |
 | `uso_ia`                   | Log de cada llamada a Claude (tokens, costo, tipo, fecha)                   |
 | `pl_auditoria_precios`     | Registro de cada item procesado por el pipeline: clave canónica, modo detectado, precio normalizado, confianza, razonamiento |
 | `pl_cache_normalizacion`   | Cache **global** (compartido entre todas las cuentas) de nombres normalizados. La segunda vez que cualquier usuario sube el mismo producto, se saltea la llamada a la IA. Solo guarda normalización (clave, tipo, tamaño, unidad), nunca precios. |
+| `pl_rangos_precio`         | **Global**, compartido. Rango de precio esperado por tipo de producto. Columnas: `tipo_producto`, `unidad_base` (kg/L/u), `mediana_estimada`, `factor_min`, `factor_max`, `origen` (`manual`/`datos`/`web`), `muestras`, `confiable`. Se usa para (a) decidir pack vs unitario y (b) detectar precios anómalos. **`origen='manual'` = seeds curados → el auto-aprendizaje NO los pisa.** `datos` = aprendido de detecciones reales. `web` = estimado por `web_search`. |
 
 **`logo_url`**: bucket Supabase Storage `provider-logos`, carpeta `{user_id}/{proveedor_id}.ext`.
 
@@ -77,8 +78,10 @@ provelink-saas/
 
 ### localStorage (datos locales del dispositivo)
 
-| Clave                   | Contenido                                                    |
-|-------------------------|--------------------------------------------------------------|
+| Clave                       | Contenido                                                    |
+|-----------------------------|--------------------------------------------------------------|
+| `pl_pedido_<user_id>`       | Pedido en construcción, **scoped por usuario** (cada cuenta ve solo el suyo) |
+| `pl_historial_<user_id>`    | Historial de pedidos confirmados + recepción (faltantes/cambios), scoped por usuario |
 | `pl_recetas`            | Productos de producción (id, nombre, catId, subcatId)        |
 | `pl_prod_cats`          | Categorías de producción                                     |
 | `pl_prod_subcats`       | Subcategorías de producción                                  |
@@ -123,6 +126,7 @@ ANTHROPIC_API_KEY         = sk-ant-...
    - `service_role` key → variable `SUPABASE_SERVICE_ROLE_KEY` en Vercel
    - `anon public` key → hardcodeada en `app/index.html` y `app/login.html`
 4. Authentication → Providers → Email → activar
+5. Authentication → URL Configuration → **Redirect URLs**: agregar `https://TU-DOMINIO/login.html` (necesario para que el link de recuperación de contraseña funcione — sin esto, "¿Olvidaste tu contraseña?" envía el mail pero el link falla)
 
 ### 2. Supabase — Storage para logos
 
@@ -163,25 +167,27 @@ El módulo de listas implementa un pipeline multi-etapa para normalizar y compar
 ETAPA 1: EXTRACCIÓN     → IA lee imagen/PDF y extrae filas crudas (precio como STRING)
 ETAPA 2: NORMALIZACIÓN  → cache + IA convierten nombres a clave canónica comparable
 ETAPA 3: AGRUPAMIENTO   → Código agrupa por clave canónica (gratis, sin IA)
-ETAPA 4: DETECCIÓN MODO → Cascada: heurística → rangos típicos → IA
+ETAPA 4: DETECCIÓN MODO → Cascada: heurística → rango dinámico (pl_rangos_precio) → coherencia entre proveedores → rangos hardcoded → web_search (aprende y cachea) → IA
 ETAPA 5: CÁLCULO FINAL  → Código calcula precio_total y precio_unitario
 + AUDITORÍA             → Todo se guarda en pl_auditoria_precios
 ```
 
 **Principio**: la IA clasifica y razona. El código calcula. Nunca al revés.
 
-### Detección de modo (cascada de 3 etapas)
+### Detección de modo (cascada completa)
 
-Para cada producto se intenta decidir si el precio del PDF es por bulto (PACK) o por unidad base (UNITARIO):
+Para cada producto se intenta decidir si el precio del PDF es por bulto (PACK) o por unidad base (UNITARIO). Se recorre la cascada y se corta en el primer paso que decida:
 
-1. **Heurística estructural** (gratis, sin IA): solo decide cuando la presentación es claramente unidad pura sin número ("KG", "X LT", "BOT", "UNI") → UNITARIO con confianza 0.85.
-2. **Rangos típicos** (gratis, sin IA): usa la tabla `RANGOS_PRECIO_AR` con precios esperados por tipo de producto (aceite girasol, aceto balsámico, harina, etc.). Si SOLO una de las 2 interpretaciones cae dentro del rango típico, decide con confianza 0.9. **Esta etapa cubre la mayoría de los casos sin llamar a la IA.**
-3. **IA** (Haiku, paga): solo para casos donde:
-   - El tipo no está en `RANGOS_PRECIO_AR`
-   - Ambas interpretaciones caen dentro/fuera del rango (verdaderamente ambiguo)
-   - Hay 2+ proveedores con el mismo producto → la IA usa el ratio de precios para deducir
+1. **Heurística estructural** (gratis): solo decide cuando la presentación es unidad pura sin número ("KG", "X LT", "BOT", "UNI") → UNITARIO conf. 0.85.
+2. **Rango dinámico** (`pl_rangos_precio`, gratis): para el `tipo` del producto, mira si el precio (interpretado como pack o como unitario) cae en `[mediana×factor_min, mediana×factor_max]`. El máximo se agranda para envases chicos vía `factorPackPequenio()`. Si solo una interpretación es coherente, decide. **Cubre la mayoría de los casos sin IA.**
+3. **Coherencia entre proveedores** (gratis): si 2+ proveedores tienen el mismo producto y los precios difieren ≈ por el factor del tamaño, el menor es UNITARIO y el mayor PACK.
+4. **Rangos hardcoded** (`RANGOS_PRECIO_AR`, gratis): fallback fijo en el código para ~20 tipos comunes.
+5. **Web search** (`buscar_rango_web`, Sonnet + web_search): si el tipo NO tiene rango, busca el precio mayorista típico en la web, **crea el rango y lo cachea en `pl_rangos_precio`** → la próxima subida de ese tipo ya está cubierta. Tiene circuit breaker (se desactiva tras N fallos seguidos) y se bloquea para tipos genéricos de 1 palabra si ya hay manuales más específicos.
+6. **IA** (Haiku, paga): lo que quede ambiguo.
 
-Si la IA falla y no hay más reintentos, el item queda con `modo: null` y se muestra como "para revisar" en la preview, donde el usuario puede flipearlo manualmente con un click.
+Si la IA falla y no hay más reintentos, el item queda con `modo: null` → "para revisar" en la preview, donde el usuario lo flipea con un click.
+
+**Importante — sin rango no se rompe nada:** si un tipo no tiene rango, el producto igual se carga (modo decidido por heurística/coherencia/web/IA). Lo único que se pierde es la red de detección de anomalías (`esOutlier` devuelve `false` sin rango). **Un rango MALO es peor que no tener rango**, porque flaggea productos buenos como anómalos.
 
 ### Modelos usados por etapa
 
@@ -310,6 +316,7 @@ Recibe POST autenticado con JWT de Supabase. Valida plan, controla cuota y logue
 | `procesar_chunk`        | Haiku   | Procesamiento de fragmento de PDF largo          | No             |
 | `normalizar_lista`      | Haiku   | Etapa 2: normalizar nombres a clave canónica     | No             |
 | `detectar_modo_precios` | Haiku   | Etapa 4: determinar si precio es pack o unitario | No             |
+| `buscar_rango_web`      | Sonnet + web_search | Estima la mediana de precio mayorista de un tipo sin rango. Se cachea en `pl_rangos_precio` (1 vez por tipo, compartido entre usuarios) | No |
 | `expandir_query`        | Haiku   | Expandir abreviaciones en el buscador            | No (sin restricción) |
 
 ### Retry automático en el proxy
@@ -405,22 +412,53 @@ Cuando Claude devuelve 429 (rate limit), 529 (overload) o 503 (service unavailab
 
 ---
 
-## Tabla de rangos típicos (`RANGOS_PRECIO_AR`)
+## Sistema de rangos de precio
 
-Definida al inicio del pipeline en `app/index.html`. Cubre los productos más comunes en Argentina (2025). Rangos amplios que incluyen precio mayorista (mínimo) y premium (máximo). El algoritmo solo decide modo automáticamente cuando una de las 2 interpretaciones (pack/unitario) queda claramente fuera del rango:
+Hay **dos** fuentes de rangos, en orden de prioridad:
 
-```js
-'aceite girasol':   { min: 600,  max: 4000,  unidad: 'L' }
-'aceite oliva':     { min: 3000, max: 60000, unidad: 'L' }
-'aceto balsamico':  { min: 1000, max: 30000, unidad: 'L' }
-'vinagre manzana':  { min: 500,  max: 8000,  unidad: 'L' }
-'harina':           { min: 300,  max: 3000,  unidad: 'kg' }
-'azucar':           { min: 400,  max: 2500,  unidad: 'kg' }
-'arroz':            { min: 700,  max: 5000,  unidad: 'kg' }
-...
+### 1. `pl_rangos_precio` (Supabase, dinámico) — la fuente principal
+
+Tabla global compartida. Cada fila tiene `mediana_estimada` (precio típico por kg/L/u del formato **bulk**), `factor_min`, `factor_max`, y `origen`. El rango efectivo es:
+
+```
+min = mediana × factor_min
+max = mediana × factor_max × factorPackPequenio(tamaño)
 ```
 
-**Cómo extender**: agregar más tipos a la tabla con el rango esperado por unidad base. Si el `tipo` que devuelve la IA matchea el prefijo de una clave (ej "aceite girasol marca X" matchea "aceite girasol"), se usa ese rango.
+**`factorPackPequenio(tamaño)`** agranda el máximo para envases chicos (que cuestan más por kg/L que el bulto grande):
+
+| Tamaño        | Multiplicador del máximo |
+|---------------|--------------------------|
+| ≤100 g/mL     | ×4.0   |
+| ≤250 g/mL     | ×3.0   |
+| ≤500 g/mL     | ×2.5   |
+| ≤1 kg/L       | ×1.8   |
+| ≤2 kg/L       | ×1.3   |
+| >2 kg/L (bulk)| ×1.0   |
+
+Por eso la **mediana siempre se calcula del formato bulk** (5/10/25 kg), nunca de latitas/sachets — el multiplicador ya cubre los chicos.
+
+**Factores proporcionales al precio** (`_factoresPorPrecio()`): productos baratos → rango angosto, caros → ancho. `<$500`: 0.5/2.0 · `<$2.000`: 0.4/3.0 · `<$10.000`: 0.3/4.0 · `≥$10.000`: 0.2/5.0.
+
+#### Orígenes y aprendizaje
+
+- **`manual`**: seeds curados (ver `sql/SEED_*.sql`). **El auto-aprendizaje NUNCA los pisa** (`actualizarRangosConDetecciones` saltea cualquier fila con `origen='manual'`). Para corregirlos: re-correr el SQL.
+- **`datos`**: aprendido de detecciones reales. Cada lista procesada actualiza la mediana (suavizado 70% nuevo / 30% viejo) y re-deriva los factores proporcionales.
+- **`web`**: estimado por `buscar_rango_web` (Sonnet + web_search) cuando un tipo no tiene rango. Se cachea para no volver a buscarlo.
+
+#### Sembrar / corregir rangos
+
+- Desde la consola del browser: `_seedRango('queso rallado', 'kg', 16000)` o `_seedRangos([['x','kg',100], ...])`.
+- Por SQL: ver `sql/SEED_RANGOS_REPOSTERIA.sql`, `SEED_RANGOS_2026_PRECIOS_REALES.sql`, `SEED_RANGOS_HORECA_CENTENO_2026.sql`. Usan `on conflict (tipo_producto) do update` (idempotentes).
+- **Regla de oro**: cargar un precio de **bulto** como si fuera por kg rompe el sistema (flaggea productos buenos). La mediana es siempre **por kg/L del bulto grande**.
+
+### 2. `RANGOS_PRECIO_AR` (hardcoded en JS) — fallback legacy
+
+Tabla fija al inicio del pipeline para ~20 tipos comunes. Solo se usa si `pl_rangos_precio` no cubrió el tipo. Match por prefijo del `tipo`.
+
+### Columna `:UNI:` de listas mayoristas
+
+Algunos PDFs (ej. CENTENO) traen una columna de tipo de envase con códigos: `KG`/`LTS` significan **precio por kg/litro**; `BOL`/`CAJ`/`PAQ`/`LAT`/`FCO`/`POT`/`POM`/`BOT` significan **precio por envase**. El prompt de extracción **ignora esa columna para el campo `unidad`** (el tamaño siempre sale del nombre, ej. "X 5 LTS"), y los prompts de normalización/detección la usan como señal de pack vs unitario.
 
 ---
 
@@ -441,3 +479,9 @@ Definida al inicio del pipeline en `app/index.html`. Cubre los productos más co
 - **Códigos de producto en nombres**: "Baño Blanco Aguila 9473 x 10 kg" — 9473 es código, no conteo de multipack. `detectarMultipack()` lo distingue de un multipack real ("Pack 200 x 8cc") usando: presencia de palabra de contenedor, tamaño de unidad, y un sanity check de "total > 200" que descarta absurdos.
 - **`precio_tipo` en `proveedores`**: columna legacy. Antes se usaba para configurar si el proveedor lista precios por envase o por kg/lt; se removió de la UI porque (a) confundía al usuario, (b) un mismo proveedor puede tener productos en ambos modos, (c) el pipeline ahora detecta modo por item. La columna queda en la DB por compat pero no se lee ni escribe.
 - **Rate limits de Anthropic**: el rate limit de Tier 1 son 10K output tokens/minuto. El pipeline está configurado con `_CLAUDE_MAX_CONCURRENT=2` + max_tokens conservativos + retry con backoff en el proxy para mantenerse cómodamente por debajo del límite. Si se cambia el tier, se puede subir la concurrencia.
+- **Rangos de precio (`pl_rangos_precio`)**: es la fuente principal de rangos (ver sección "Sistema de rangos de precio"). **Los `origen='manual'` son intocables por el auto-aprendizaje** — si querés corregir uno corrompido, re-correr el SQL con `origen='manual'` (queda blindado). Un rango con la mediana mal cargada (típico: precio de bulto como si fuera por kg, ej. miel a $27.000/kg cuando es $5.500/kg) flaggea productos buenos como anómalos → **un rango malo es peor que no tener rango**. La mediana siempre se deriva del formato bulk (5/10/25 kg); `factorPackPequenio()` cubre los envases chicos.
+- **Datos del usuario en localStorage scoped por `user_id`**: el pedido en construcción y el historial de pedidos (con recepción) viven en `localStorage` con clave `pl_pedido_<user_id>` / `pl_historial_<user_id>` (funciones `getPedidoKey()`/`getHistKey()`). Esto evita que dos cuentas en el mismo navegador vean los pedidos de la otra. **No están en Supabase** — si el usuario cambia de dispositivo, pierde pedidos e historial.
+- **Recuperación de contraseña** (`login.html`): `resetPasswordForEmail` con `redirectTo: origin + '/login.html'`. Al volver del mail, `onAuthStateChange` detecta el evento `PASSWORD_RECOVERY` y muestra el form de nueva contraseña (función `hacerCambioContrasenia()` → `updateUser`). Requiere que la URL esté en los Redirect URLs de Supabase (ver Setup paso 1.5).
+- **Columna `:UNI:` (tipo de envase)**: códigos como `BOL`/`CAJ`/`PAQ`/`KG`/`LTS` NO son la unidad de tamaño — el tamaño sale del nombre ("X 5 LTS"). Los prompts de extracción/normalización/detección lo manejan explícitamente (ver sección "Sistema de rangos de precio").
+- **Recepción de pedidos** (modal en Historial): arranca con todo **destildado**; botones "Seleccionar todos" / "Limpiar todo"; **"Guardar"** = borrador editable, **"Guardar definitivamente"** = bloquea a solo-lectura. Sin límite de ediciones hasta cerrar. Útil cuando el pedido llega en días distintos.
+- **Orden del buscador**: los resultados que **empiezan** por la query van arriba; los que la contienen en el medio, abajo (ej. "dulce de leche" muestra primero "dulce de leche repostero", después "salsa de dulce de leche").

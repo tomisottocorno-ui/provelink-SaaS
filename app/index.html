@@ -3926,17 +3926,22 @@ function renderPlanesGrid() {
 // SISTEMA DE PEDIDOS
 // ============================================================
 
-var PEDIDO_KEY = 'pl_pedido_actual';
-var HIST_KEY = 'pl_historial';
+// Claves de localStorage escopadas por usuario para evitar que se mezclen datos entre cuentas
+function getPedidoKey() {
+  return 'pl_pedido_' + (sesion && sesion.user ? sesion.user.id : 'anon');
+}
+function getHistKey() {
+  return 'pl_historial_' + (sesion && sesion.user ? sesion.user.id : 'anon');
+}
 
 function pedidoGet() {
-  try { var v = localStorage.getItem(PEDIDO_KEY); return v ? JSON.parse(v) : { items: {} }; } catch(e) { return { items: {} }; }
+  try { var v = localStorage.getItem(getPedidoKey()); return v ? JSON.parse(v) : { items: {} }; } catch(e) { return { items: {} }; }
 }
-function pedidoSet(v) { localStorage.setItem(PEDIDO_KEY, JSON.stringify(v)); }
+function pedidoSet(v) { localStorage.setItem(getPedidoKey(), JSON.stringify(v)); }
 function histGet() {
-  try { var v = localStorage.getItem(HIST_KEY); return v ? JSON.parse(v) : []; } catch(e) { return []; }
+  try { var v = localStorage.getItem(getHistKey()); return v ? JSON.parse(v) : []; } catch(e) { return []; }
 }
-function histSet(v) { localStorage.setItem(HIST_KEY, JSON.stringify(v)); }
+function histSet(v) { localStorage.setItem(getHistKey(), JSON.stringify(v)); }
 
 function formatPrecio(n) {
   if (n == null || isNaN(n)) return '0,00';

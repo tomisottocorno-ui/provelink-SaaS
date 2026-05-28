@@ -59,6 +59,23 @@
       <div class="error" id="reg-error"></div>
       <div class="success" id="reg-success"></div>
     </div>
+
+    <!-- RECOVERY: nueva contraseña tras el link del mail -->
+    <div id="form-recovery" class="hide">
+      <div style="text-align:center;margin-bottom:18px;font-size:14px;color:#94a3b8;">
+        🔑 Ingresá tu nueva contraseña
+      </div>
+      <label for="rec-pass">Nueva contraseña</label>
+      <input type="password" id="rec-pass" autocomplete="new-password" placeholder="Mínimo 6 caracteres">
+
+      <label for="rec-pass2" style="margin-top:12px;">Confirmar contraseña</label>
+      <input type="password" id="rec-pass2" autocomplete="new-password" placeholder="Repetí la contraseña">
+
+      <button class="primary" id="btn-recovery" onclick="hacerCambioContrasenia()" style="margin-top:18px;">Guardar nueva contraseña</button>
+
+      <div class="error" id="rec-error"></div>
+      <div class="success" id="rec-success"></div>
+    </div>
   </div>
 </div>
 
@@ -73,9 +90,19 @@
 
   var supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  // Si ya hay sesión activa, redirigir a la app
+  // Detectar si es redirect de recovery ANTES de chequear sesión
+  var esRecovery = (function() {
+    try {
+      var h = window.location.hash.replace('#', '');
+      var p = new URLSearchParams(h);
+      return p.get('type') === 'recovery';
+    } catch(e) { return false; }
+  })();
+
+  // Si ya hay sesión activa (y no es un recovery), redirigir a la app
   (async function() {
     try {
+      if (esRecovery) return; // dejar que onAuthStateChange lo maneje
       var { data: { session } } = await supabase.auth.getSession();
       if (session) {
         window.location.href = '/app';
@@ -83,14 +110,35 @@
     } catch(e) { console.error('check session', e); }
   })();
 
+  // Detectar evento de recovery de contraseña
+  supabase.auth.onAuthStateChange(function(event, session) {
+    if (event === 'PASSWORD_RECOVERY') {
+      mostrarModo('recovery');
+    }
+  });
+
+  function mostrarModo(modo) {
+    // Ocultar / mostrar tabs según modo
+    var tabs = document.querySelector('.auth-tabs');
+    if (tabs) tabs.style.display = modo === 'recovery' ? 'none' : '';
+    // Mostrar/ocultar formularios
+    document.getElementById('form-login').classList.toggle('hide', modo !== 'login');
+    document.getElementById('form-registro').classList.toggle('hide', modo !== 'registro');
+    document.getElementById('form-recovery').classList.toggle('hide', modo !== 'recovery');
+    // Tabs activos
+    if (modo !== 'recovery') {
+      document.getElementById('tab-login').classList.toggle('active', modo === 'login');
+      document.getElementById('tab-registro').classList.toggle('active', modo === 'registro');
+    }
+    // Limpiar errores
+    ['login-error','reg-error','reg-success','rec-error','rec-success'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  }
+
   function cambiarTab(tab) {
-    document.getElementById('tab-login').classList.toggle('active', tab === 'login');
-    document.getElementById('tab-registro').classList.toggle('active', tab === 'registro');
-    document.getElementById('form-login').classList.toggle('hide', tab !== 'login');
-    document.getElementById('form-registro').classList.toggle('hide', tab !== 'registro');
-    document.getElementById('login-error').style.display = 'none';
-    document.getElementById('reg-error').style.display = 'none';
-    document.getElementById('reg-success').style.display = 'none';
+    mostrarModo(tab);
   }
 
   function mostrarError(elId, msg) {
@@ -205,18 +253,56 @@
       return;
     }
     try {
-      var { error } = await supabase.auth.resetPasswordForEmail(email);
+      var redirectUrl = window.location.origin + '/login.html';
+      var { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: redirectUrl });
       if (error) {
         mostrarError('login-error', 'No se pudo enviar el mail: ' + error.message);
       } else {
         var ok = document.getElementById('login-error');
         ok.classList.remove('error');
         ok.classList.add('success');
-        ok.textContent = 'Te enviamos un mail para recuperar la contraseña';
+        ok.textContent = '✉️ Te enviamos un mail. Abrí el link y podrás poner una nueva contraseña.';
         ok.style.display = 'block';
       }
     } catch(e) {
       console.error('recuperar', e);
+    }
+  }
+
+  async function hacerCambioContrasenia() {
+    var pass  = document.getElementById('rec-pass').value;
+    var pass2 = document.getElementById('rec-pass2').value;
+    var btn   = document.getElementById('btn-recovery');
+    document.getElementById('rec-error').style.display   = 'none';
+    document.getElementById('rec-success').style.display = 'none';
+
+    if (!pass || pass.length < 6) {
+      mostrarError('rec-error', 'La contraseña debe tener al menos 6 caracteres');
+      return;
+    }
+    if (pass !== pass2) {
+      mostrarError('rec-error', 'Las contraseñas no coinciden');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Guardando...';
+
+    try {
+      var { error } = await supabase.auth.updateUser({ password: pass });
+      if (error) {
+        mostrarError('rec-error', 'Error: ' + error.message);
+        btn.disabled = false;
+        btn.textContent = 'Guardar nueva contraseña';
+        return;
+      }
+      mostrarOk('rec-success', '✅ Contraseña actualizada. Redirigiendo...');
+      setTimeout(function() { window.location.href = '/app'; }, 2000);
+    } catch(e) {
+      console.error('cambioContrasenia', e);
+      mostrarError('rec-error', 'Error de conexión. Probá de nuevo.');
+      btn.disabled = false;
+      btn.textContent = 'Guardar nueva contraseña';
     }
   }
 
@@ -225,6 +311,9 @@
   });
   document.getElementById('reg-pass').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') hacerRegistro();
+  });
+  document.getElementById('rec-pass2').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') hacerCambioContrasenia();
   });
 
   // Pintar íconos estáticos del HTML

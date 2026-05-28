@@ -540,6 +540,13 @@ function effectiveUserId() {
 function esEmpleado() { return empleadoInfo !== null; }
 function esOwner()    { return empleadoInfo === null; }
 
+// Nombre para mostrar de quien está usando la cuenta ahora.
+// Owner → "Dueño"; Empleado → su nombre.
+function quienSoy() {
+  if (esEmpleado()) return empleadoInfo.nombre || 'Empleado';
+  return 'Dueño';
+}
+
 // canAccess('pedido') → true si owner, o si empleado con permiso 'pedido'
 function canAccess(perm) {
   if (esOwner()) return true;
@@ -5200,7 +5207,14 @@ function confirmarPedido() {
     if (idx >= 0) {
       var prev = hist[idx];
       var nuevoEditCount = (prev.editCount || 0) + 1;
-      hist[idx] = { id: prev.id, fecha: prev.fecha, timestamp: prev.timestamp, items: items, total: items.reduce(function(s, it) { return s + it.subtotal; }, 0), editCount: nuevoEditCount, ultimaEdicion: Date.now(), recepcionado: prev.recepcionado !== undefined ? prev.recepcionado : false };
+      hist[idx] = {
+        id: prev.id, fecha: prev.fecha, timestamp: prev.timestamp,
+        items: items, total: items.reduce(function(s, it) { return s + it.subtotal; }, 0),
+        editCount: nuevoEditCount, ultimaEdicion: Date.now(),
+        recepcionado: prev.recepcionado !== undefined ? prev.recepcionado : false,
+        creado_por: prev.creado_por || quienSoy(),  // preservamos quien lo creó originalmente
+        editado_por: quienSoy()
+      };
       histSet(hist);
       pedidoSet({ items: {} });
       actualizarBadgePedido();
@@ -5217,7 +5231,8 @@ function confirmarPedido() {
     timestamp: Date.now(),
     items: items,
     total: items.reduce(function(s, it) { return s + it.subtotal; }, 0),
-    recepcionado: false
+    recepcionado: false,
+    creado_por: quienSoy()
   });
   if (hist.length > 100) hist = hist.slice(0, 100);
   histSet(hist);
@@ -5271,9 +5286,12 @@ function renderHistorialRecepcion() {
       porProv[it.proveedorId].items.push(it);
       porProv[it.proveedorId].total += it.subtotal;
     });
+    var porTag = h.creado_por
+      ? '<span style="font-size:11px;color:var(--text-muted);background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:6px;margin-left:8px;vertical-align:middle;">por ' + escapeHtml(h.creado_por) + '</span>'
+      : '';
     html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:12px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
-    html += '<div><div style="font-size:15px;font-weight:600;">' + escapeHtml(h.fecha) + '</div>';
+    html += '<div><div style="font-size:15px;font-weight:600;">' + escapeHtml(h.fecha) + porTag + '</div>';
     html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + '</div></div>';
     html += '<div style="text-align:right;"><div style="font-size:11px;color:var(--text-muted);">Total</div><div style="font-size:18px;font-weight:700;">$' + formatPrecio(h.total) + '</div></div></div>';
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">';
@@ -5325,9 +5343,12 @@ function renderHistorialProveedores() {
       porProv[it.proveedorId].total += it.subtotal;
     });
 
+    var porTagP = h.creado_por
+      ? '<span style="font-size:11px;color:var(--text-muted);background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:6px;margin-left:8px;vertical-align:middle;">por ' + escapeHtml(h.creado_por) + '</span>'
+      : '';
     html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:12px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
-    html += '<div><div style="font-size:15px;font-weight:600;">' + escapeHtml(h.fecha) + '</div>';
+    html += '<div><div style="font-size:15px;font-weight:600;">' + escapeHtml(h.fecha) + porTagP + '</div>';
     var faltantesCount = (h.faltantes || []).length;
     var cambiosCount   = (h.cambios   || []).length;
     var faltantesTag = faltantesCount > 0 ? ' · <span style="color:var(--danger);">' + faltantesCount + ' faltante' + (faltantesCount !== 1 ? 's' : '') + '</span>' : '';
@@ -5387,7 +5408,8 @@ function verDetalleHistorial(id) {
     porProv[it.proveedorId].items.push(it);
   });
   var bodyHtml = '<h1 style="font-family:Georgia,serif;margin-bottom:4px;">Pedido ProveLink</h1>';
-  bodyHtml += '<p style="color:#888;font-size:13px;margin-bottom:20px;">' + escapeHtml(h.fecha) + ' · ' + h.items.length + ' productos · Total: $' + formatPrecio(h.total) + '</p>';
+  var creadoPorTxt = h.creado_por ? ' · Realizado por <strong>' + escapeHtml(h.creado_por) + '</strong>' : '';
+  bodyHtml += '<p style="color:#888;font-size:13px;margin-bottom:20px;">' + escapeHtml(h.fecha) + ' · ' + h.items.length + ' productos · Total: $' + formatPrecio(h.total) + creadoPorTxt + '</p>';
   Object.keys(porProv).forEach(function(pid) {
     var prov = porProv[pid];
     var total = prov.items.reduce(function(s, it) { return s + it.subtotal; }, 0);

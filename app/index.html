@@ -2602,15 +2602,27 @@ function lookupRangoCacheado(rangosMap, tipo) {
   return bestManual || bestOther || null;
 }
 
+// Factores proporcionales al precio típico: baratos varían poco (rango estrecho),
+// caros varían mucho (mayorista vs premium). Evita el 0.5/2.5 fijo que flaggeaba
+// productos baratos como anomalía.
+function _factoresPorPrecio(p) {
+  p = parseFloat(p) || 0;
+  if (p < 500)   return { min: 0.5, max: 2.0 }; // 4x
+  if (p < 2000)  return { min: 0.4, max: 3.0 }; // 7.5x
+  if (p < 10000) return { min: 0.3, max: 4.0 }; // 13x
+  return { min: 0.2, max: 5.0 };                // 25x
+}
+
 async function guardarRangoCacheado(rango) {
   if (!rango || !rango.tipo_producto) return;
   try {
+    var _ff = _factoresPorPrecio(rango.mediana_estimada);
     var r = await supabase.from('pl_rangos_precio').upsert({
       tipo_producto: (rango.tipo_producto || '').toLowerCase(),
       unidad_base: rango.unidad_base || 'kg',
       mediana_estimada: rango.mediana_estimada,
-      factor_min: rango.factor_min || 0.5,
-      factor_max: rango.factor_max || 2.5,
+      factor_min: rango.factor_min != null ? rango.factor_min : _ff.min,
+      factor_max: rango.factor_max != null ? rango.factor_max : _ff.max,
       origen: rango.origen || 'web',
       muestras: rango.muestras || 0,
       confiable: !!rango.confiable,
@@ -2631,11 +2643,8 @@ async function guardarRangoCacheado(rango) {
 async function _seedRango(tipo, unidadBase, precioTipico) {
   var p = parseFloat(precioTipico);
   if (!p || p <= 0) { console.warn('[Rangos] precio invalido'); return null; }
-  var fMin, fMax;
-  if (p < 500)        { fMin = 0.5; fMax = 2.0; } // 4x range
-  else if (p < 2000)  { fMin = 0.4; fMax = 3.0; } // 7.5x range
-  else if (p < 10000) { fMin = 0.3; fMax = 4.0; } // 13x range
-  else                { fMin = 0.2; fMax = 5.0; } // 25x range
+  var _ff = _factoresPorPrecio(p);
+  var fMin = _ff.min, fMax = _ff.max;
   await guardarRangoCacheado({
     tipo_producto: String(tipo || '').toLowerCase().trim(),
     unidad_base: unidadBase,
@@ -2963,16 +2972,21 @@ async function actualizarRangosConDetecciones(filasDetectadas) {
   Object.keys(preciosPorTipo).forEach(function(tipo) {
     var data = preciosPorTipo[tipo];
     var ex = lookupRangoCacheado(rangosActuales, tipo);
+    // PROTECCIÓN: los rangos manuales son verdad curada y verificada.
+    // El auto-aprendizaje NUNCA los pisa (evita que se re-corrompan los seeds
+    // mezclando variantes premium con básicas, como pasó con sal/miel/azúcar).
+    if (ex && ex.origen === 'manual') return;
     var medianaNueva = _mediana(data.precios);
     // Suavizar: 70% peso a nuevo, 30% a anterior (refleja inflación real)
     var medianaFinal = ex && ex.muestras > 0
       ? medianaNueva * 0.7 + ex.mediana_estimada * 0.3
       : medianaNueva;
     var muestras = (ex && ex.muestras ? ex.muestras : 0) + data.precios.length;
-    // Preservar factors existentes (especialmente los sembrados con formula
-    // proporcional). Si no hay, usar 0.5 / 2.5 default.
-    var fMin = (ex && ex.factor_min != null) ? ex.factor_min : 0.5;
-    var fMax = (ex && ex.factor_max != null) ? ex.factor_max : 2.5;
+    // Factores proporcionales al precio (los manuales ya se saltearon arriba).
+    // Esto además re-ensancha los auto-aprendidos viejos que tenían 0.5/2.5 fijo
+    // y causaban falsos flags en productos baratos.
+    var _ff = _factoresPorPrecio(medianaFinal);
+    var fMin = _ff.min, fMax = _ff.max;
     updates.push({
       tipo_producto: tipo,
       unidad_base: data.unidad,

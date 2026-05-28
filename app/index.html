@@ -4169,7 +4169,8 @@ function formatPrecio(n) {
 
 function escapeHtmlAttr(s) {
   if (s == null) return '';
-  return String(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/&/g, '&amp;');
+  // IMPORTANTE: el & va PRIMERO, sino re-escapa los &#39; y &quot; recién creados.
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // ============================================================

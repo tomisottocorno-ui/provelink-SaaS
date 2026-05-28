@@ -347,10 +347,10 @@
     <div class="upload-zone">
       <button class="upload-btn" onclick="document.getElementById('lista-input-img').click()">
         <span class="icon-slot" data-icon="camera"></span>
-        Subir foto o PDF
+        Subir foto, PDF o Excel
       </button>
     </div>
-    <input type="file" id="lista-input-img" accept="image/*,application/pdf" style="display:none;" onchange="procesarArchivo(event)">
+    <input type="file" id="lista-input-img" accept="image/*,application/pdf,.xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" style="display:none;" onchange="procesarArchivo(event)">
 
     <div id="lista-loading-container"></div>
 
@@ -407,6 +407,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 // Configurar el worker de PDF.js
 if (typeof pdfjsLib !== 'undefined') {
@@ -1138,7 +1139,7 @@ function renderListas() {
     cont.innerHTML = '<div class="empty">' +
       '<div class="empty-emoji">' + Icon.list() + '</div>' +
       '<div class="empty-title">No cargaste ninguna lista todavía</div>' +
-      '<div class="empty-sub">Subí una foto o PDF y la IA extrae los productos sola</div>' +
+      '<div class="empty-sub">Subí una foto, PDF o Excel y la IA extrae los productos sola</div>' +
       '</div>';
     return;
   }
@@ -1343,12 +1344,18 @@ async function procesarArchivo(event) {
   }
 
   var esPDF = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  var esExcel = /\.(xlsx|xls|csv)$/i.test(file.name) ||
+    file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    file.type === 'application/vnd.ms-excel' ||
+    file.type === 'text/csv';
 
   var jobId = Date.now().toString();
   crearBarraProgreso(jobId);
 
   try {
-    if (esPDF) {
+    if (esExcel) {
+      await procesarExcel(file, jobId);
+    } else if (esPDF) {
       await procesarPDF(file, jobId);
     } else {
       await procesarImagen(file, jobId);
@@ -1419,6 +1426,72 @@ async function procesarImagen(file, jobId) {
   removeBarraProgreso(jobId);
   renderPreview();
   showToast('IA extrajo ' + filasPreview.length + ' productos');
+}
+
+// ============================================================
+// PROCESAR EXCEL/CSV: parsear local → líneas de texto → mismo pipeline que PDF
+// ============================================================
+async function procesarExcel(file, jobId) {
+  if (typeof XLSX === 'undefined') {
+    throw new Error('La librería de Excel no cargó. Recargá la página.');
+  }
+  setProgresoJob(jobId, 'Leyendo Excel...', 8);
+
+  // 1. Parsear el Excel localmente (sin IA)
+  var buffer = await file.arrayBuffer();
+  var workbook;
+  try {
+    workbook = XLSX.read(buffer, { type: 'array', cellText: true });
+  } catch(e) {
+    throw new Error('No se pudo leer el archivo. ¿Es un Excel (.xlsx/.xls) o CSV válido?');
+  }
+
+  if (!workbook.SheetNames || !workbook.SheetNames.length) {
+    throw new Error('El archivo no tiene hojas.');
+  }
+
+  // 2. Tomar la primera hoja con contenido y convertir filas a líneas de texto
+  //    Cada celda se separa con 3 espacios para que la IA distinga las columnas
+  //    (raw:false => usa el texto formateado tal como se ve en Excel, conservando
+  //     el formato de los precios)
+  var lineas = [];
+  var hojaUsada = '';
+  for (var s = 0; s < workbook.SheetNames.length; s++) {
+    var sheet = workbook.Sheets[workbook.SheetNames[s]];
+    var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, blankrows: false });
+    var lineasHoja = rows.map(function(row) {
+      return row.map(function(cell) {
+        return (cell === null || cell === undefined) ? '' : String(cell).trim();
+      }).join('   ').replace(/\s+$/, '');
+    }).filter(function(l) { return l.trim().length > 0; });
+    if (lineasHoja.length > 0) {
+      lineas = lineasHoja;
+      hojaUsada = workbook.SheetNames[s];
+      break;
+    }
+  }
+
+  if (!lineas.length) {
+    throw new Error('El Excel está vacío o no tiene datos legibles.');
+  }
+  console.log('[Excel] Hoja "' + hojaUsada + '" — filas extraídas:', lineas.length);
+
+  // 3. Detectar columnas de precio con IA (mismo pipeline que el PDF)
+  setProgresoJob(jobId, 'Detectando columnas...', 28);
+  var muestra = lineas.slice(0, 60).join('\n');
+  var columnas = await detectarColumnasPDF(muestra);
+
+  if (!columnas || !columnas.precios || !columnas.precios.length) {
+    throw new Error('No se detectaron columnas de precio en el Excel');
+  }
+
+  // 4. Si hay UNA columna, procesar directo. Si hay varias, mostrar selector
+  if (columnas.precios.length === 1) {
+    await procesarPDFConColumna(lineas, columnas.precios[0].nombre, columnas.precios[0].ejemplo, columnas.precios, jobId);
+  } else {
+    removeBarraProgreso(jobId);
+    mostrarSelectorColumnasPDF(lineas, columnas, jobId);
+  }
 }
 
 // ============================================================

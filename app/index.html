@@ -2124,6 +2124,15 @@ function calcularPrecios(grupos, resultadosModo) {
       var modoInfo = modoPorId[prov.id_original];
       var precio = prov.precio_raw;
       var tamano = grupo.tamano;
+      var unidadBaseCalc = grupo.unidad_base;
+      // Caja de porciones individuales (sachets/sobres): el precio de la lista es
+      // el del bulto completo → forzar PACK y tamaño = contenido total (N×M).
+      var _caja = analizarCajaIndividual(prov.nombre_original || prov.presentacion_original || grupo.clave_canonica || '');
+      if (_caja) {
+        modoInfo = { modo: 'pack', confianza: 0.9, razonamiento: 'caja de porciones individuales: precio del bulto completo' };
+        tamano = _caja.total;
+        unidadBaseCalc = _caja.unidad;
+      }
       var precio_total = null;
       var precio_unitario = null;
       if (modoInfo) {
@@ -2140,7 +2149,7 @@ function calcularPrecios(grupos, resultadosModo) {
         clave_canonica: grupo.clave_canonica,
         tipo: grupo.tipo,
         tamano: tamano,
-        unidad_base: grupo.unidad_base,
+        unidad_base: unidadBaseCalc,
         proveedor_id: prov.proveedor_id,
         nombre_original: prov.nombre_original,
         presentacion_original: prov.presentacion_original,
@@ -3163,6 +3172,30 @@ function detectarMultipack(texto) {
   return null;
 }
 
+// Detecta CAJAS DE PORCIONES INDIVIDUALES (sachets/sobres): en las listas
+// mayoristas el precio es el de la CAJA COMPLETA, no el sobrecito.
+// Ej: "SAL ABEDUL INDIV. 1000 X 0.5 GR" ($11.986 la caja, no $5,99 el sobre).
+// Señal: marcador INDIV/INDV/SOBR/PARES, o patrón "N x M cc/gr" con N grande
+// (>=50) y M chico (<=30). Excluye el caso anidado "N CAJA (MxP)" (paréntesis).
+// Devuelve { total, unidad } con el contenido total en kg/L, o null.
+function analizarCajaIndividual(texto) {
+  var s = String(texto || '');
+  if (s.indexOf('(') >= 0) return null; // anidado → lo maneja la regla de multipack
+  var m = s.match(/\b(\d{2,5})\s*(?:sobr?\w*\.?\s*|pares?\s*)?x\s*(\d+(?:[.,]\d+)?)\s*(c\s*\.?\s*c|cc|ml|gr|g)\b/i);
+  if (!m) return null;
+  var n = parseInt(m[1], 10);
+  var size = parseFloat(m[2].replace(',', '.'));
+  if (!(n >= 2) || !(size > 0)) return null;
+  var esIndividual = /\b(indiv\w*|indv\w*|sobres?|sobr|pares?)\b/i.test(s);
+  var esSachetGrande = n >= 50 && size <= 30;   // muchas unidades chicas = caja de sobres
+  if (!esIndividual && !esSachetGrande) return null;
+  var unitRaw = m[3].toLowerCase().replace(/[\s.]/g, ''); // "c.c" → "cc"
+  var unidad = (unitRaw === 'cc' || unitRaw === 'ml') ? 'L' : 'kg';
+  var total = n * size / 1000; // gr→kg y cc/ml→L (ambos /1000)
+  if (total <= 0 || total > 300) return null;   // sanity
+  return { total: total, unidad: unidad };
+}
+
 async function normalizarConCache(itemsConId, loadingEl) {
   var cache = await getCacheNorm();
   var sinCache = [];
@@ -4108,6 +4141,24 @@ function todosLosItems() {
       // Limpiar comillas del nombre ANTES de armar el itemId, así listas viejas
       // con comillas (ej: SALAME "42") se pueden agregar igual en el buscador.
       var nombreLimpio = limpiarNombreProducto(it.productoLista);
+      // Caja de porciones individuales (sachets/sobres): el precio de la lista es
+      // el del BULTO COMPLETO, no el sobrecito. Corrige el precio diminuto que
+      // salía por tomar el tamaño de un sobre como tamaño total. Arregla listas
+      // ya cargadas sin re-procesarlas.
+      var _caja = analizarCajaIndividual(nombreLimpio);
+      var modoItem = it.modo || null;
+      var tamanoItem = it.tamano || null;
+      var unidadBaseItem = it.unidad_base || null;
+      var precioTotalItem = (it.precio_total != null) ? it.precio_total : null;
+      var precioUnitItem = (it.precio_unitario != null) ? it.precio_unitario : null;
+      if (_caja) {
+        precioFinal     = it.precio;          // precio del bulto (la caja completa)
+        precioTotalItem = it.precio;
+        modoItem        = 'pack';
+        tamanoItem      = _caja.total;
+        unidadBaseItem  = _caja.unidad;
+        precioUnitItem  = (_caja.total > 0) ? Math.round((it.precio / _caja.total) * 100) / 100 : precioUnitItem;
+      }
       out.push({
         listaId: l.id,
         proveedorId: l.proveedor_id,
@@ -4120,13 +4171,13 @@ function todosLosItems() {
         // Preservar datos del pipeline para el display y modo toggle
         clave_canonica: it.clave_canonica || null,
         tipo: it.tipo || null,
-        tamano: it.tamano || null,
-        unidad_base: it.unidad_base || null,
-        modo: it.modo || null,
-        precio_total: (it.precio_total != null) ? it.precio_total : null,
-        precio_unitario: (it.precio_unitario != null) ? it.precio_unitario : null,
+        tamano: tamanoItem,
+        unidad_base: unidadBaseItem,
+        modo: modoItem,
+        precio_total: precioTotalItem,
+        precio_unitario: precioUnitItem,
         confianza: (it.confianza != null) ? it.confianza : null,
-        itemId: l.id + '|' + (it.productoLista || '')
+        itemId: l.id + '|' + nombreLimpio
       });
     });
   });

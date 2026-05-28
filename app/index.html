@@ -666,7 +666,7 @@ function renderHeader() {
     var el = document.getElementById(id);
     if (!el) return;
     if (esEmpleado()) {
-      el.innerHTML = esc(empleadoInfo.nombre || 'Empleado') + ' <span class="role-badge-emp">EMPLEADO</span>';
+      el.innerHTML = escapeHtml(empleadoInfo.nombre || 'Empleado') + ' <span class="role-badge-emp">EMPLEADO</span>';
     } else {
       el.textContent = negocio;
     }
@@ -4279,12 +4279,12 @@ function renderEmpleadosList() {
     var inactivoLabel = e.activo ? '' : ' <span class="perm-tag" style="color:var(--danger);">desactivado</span>';
     return '<div class="empleado-row' + inactivoClass + '">' +
       '<div style="min-width:140px;">' +
-        '<div class="nombre">' + esc(e.nombre) + inactivoLabel + '</div>' +
-        '<div class="email">' + esc(e.email) + '</div>' +
+        '<div class="nombre">' + escapeHtml(e.nombre) + inactivoLabel + '</div>' +
+        '<div class="email">' + escapeHtml(e.email) + '</div>' +
       '</div>' +
       '<div class="perms-tags">' + perms + '</div>' +
       '<div class="acciones">' +
-        '<button class="btn" onclick="abrirModalEmpleado(\'' + esc(e.id) + '\')">Editar</button>' +
+        '<button class="btn" onclick="abrirModalEmpleado(\'' + escapeHtml(e.id) + '\')">Editar</button>' +
       '</div>' +
     '</div>';
   }).join('');

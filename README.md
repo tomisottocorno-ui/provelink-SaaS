@@ -164,7 +164,7 @@ Para dar plan Pro/Business: Supabase → Table Editor → `profiles` → editar 
 El módulo de listas implementa un pipeline multi-etapa para normalizar y comparar precios entre proveedores aunque cada uno los exprese de forma distinta (precio por bulto vs. precio por kg).
 
 ```
-ETAPA 1: EXTRACCIÓN     → IA lee imagen/PDF y extrae filas crudas (precio como STRING)
+ETAPA 1: EXTRACCIÓN     → IA lee imagen/PDF/Excel y extrae filas crudas (precio como STRING)
 ETAPA 2: NORMALIZACIÓN  → cache + IA convierten nombres a clave canónica comparable
 ETAPA 3: AGRUPAMIENTO   → Código agrupa por clave canónica (gratis, sin IA)
 ETAPA 4: DETECCIÓN MODO → Cascada: heurística → rango dinámico (pl_rangos_precio) → coherencia entre proveedores → rangos hardcoded → web_search (aprende y cachea) → IA
@@ -335,9 +335,10 @@ Cuando Claude devuelve 429 (rate limit), 529 (overload) o 503 (service unavailab
 | `cargarProveedores()`      | SELECT de `proveedores` ordenado por nombre                     |
 | `guardarProveedor()`       | INSERT/UPDATE con upload de logo a Storage si hay archivo       |
 | `cargarListas()`           | SELECT de `listas_precios` ordenado por fecha                   |
-| `procesarArchivo(event)`   | Detecta PDF o imagen y llama al proceso correcto                |
+| `procesarArchivo(event)`   | Detecta Excel/CSV, PDF o imagen y llama al proceso correcto      |
 | `procesarImagen(file)`     | Extracción via Sonnet → pipeline etapas 2-5                     |
 | `procesarPDF(file)`        | PDF.js extrae texto → detecta columnas → chunks Haiku → pipeline etapas 2-5 |
+| `procesarExcel(file)`      | SheetJS (xlsx) parsea `.xlsx`/`.xls`/`.csv` local → filas a texto → reusa detección de columnas + chunks Haiku del flujo PDF → pipeline etapas 2-5 |
 | `guardarLista()`           | Upsert en `listas_precios` + snapshot + auditoría asíncrona     |
 | `todosLosItems()`          | Aplana todas las listas en un array plano. `precio` expuesto = `precio_total` (lo que cuesta 1 envase). `precioRaw` para el original. |
 | `renderBuscarProducto()`   | Busca en todas las listas, agrupa por proveedor                 |
@@ -485,3 +486,4 @@ Algunos PDFs (ej. CENTENO) traen una columna de tipo de envase con códigos: `KG
 - **Columna `:UNI:` (tipo de envase)**: códigos como `BOL`/`CAJ`/`PAQ`/`KG`/`LTS` NO son la unidad de tamaño — el tamaño sale del nombre ("X 5 LTS"). Los prompts de extracción/normalización/detección lo manejan explícitamente (ver sección "Sistema de rangos de precio").
 - **Recepción de pedidos** (modal en Historial): arranca con todo **destildado**; botones "Seleccionar todos" / "Limpiar todo"; **"Guardar"** = borrador editable, **"Guardar definitivamente"** = bloquea a solo-lectura. Sin límite de ediciones hasta cerrar. Útil cuando el pedido llega en días distintos.
 - **Orden del buscador**: los resultados que **empiezan** por la query van arriba; los que la contienen en el medio, abajo (ej. "dulce de leche" muestra primero "dulce de leche repostero", después "salsa de dulce de leche").
+- **Carga de Excel/CSV** (`procesarExcel()`): se acepta `.xlsx`/`.xls`/`.csv` además de foto/PDF. Usa **SheetJS** (`xlsx.full.min.js` por CDN, igual patrón que PDF.js). El archivo se parsea **localmente** (sin IA): cada fila se convierte a una línea de texto (celdas separadas por 3 espacios, `raw:false` para conservar el formato visible de los precios) y se reusa **el mismo pipeline que el PDF** (`detectarColumnasPDF` → `procesarPDFConColumna`/`mostrarSelectorColumnasPDF` → chunks Haiku → etapas 2-5). Soporta varias columnas de precio (muestra el selector) y toma la primera hoja con datos.

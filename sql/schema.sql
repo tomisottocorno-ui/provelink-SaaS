@@ -154,7 +154,10 @@ alter table public.profiles enable row level security;
 drop policy if exists "Profiles: usuarios ven su propio profile" on public.profiles;
 create policy "Profiles: usuarios ven su propio profile"
   on public.profiles for select
-  using (auth.uid() = id);
+  using (
+    auth.uid() = id
+    OR id = public.get_owner_id(auth.uid())  -- empleados ven el profile del owner
+  );
 
 drop policy if exists "Profiles: usuarios actualizan su propio profile" on public.profiles;
 create policy "Profiles: usuarios actualizan su propio profile"

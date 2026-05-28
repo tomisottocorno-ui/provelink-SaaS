@@ -27,7 +27,11 @@
       <div class="sidebar-brand-name">ProveLink</div>
     </div>
     <nav class="sidebar-nav">
-      <button class="sidebar-link active" data-tab="proveedores" onclick="cambiarTab('proveedores')" id="side-link-prov">
+      <button class="sidebar-link active" data-tab="ingreso" onclick="cambiarTab('ingreso')" id="side-link-ingreso">
+        <span class="icon-slot" data-icon="star"></span>
+        <span>Inicio</span>
+      </button>
+      <button class="sidebar-link" data-tab="proveedores" onclick="cambiarTab('proveedores')" id="side-link-prov">
         <span class="icon-slot" data-icon="box"></span>
         <span>Proveedores</span>
       </button>
@@ -41,11 +45,7 @@
       </button>
       <button class="sidebar-link" data-tab="historial" onclick="cambiarTab('historial')" id="side-link-historial">
         <span class="icon-slot" data-icon="file"></span>
-        <span>Historial</span>
-      </button>
-      <button class="sidebar-link" data-tab="produccion" onclick="cambiarTab('produccion')" id="side-link-produccion">
-        <span class="icon-slot" data-icon="factory"></span>
-        <span>Producción</span>
+        <span>Pedidos</span>
       </button>
     </nav>
     <div class="sidebar-footer">
@@ -84,11 +84,38 @@
 
     <!-- Tabs (solo mobile; en desktop quedan ocultas) -->
     <div class="tabs-nav">
-      <button class="tab-btn active" data-tab="proveedores" onclick="cambiarTab('proveedores')">Proveedores</button>
+      <button class="tab-btn active" data-tab="ingreso" onclick="cambiarTab('ingreso')">Inicio</button>
+      <button class="tab-btn" data-tab="proveedores" onclick="cambiarTab('proveedores')">Proveedores</button>
       <button class="tab-btn" data-tab="listas" onclick="cambiarTab('listas')">Listas</button>
       <button class="tab-btn" data-tab="pedido" onclick="cambiarTab('pedido')">Pedido</button>
-      <button class="tab-btn" data-tab="historial" onclick="cambiarTab('historial')">Historial</button>
-      <button class="tab-btn" data-tab="produccion" onclick="cambiarTab('produccion')">Producción</button>
+      <button class="tab-btn" data-tab="historial" onclick="cambiarTab('historial')">Pedidos</button>
+    </div>
+
+    <!-- ============ TAB: INGRESO (home) ============ -->
+    <div class="tab-section active" id="tab-ingreso">
+      <div style="padding:8px 0 24px;">
+        <h2 style="margin:0 0 4px;font-size:22px;" id="ingreso-saludo">¡Buen día! 👋</h2>
+        <p style="margin:0;color:var(--text-muted);font-size:13px;">¿Qué querés hacer hoy?</p>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <button onclick="cambiarTab('pedido')" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:var(--bg-elev);border:1px solid var(--border-hi);border-radius:16px;padding:24px 12px;cursor:pointer;font-family:inherit;">
+          <span style="font-size:32px;">🛒</span>
+          <span style="font-size:13px;font-weight:600;color:var(--text);">Armar pedido</span>
+        </button>
+        <button onclick="irARecepcionar()" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:var(--bg-elev);border:1px solid var(--border-hi);border-radius:16px;padding:24px 12px;cursor:pointer;font-family:inherit;">
+          <span style="font-size:32px;">📥</span>
+          <span style="font-size:13px;font-weight:600;color:var(--text);">Recepcionar pedido</span>
+        </button>
+        <button onclick="cambiarTab('proveedores')" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:var(--bg-elev);border:1px solid var(--border-hi);border-radius:16px;padding:24px 12px;cursor:pointer;font-family:inherit;">
+          <span style="font-size:32px;">🏢</span>
+          <span style="font-size:13px;font-weight:600;color:var(--text);">Proveedores</span>
+        </button>
+        <button onclick="cambiarTab('listas');setTimeout(function(){abrirModalLista();},100);" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:var(--bg-elev);border:1px solid var(--border-hi);border-radius:16px;padding:24px 12px;cursor:pointer;font-family:inherit;">
+          <span style="font-size:32px;">📄</span>
+          <span style="font-size:13px;font-weight:600;color:var(--text);">Cargar lista</span>
+        </button>
+      </div>
+      <div id="ingreso-pendientes" style="margin-top:24px;"></div>
     </div>
 
     <!-- ============ TAB: PROVEEDORES ============ -->
@@ -125,6 +152,7 @@
         <span class="icon-slot" data-icon="search"></span>
         <input type="text" class="buscador" id="buscar-producto" placeholder="Buscar producto... (ej: leche, aceite, harina)" oninput="renderBuscarProducto()">
       </div>
+      <div id="pedido-faltantes-sugerencia" style="margin-bottom:12px;"></div>
       <div id="buscar-content">
         <div class="empty"><div class="empty-emoji"></div><div class="empty-title">Escribí para buscar</div></div>
       </div>
@@ -158,90 +186,17 @@
     <!-- ============ TAB: HISTORIAL ============ -->
     <div class="tab-section" id="tab-historial">
       <div class="seccion-titulo">
-        <h2>Historial</h2>
+        <h2>Historial y Recepción de Pedidos</h2>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:20px;">
-        <button class="btn" id="hist-btn-proveedores" onclick="switchHistorialTab('proveedores')" style="flex:1;">📦 Pedidos a Proveedores</button>
-        <button class="btn primary" id="hist-btn-produccion" onclick="switchHistorialTab('produccion')" style="flex:1;">🏭 Pedidos a Producción</button>
+        <button class="btn primary" id="hist-btn-recepcion" onclick="switchHistorialTab('recepcion')" style="flex:1;">📥 Recepción</button>
+        <button class="btn" id="hist-btn-historial" onclick="switchHistorialTab('historial')" style="flex:1;">📋 Historial</button>
       </div>
-      <div id="hist-panel-proveedores" style="display:none;">
-        <div id="historial-content-prov">
-          <div class="empty"><div class="empty-emoji"></div><div class="empty-title">Cargando...</div></div>
-        </div>
+      <div id="hist-panel-recepcion">
+        <div id="historial-content-recepcion"></div>
       </div>
-      <div id="hist-panel-produccion">
-        <div id="historial-content-prod"></div>
-      </div>
-      <!-- Panel de verificación desde historial de producción -->
-      <div id="prod-verif-hist-panel" style="display:none;margin-top:16px;">
-        <div class="seccion-titulo" style="margin-top:0;">
-          <div>
-            <h3 style="font-size:15px;font-weight:600;margin:0;">Verificar producción</h3>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" id="prod-verif-hist-fecha"></div>
-          </div>
-          <div id="prod-verif-hist-btns" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
-        </div>
-        <div class="prod-verif-legend">
-          <span><span class="pv-dot ok"></span> Completo</span>
-          <span><span class="pv-dot falta"></span> Faltante</span>
-          <span><span class="pv-dot sin"></span> Sin verificar</span>
-        </div>
-        <div id="prod-verif-hist-banner"></div>
-        <div id="prod-verif-hist-lista"></div>
-      </div>
-    </div>
-
-    <!-- ============ TAB: PRODUCCIÓN ============ -->
-    <div class="tab-section" id="tab-produccion">
-      <div class="seccion-titulo">
-        <h2>Producción</h2>
-      </div>
-
-      <!-- Sub-tabs -->
-      <div class="prod-subtabs">
-        <button class="prod-subtab active" id="psub-recetas" onclick="prodSubtab('recetas')">
-          <span style="font-size:16px;">📋</span> Productos
-        </button>
-        <button class="prod-subtab" id="psub-producir" onclick="prodSubtab('producir')">
-          <span style="font-size:16px;">🏭</span> Hacer pedido a producción
-        </button>
-      </div>
-
-      <!-- Sub-panel: Productos -->
-      <div id="prod-panel-recetas" class="prod-panel active">
-        <div class="seccion-titulo" style="margin-top:0;padding-top:0;">
-          <h3 style="font-size:15px;font-weight:600;margin:0;">Productos</h3>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-            <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="abrirModalProdCat()">+ Categoría</button>
-            <button class="btn" style="font-size:12px;padding:6px 12px;" onclick="abrirModalProdSubcat()">+ Subcategoría</button>
-            <button class="btn primary" onclick="abrirModalReceta()"><span class="icon-slot" data-icon="plus"></span> Nuevo producto</button>
-          </div>
-        </div>
-        <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Definí los productos que fabricás con su categoría y subcategoría.</p>
-        <div id="prod-recetas-lista"></div>
-      </div>
-
-      <!-- Sub-panel: Hacer pedido a producción -->
-      <div id="prod-panel-producir" class="prod-panel">
-        <!-- Estado 1: Armar pedido -->
-        <div id="prod-armar-pedido">
-          <div class="seccion-titulo" style="margin-top:0;padding-top:0;">
-            <h3 style="font-size:15px;font-weight:600;margin:0;">Armar pedido a producción</h3>
-          </div>
-          <p style="font-size:12px;color:var(--text-muted);margin:0 0 16px;">Indicá cuántas unidades de cada producto y el stock actual disponible.</p>
-          <div id="prod-armar-lista"></div>
-          <div style="margin-top:20px;text-align:center;" id="prod-armar-footer">
-            <button class="btn primary" style="padding:12px 32px;font-size:15px;" onclick="confirmarPedidoProduccion()">✓ Confirmar pedido a producción</button>
-          </div>
-        </div>
-        <!-- Estado 2: Ver pedido -->
-        <div id="prod-ver-pedido" style="display:none;">
-          <div class="seccion-titulo" style="margin-top:0;padding-top:0;">
-            <h3 style="font-size:15px;font-weight:600;margin:0;" id="prod-ver-titulo">Pedido generado</h3>
-            <div id="prod-ver-acciones" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
-          </div>
-          <div id="prod-ver-content"></div>
-        </div>
+      <div id="hist-panel-historial" style="display:none;">
+        <div id="historial-content-prov"></div>
       </div>
     </div>
 
@@ -308,6 +263,16 @@
         <span class="phone-prefix">🇦🇷 +54</span>
         <input type="tel" id="prov-telefono" placeholder="11 1234 5678" class="phone-input" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)">
       </div>
+    </div>
+
+    <div class="form-row">
+      <label for="prov-cuit">CUIT (opcional)</label>
+      <input type="text" id="prov-cuit" placeholder="Ej: 30712345678" inputmode="numeric" maxlength="11" oninput="this.value=this.value.replace(/\D/g,'').slice(0,11)">
+    </div>
+
+    <div class="form-row">
+      <label for="prov-email">Email (opcional)</label>
+      <input type="email" id="prov-email" placeholder="contacto@proveedor.com">
     </div>
 
     <div class="modal-actions">
@@ -387,7 +352,7 @@
     </div>
     <input type="file" id="lista-input-img" accept="image/*,application/pdf" style="display:none;" onchange="procesarArchivo(event)">
 
-    <div class="loading-box" id="lista-loading">Procesando...</div>
+    <div id="lista-loading-container"></div>
 
     <div style="margin-bottom:10px;font-size:13px;color:var(--text-muted);" id="preview-info"></div>
 
@@ -420,52 +385,22 @@
   </div>
 </div>
 
-<!-- Modal: Producto / Receta -->
-<div class="modal-overlay" id="modal-receta">
-  <div class="modal" style="max-width:560px;">
-    <h3 id="modal-receta-titulo">Nuevo producto</h3>
-    <div class="form-row">
-      <label for="rec-nombre">Nombre del producto *</label>
-      <input type="text" id="rec-nombre" placeholder="Ej: Pan francés, Medialunas, Facturas">
+<!-- Modal recepcionar pedido -->
+<div class="modal-overlay modal-lg" id="modal-recepcionar" style="display:none;">
+  <div class="modal">
+    <h3>Recepcionar pedido</h3>
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px;" id="modal-rec-fecha"></div>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Tildá lo que llegó. Lo que quede destildado queda como faltante. Usá 🔄 si vino algo diferente al pedido.</p>
+    <!-- Barra de acciones rápidas -->
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button onclick="seleccionarTodosRecepcion()" style="flex:1;background:transparent;border:1px solid var(--border-hi);color:var(--text-2);padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer;">☑️ Seleccionar todos</button>
+      <button onclick="limpiarSeleccionRecepcion()" style="flex:1;background:transparent;border:1px solid var(--border-hi);color:var(--text-2);padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer;">🗑️ Limpiar todo</button>
     </div>
-    <div class="form-row">
-      <label>Categoría <span style="font-size:11px;color:var(--text-muted);text-transform:none;">(opcional)</span></label>
-      <select id="rec-cat" onchange="actualizarSubcatsProdModal()"><option value="">Sin categoría</option></select>
-    </div>
-    <div class="form-row">
-      <label>Subcategoría <span style="font-size:11px;color:var(--text-muted);text-transform:none;">(opcional)</span></label>
-      <select id="rec-subcat"><option value="">Sin subcategoría</option></select>
-    </div>
-    <div class="modal-actions">
-      <button class="btn" id="btn-borrar-receta" onclick="borrarReceta()" style="color:var(--danger);border-color:var(--danger-border);display:none;">Eliminar</button>
-      <button class="btn" onclick="cerrarModalReceta()">Cancelar</button>
-      <button class="btn primary" onclick="guardarReceta()">Guardar</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="modal-prod-cat">
-  <div class="modal" style="max-width:400px;">
-    <h3 id="modal-prod-cat-titulo">Nueva categoría</h3>
-    <div class="form-row"><label>Nombre</label><input type="text" id="prod-cat-nombre" placeholder="Ej: Panadería, Pastelería"></div>
-    <div class="form-row"><label>Color</label><input type="color" id="prod-cat-color" value="#3b82f6" style="width:70px;height:36px;padding:2px;cursor:pointer;border-radius:8px;border:1px solid var(--border);"></div>
-    <div class="modal-actions">
-      <button class="btn" id="btn-borrar-prod-cat" onclick="borrarProdCat()" style="color:var(--danger);border-color:var(--danger-border);display:none;">Eliminar</button>
-      <button class="btn" onclick="cerrarModalProdCat()">Cancelar</button>
-      <button class="btn primary" onclick="guardarProdCat()">Guardar</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="modal-prod-subcat">
-  <div class="modal" style="max-width:400px;">
-    <h3 id="modal-prod-subcat-titulo">Nueva subcategoría</h3>
-    <div class="form-row"><label>Nombre</label><input type="text" id="prod-subcat-nombre" placeholder="Ej: Galletitas, Budines"></div>
-    <div class="form-row"><label>Categoría</label><select id="prod-subcat-cat"></select></div>
-    <div class="modal-actions">
-      <button class="btn" id="btn-borrar-prod-subcat" onclick="borrarProdSubcat()" style="color:var(--danger);border-color:var(--danger-border);display:none;">Eliminar</button>
-      <button class="btn" onclick="cerrarModalProdSubcat()">Cancelar</button>
-      <button class="btn primary" onclick="guardarProdSubcat()">Guardar</button>
+    <div id="modal-rec-items" style="max-height:52vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
+    <div class="modal-actions" style="margin-top:16px;flex-wrap:wrap;gap:8px;">
+      <button class="btn" onclick="cerrarModalRecepcionar()">Cancelar</button>
+      <button class="btn" onclick="guardarRecepcion(false)" style="border-color:var(--emerald);color:var(--emerald);">💾 Guardar</button>
+      <button class="btn primary" onclick="guardarRecepcion(true)">✅ Guardar definitivamente</button>
     </div>
   </div>
 </div>
@@ -740,6 +675,8 @@ function abrirModalProv() {
   $('modal-prov-titulo').textContent = 'Nuevo proveedor';
   $('prov-nombre').value = '';
   $('prov-telefono').value = '';
+  $('prov-cuit').value = '';
+  $('prov-email').value = '';
   $('prov-logo-input').value = '';
   resetLogoPreview('', null);
 
@@ -758,6 +695,8 @@ function editarProveedor(id) {
   $('prov-nombre').value = p.nombre || '';
   var telEdit = (p.telefono || '').replace(/^\+54\s?/, '').trim();
   $('prov-telefono').value = telEdit;
+  $('prov-cuit').value = p.cuit || '';
+  $('prov-email').value = p.email || '';
   $('prov-logo-input').value = '';
   resetLogoPreview(p.nombre, p.logo_url);
   $('modal-prov').classList.add('open');
@@ -774,8 +713,15 @@ async function guardarProveedor() {
   var nombre = $('prov-nombre').value.trim();
   var telRaw = $('prov-telefono').value.replace(/\D/g, '').trim();
   var tel = telRaw ? ('+54' + telRaw) : '';
+  var precioTipo = 'envase';
+  var cuit = $('prov-cuit').value.replace(/\D/g, '').slice(0, 11) || null;
+  var email = $('prov-email').value.trim() || null;
   if (!nombre) {
     showToast('El nombre es obligatorio', 'error');
+    return;
+  }
+  if (cuit && cuit.length !== 11) {
+    showToast('El CUIT debe tener 11 dígitos', 'error');
     return;
   }
   var btn = $('btn-guardar-prov');
@@ -784,7 +730,7 @@ async function guardarProveedor() {
   try {
     if (provEditandoId) {
       // UPDATE
-      var updateData = { nombre: nombre, telefono: tel || null, actualizado: new Date().toISOString() };
+      var updateData = { nombre: nombre, telefono: tel || null, precio_tipo: precioTipo, cuit: cuit, email: email, actualizado: new Date().toISOString() };
       if (logoQuitado) {
         updateData.logo_url = null;
       } else if (logoFile) {
@@ -802,7 +748,7 @@ async function guardarProveedor() {
       // INSERT: crear primero, luego subir logo con el id real
       var { data: inserted, error: insError } = await supabase
         .from('proveedores')
-        .insert({ user_id: sesion.user.id, nombre: nombre, telefono: tel || null })
+        .insert({ user_id: sesion.user.id, nombre: nombre, telefono: tel || null, precio_tipo: precioTipo, cuit: cuit, email: email })
         .select()
         .single();
       if (insError) throw insError;
@@ -853,6 +799,296 @@ async function borrarProveedor(id) {
 // ============================================================
 // TABS — Cambiar entre Proveedores / Listas
 // ============================================================
+// ============================================================
+// TAB INGRESO (home dashboard)
+// ============================================================
+function renderIngreso() {
+  // Saludo dinámico por hora
+  var hora = new Date().getHours();
+  var saludo = hora < 12 ? '¡Buenos días! 👋' : hora < 19 ? '¡Buenas tardes! 👋' : '¡Buenas noches! 👋';
+  var el = $('ingreso-saludo');
+  if (el) el.textContent = saludo;
+
+  // Mostrar pedidos pendientes de recepción
+  var cont = $('ingreso-pendientes');
+  if (!cont) return;
+  var pendientes = histGet().filter(function(h) { return !h.recepcionado; });
+  if (!pendientes.length) { cont.innerHTML = ''; return; }
+  var html = '<div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);border-radius:12px;padding:14px 16px;">';
+  html += '<div style="font-size:13px;font-weight:600;color:var(--emerald-bright);margin-bottom:8px;">📥 ' + pendientes.length + ' pedido' + (pendientes.length !== 1 ? 's' : '') + ' pendiente' + (pendientes.length !== 1 ? 's' : '') + ' de recepción</div>';
+  pendientes.forEach(function(h) {
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(16,185,129,0.15);">';
+    html += '<span style="font-size:12px;color:var(--text);">' + escapeHtml(h.fecha) + ' · $' + formatPrecio(h.total) + '</span>';
+    html += '<button onclick="irARecepcionar()" style="background:var(--emerald);border:none;color:#fff;padding:4px 10px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;">Recepcionar</button>';
+    html += '</div>';
+  });
+  html += '</div>';
+  cont.innerHTML = html;
+}
+
+function irARecepcionar() {
+  cambiarTab('historial');
+  switchHistorialTab('recepcion');
+}
+
+// ============================================================
+// MODAL RECEPCIONAR PEDIDO
+// ============================================================
+var recepcionandoId = null;
+
+function abrirModalRecepcionar(id) {
+  var h = histGet().find(function(x) { return x.id === id; });
+  if (!h) return;
+  recepcionandoId = id;
+
+  $('modal-rec-fecha').textContent = h.fecha + ' · ' + h.items.length + ' productos · $' + formatPrecio(h.total);
+
+  // Agrupar por proveedor
+  var porProv = {};
+  h.items.forEach(function(it) {
+    if (!porProv[it.proveedorId]) porProv[it.proveedorId] = { nombre: it.proveedor, items: [] };
+    porProv[it.proveedorId].items.push(it);
+  });
+
+  // Pre-cargar faltantes y cambios existentes (para edición)
+  // Si es primera vez (nunca se guardó una recepción), todos empiezan destildados.
+  // El usuario tilda lo que efectivamente llegó.
+  var tieneDatosRecepcion = h.recepcionado || (h.faltantes && h.faltantes.length > 0) || (h.cambios && h.cambios.length > 0) || h._recepcionGuardada;
+  var faltantesExistentes = {};
+  if (!tieneDatosRecepcion) {
+    // Primera recepción: todos destildados (nada llegó aún)
+    h.items.forEach(function(it) { faltantesExistentes[it.itemId] = true; });
+  } else {
+    // Edición: restaurar estado previo
+    (h.faltantes || []).forEach(function(f) { faltantesExistentes[f.itemId] = true; });
+  }
+  var cambiosExistentes = {};
+  (h.cambios || []).forEach(function(c) { cambiosExistentes[c.itemId] = true; });
+
+  var html = '';
+  Object.keys(porProv).forEach(function(pid) {
+    var prov = porProv[pid];
+    html += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin:10px 0 4px;">' + escapeHtml(prov.nombre) + '</div>';
+    prov.items.forEach(function(it) {
+      var noLlego = faltantesExistentes[it.itemId];
+      var esCambio = cambiosExistentes[it.itemId];
+      var rowBorder = esCambio ? 'rgba(251,191,36,0.4)' : (noLlego ? 'var(--danger-border)' : 'var(--border)');
+      var rowBg    = esCambio ? 'rgba(251,191,36,0.05)' : 'var(--bg-elev)';
+      var rowOpacity = (!esCambio && noLlego) ? '0.45' : '1';
+      var cambioStyle = esCambio ? 'background:rgba(251,191,36,0.12);border-color:rgba(251,191,36,0.5);color:var(--gold-bright);' : '';
+      var cambioActive = esCambio ? 'true' : 'false';
+      html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;border:1px solid ' + rowBorder + ';background:' + rowBg + ';opacity:' + rowOpacity + ';" id="rec-row-' + it.itemId + '">';
+      html += '<input type="checkbox" data-item-id="' + it.itemId + '" ' + (noLlego ? '' : 'checked') + ' onchange="actualizarFilaRecepcion(this)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--emerald);flex-shrink:0;">';
+      html += '<span style="flex:1;font-size:12px;line-height:1.3;">' + escapeHtml(it.productoLista) + '</span>';
+      html += '<span style="font-size:11px;color:var(--text-muted);white-space:nowrap;">' + it.qty + ' · $' + formatPrecio(it.precio) + '</span>';
+      html += '<button data-cambio-id="' + it.itemId + '" data-cambio-active="' + cambioActive + '" onclick="toggleCambioRecepcion(this)" style="flex-shrink:0;background:transparent;border:1px solid var(--border-hi);color:var(--text-muted);padding:3px 8px;border-radius:6px;font-size:10px;cursor:pointer;white-space:nowrap;' + cambioStyle + '" title="Vino diferente al pedido">🔄 Cambio</button>';
+      html += '</div>';
+    });
+  });
+
+  $('modal-rec-items').innerHTML = html;
+  $('modal-recepcionar').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function actualizarFilaRecepcion(checkbox) {
+  actualizarEstiloFilaRecepcion(checkbox.getAttribute('data-item-id'));
+}
+
+function actualizarEstiloFilaRecepcion(itemId) {
+  var row = document.getElementById('rec-row-' + itemId);
+  if (!row) return;
+  var cb = row.querySelector('input[type="checkbox"]');
+  var cambioBtn = row.querySelector('button[data-cambio-id]');
+  var esCambio = cambioBtn && cambioBtn.getAttribute('data-cambio-active') === 'true';
+  var llego = cb && cb.checked;
+  if (esCambio) {
+    row.style.opacity = '1';
+    row.style.borderColor = 'rgba(251,191,36,0.4)';
+    row.style.background = 'rgba(251,191,36,0.05)';
+  } else if (!llego) {
+    row.style.opacity = '0.45';
+    row.style.borderColor = 'var(--danger-border)';
+    row.style.background = 'var(--bg-elev)';
+  } else {
+    row.style.opacity = '1';
+    row.style.borderColor = 'var(--border)';
+    row.style.background = 'var(--bg-elev)';
+  }
+}
+
+function toggleCambioRecepcion(btn) {
+  var active = btn.getAttribute('data-cambio-active') === 'true';
+  if (active) {
+    btn.setAttribute('data-cambio-active', 'false');
+    btn.style.background = 'transparent';
+    btn.style.borderColor = 'var(--border-hi)';
+    btn.style.color = 'var(--text-muted)';
+  } else {
+    btn.setAttribute('data-cambio-active', 'true');
+    btn.style.background = 'rgba(251,191,36,0.12)';
+    btn.style.borderColor = 'rgba(251,191,36,0.5)';
+    btn.style.color = 'var(--gold-bright)';
+  }
+  actualizarEstiloFilaRecepcion(btn.getAttribute('data-cambio-id'));
+}
+
+function cerrarModalRecepcionar() {
+  $('modal-recepcionar').style.display = 'none';
+  document.body.style.overflow = '';
+  recepcionandoId = null;
+}
+
+function seleccionarTodosRecepcion() {
+  $('modal-rec-items').querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+    if (!cb.checked) { cb.checked = true; actualizarEstiloFilaRecepcion(cb.getAttribute('data-item-id')); }
+  });
+}
+
+function limpiarSeleccionRecepcion() {
+  $('modal-rec-items').querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+    if (cb.checked) { cb.checked = false; actualizarEstiloFilaRecepcion(cb.getAttribute('data-item-id')); }
+  });
+}
+
+// definitivo=false → guarda borrador (editable después)
+// definitivo=true  → cierra definitivamente (solo lectura)
+function guardarRecepcion(definitivo) {
+  if (!recepcionandoId) return;
+  var hist = histGet();
+  var idx = hist.findIndex(function(x) { return x.id === recepcionandoId; });
+  if (idx < 0) return;
+
+  // Recopilar items no recibidos (unchecked = faltantes)
+  var faltantes = [];
+  $('modal-rec-items').querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+    if (!cb.checked) {
+      var itemId = cb.getAttribute('data-item-id');
+      var it = hist[idx].items.find(function(x) { return x.itemId === itemId; });
+      if (it) faltantes.push({ itemId: it.itemId, productoLista: it.productoLista, qty: it.qty, proveedor: it.proveedor });
+    }
+  });
+
+  // Recopilar items marcados como cambio
+  var cambios = [];
+  $('modal-rec-items').querySelectorAll('button[data-cambio-id]').forEach(function(btn) {
+    if (btn.getAttribute('data-cambio-active') === 'true') {
+      var itemId = btn.getAttribute('data-cambio-id');
+      var it = hist[idx].items.find(function(x) { return x.itemId === itemId; });
+      if (it) cambios.push({ itemId: it.itemId, productoLista: it.productoLista, qty: it.qty, proveedor: it.proveedor });
+    }
+  });
+
+  hist[idx].recepcionado    = true;          // mover a historial siempre
+  hist[idx]._recepcionGuardada = true;        // marca que ya tiene datos guardados
+  hist[idx].recepcionFinal  = !!definitivo;   // definitivo = no editable
+  hist[idx].fechaRecepcion  = Date.now();
+  hist[idx].faltantes       = faltantes;
+  hist[idx].cambios         = cambios;
+  histSet(hist);
+
+  cerrarModalRecepcionar();
+  renderHistorial();
+  renderIngreso();
+
+  var partes = [];
+  if (faltantes.length > 0) partes.push(faltantes.length + ' faltante' + (faltantes.length !== 1 ? 's' : ''));
+  if (cambios.length > 0) partes.push(cambios.length + ' cambio' + (cambios.length !== 1 ? 's' : ''));
+  var resumen = partes.length > 0 ? ' · ' + partes.join(' · ') : ' completo';
+  if (definitivo) {
+    showToast('Recepción cerrada definitivamente ✅' + resumen);
+  } else {
+    showToast('Recepción guardada 💾' + resumen + ' — podés seguir editando');
+  }
+}
+
+function editarRecepcion(id) {
+  abrirModalRecepcionar(id);
+}
+
+function verRecepcionSoloLectura(id) {
+  // Abre el modal pero deshabilita todos los controles (solo lectura)
+  abrirModalRecepcionar(id);
+  // Después de renderizar, deshabilitar inputs y botones de acción
+  setTimeout(function() {
+    var items = $('modal-rec-items');
+    if (!items) return;
+    items.querySelectorAll('input[type="checkbox"]').forEach(function(cb) { cb.disabled = true; });
+    items.querySelectorAll('button[data-cambio-id]').forEach(function(btn) { btn.disabled = true; btn.style.opacity = '0.5'; });
+    // Reemplazar footer: solo cerrar
+    var actions = $('modal-recepcionar').querySelector('.modal-actions');
+    if (actions) {
+      actions.innerHTML = '<div style="font-size:11px;color:var(--text-muted);flex:1;">🔒 Recepción cerrada definitivamente</div>' +
+        '<button class="btn" onclick="cerrarModalRecepcionar()">Cerrar</button>';
+    }
+    // Deshabilitar Limpiar/Seleccionar todos
+    $('modal-recepcionar').querySelectorAll('button[onclick*="Recepcion"]').forEach(function(b) {
+      b.disabled = true; b.style.opacity = '0.4';
+    });
+  }, 0);
+}
+
+// ============================================================
+// SUGERENCIA DE FALTANTES EN ARMAR PEDIDO
+// ============================================================
+function renderFaltantesSugerencia() {
+  var cont = $('pedido-faltantes-sugerencia');
+  if (!cont) return;
+  // Buscar el último pedido recepcionado que tenga faltantes
+  var hist = histGet();
+  var ultConFaltantes = null;
+  for (var i = 0; i < hist.length; i++) {
+    if (hist[i].recepcionado && (hist[i].faltantes || []).length > 0) {
+      ultConFaltantes = hist[i];
+      break;
+    }
+  }
+  if (!ultConFaltantes) { cont.innerHTML = ''; return; }
+  // Si ya están todos cargados en el pedido actual, no mostrar
+  var ped = pedidoGet();
+  var faltantes = ultConFaltantes.faltantes;
+  var todosYaCargados = faltantes.every(function(f) {
+    return ped.items && ped.items[f.itemId] && ped.items[f.itemId].qty > 0;
+  });
+  if (todosYaCargados) { cont.innerHTML = ''; return; }
+  var nombres = faltantes.slice(0, 3).map(function(f) { return escapeHtml(f.productoLista); }).join(', ');
+  if (faltantes.length > 3) nombres += ' y ' + (faltantes.length - 3) + ' más';
+  var html = '<div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);border-radius:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">';
+  html += '<div style="min-width:0;">';
+  html += '<div style="font-size:12px;font-weight:600;color:var(--gold-bright);margin-bottom:2px;">⚠️ ' + faltantes.length + ' faltante' + (faltantes.length !== 1 ? 's' : '') + ' del último pedido</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + nombres + '</div>';
+  html += '</div>';
+  html += '<button onclick="cargarFaltantesAlPedido()" style="flex-shrink:0;background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.4);color:var(--gold-bright);padding:6px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Agregar al pedido</button>';
+  html += '</div>';
+  cont.innerHTML = html;
+}
+
+function cargarFaltantesAlPedido() {
+  var hist = histGet();
+  var ultConFaltantes = null;
+  for (var i = 0; i < hist.length; i++) {
+    if (hist[i].recepcionado && (hist[i].faltantes || []).length > 0) {
+      ultConFaltantes = hist[i];
+      break;
+    }
+  }
+  if (!ultConFaltantes) return;
+  var ped = pedidoGet();
+  if (!ped.items) ped.items = {};
+  var count = 0;
+  ultConFaltantes.faltantes.forEach(function(f) {
+    if (f.itemId) {
+      ped.items[f.itemId] = { qty: f.qty };
+      count++;
+    }
+  });
+  pedidoSet(ped);
+  actualizarBadgePedido();
+  renderFaltantesSugerencia();
+  renderBuscarProducto();
+  showToast(count + ' faltante' + (count !== 1 ? 's' : '') + ' agregado' + (count !== 1 ? 's' : '') + ' al pedido');
+}
+
 function cambiarTab(tab) {
   document.querySelectorAll('.tab-btn, .sidebar-link').forEach(function(b) {
     if (b.dataset.tab) b.classList.toggle('active', b.dataset.tab === tab);
@@ -860,12 +1096,12 @@ function cambiarTab(tab) {
   document.querySelectorAll('.tab-section').forEach(function(s) {
     s.classList.toggle('active', s.id === 'tab-' + tab);
   });
+  if (tab === 'ingreso') renderIngreso();
   if (tab === 'listas') cargarListas();
-  if (tab === 'pedido') { renderBuscarProducto(); actualizarBadgePedido(); }
+  if (tab === 'pedido') { renderFaltantesSugerencia(); renderBuscarProducto(); actualizarBadgePedido(); }
   if (tab === 'ver-pedido') renderVerPedido();
   if (tab === 'resumen') renderResumen();
   if (tab === 'historial') renderHistorial();
-  if (tab === 'produccion') renderProduccion();
   window.scrollTo(0, 0);
 }
 
@@ -982,7 +1218,6 @@ function abrirModalLista(proveedorId) {
     $('btn-guardar-lista').disabled = true;
   }
 
-  $('lista-loading').style.display = 'none';
   $('modal-lista').classList.add('open');
 }
 
@@ -1020,6 +1255,32 @@ function recuperarItemsTruncados(texto) {
   }
   console.log('[IA] Recuperados ' + items.length + ' items del JSON truncado');
   return items;
+}
+
+function crearBarraProgreso(jobId) {
+  var container = $('lista-loading-container');
+  if (!container) return;
+  var div = document.createElement('div');
+  div.id = 'job-' + jobId;
+  div.style.cssText = 'background:var(--bg-elev2);border-radius:8px;padding:8px 10px;margin-bottom:6px;';
+  div.innerHTML =
+    '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;" id="job-txt-' + jobId + '">Iniciando...</div>' +
+    '<div style="background:var(--bg-elev3);border-radius:6px;height:5px;overflow:hidden;">' +
+    '<div id="job-bar-' + jobId + '" style="height:100%;background:var(--accent);border-radius:6px;width:0%;transition:width 0.3s;"></div>' +
+    '</div>';
+  container.appendChild(div);
+}
+
+function setProgresoJob(jobId, texto, pct) {
+  var txt = document.getElementById('job-txt-' + jobId);
+  var bar = document.getElementById('job-bar-' + jobId);
+  if (txt) txt.textContent = texto;
+  if (bar) bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+}
+
+function removeBarraProgreso(jobId) {
+  var el = document.getElementById('job-' + jobId);
+  if (el) el.remove();
 }
 
 // Parser tolerante: recorre el texto desde el primer "[" y devuelve TODOS los
@@ -1083,15 +1344,18 @@ async function procesarArchivo(event) {
 
   var esPDF = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
 
+  var jobId = Date.now().toString();
+  crearBarraProgreso(jobId);
+
   try {
     if (esPDF) {
-      await procesarPDF(file);
+      await procesarPDF(file, jobId);
     } else {
-      await procesarImagen(file);
+      await procesarImagen(file, jobId);
     }
   } catch(e) {
     console.error('procesarArchivo error:', e);
-    $('lista-loading').style.display = 'none';
+    removeBarraProgreso(jobId);
     showToast('Error: ' + (e.message || 'no se pudo procesar'), 'error');
   } finally {
     event.target.value = '';
@@ -1101,7 +1365,7 @@ async function procesarArchivo(event) {
 // ============================================================
 // PROCESAR IMAGEN (foto): una sola llamada con visión
 // ============================================================
-async function procesarImagen(file) {
+async function procesarImagen(file, jobId) {
   var tiposValidos = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
   var mimeType = file.type || 'image/jpeg';
   if (mimeType === 'image/jpg') mimeType = 'image/jpeg';
@@ -1109,9 +1373,7 @@ async function procesarImagen(file) {
     throw new Error('Tipo de imagen no soportado. Usá JPG, PNG, GIF o WEBP.');
   }
 
-  var loading = $('lista-loading');
-  loading.textContent = 'Procesando imagen con IA... (15-30 seg)';
-  loading.style.display = 'block';
+  setProgresoJob(jobId, 'Procesando imagen con IA...', 30);
   $('btn-guardar-lista').disabled = true;
 
   var base64 = await fileToBase64(file);
@@ -1138,21 +1400,23 @@ async function procesarImagen(file) {
     .filter(function(it) { return it.productoLista && it.precio !== null && it.precio > 0; });
 
   if (filasPreview.length === 0) {
-    loading.style.display = 'none';
+    removeBarraProgreso(jobId);
     showToast('No se detectaron productos. Probá con una foto de mejor calidad', 'error');
     return;
   }
 
   // Etapas 2-5: normalización, agrupamiento, detección de modo, cálculo
+  setProgresoJob(jobId, 'Normalizando productos...', 80);
   try {
     var provId = $('lista-prov-select').value;
-    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provId, loading);
+    var pipeEl = document.getElementById('job-txt-' + jobId);
+    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provId, pipeEl);
   } catch(pipeErr) {
     console.warn('[Pipeline] Falló, usando extracción básica:', pipeErr.message);
     showToast('Extraídos sin normalizar (' + pipeErr.message + ')', 'warn');
   }
 
-  loading.style.display = 'none';
+  removeBarraProgreso(jobId);
   renderPreview();
   showToast('IA extrajo ' + filasPreview.length + ' productos');
 }
@@ -1160,20 +1424,18 @@ async function procesarImagen(file) {
 // ============================================================
 // PROCESAR PDF: extraer texto local → detectar columnas → chunks
 // ============================================================
-async function procesarPDF(file) {
+async function procesarPDF(file, jobId) {
   if (typeof pdfjsLib === 'undefined') {
     throw new Error('PDF.js no cargó. Recargá la página.');
   }
-  var loading = $('lista-loading');
-  loading.textContent = 'Extrayendo texto del PDF...';
-  loading.style.display = 'block';
+  setProgresoJob(jobId, 'Extrayendo texto del PDF...', 5);
 
   // 1. Extraer texto del PDF localmente (sin IA)
   var buffer = await file.arrayBuffer();
   var pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
   var lineas = [];
   for (var i = 1; i <= pdf.numPages; i++) {
-    loading.textContent = 'Leyendo página ' + i + ' de ' + pdf.numPages + '...';
+    setProgresoJob(jobId, 'Leyendo página ' + i + ' de ' + pdf.numPages + '...', Math.round(5 + (i / pdf.numPages) * 20));
     var page = await pdf.getPage(i);
     var tc = await page.getTextContent();
     var lineasPag = {};
@@ -1195,7 +1457,7 @@ async function procesarPDF(file) {
   console.log('[PDF] Líneas extraídas:', lineas.length);
 
   // 2. Detectar columnas con IA usando una muestra
-  loading.textContent = 'Detectando columnas de precio...';
+  setProgresoJob(jobId, 'Detectando columnas...', 28);
   var muestra = lineas.slice(0, 60).join('\n');
   var columnas = await detectarColumnasPDF(muestra);
 
@@ -1205,10 +1467,10 @@ async function procesarPDF(file) {
 
   // 3. Si hay UNA columna sola, procesar directo. Si hay varias, mostrar selector
   if (columnas.precios.length === 1) {
-    await procesarPDFConColumna(lineas, columnas.precios[0].nombre);
+    await procesarPDFConColumna(lineas, columnas.precios[0].nombre, columnas.precios[0].ejemplo, columnas.precios, jobId);
   } else {
-    loading.style.display = 'none';
-    mostrarSelectorColumnasPDF(lineas, columnas);
+    removeBarraProgreso(jobId);
+    mostrarSelectorColumnasPDF(lineas, columnas, jobId);
   }
 }
 
@@ -1244,7 +1506,7 @@ async function detectarColumnasPDF(muestraTexto) {
   }
 }
 
-function mostrarSelectorColumnasPDF(lineas, columnas) {
+function mostrarSelectorColumnasPDF(lineas, columnas, jobId) {
   // Crear modal dinámico
   var opciones = columnas.precios.map(function(c, idx) {
     return '<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;background:var(--bg-elev2);">' +
@@ -1268,10 +1530,14 @@ function mostrarSelectorColumnasPDF(lineas, columnas) {
     var sel = document.querySelector('input[name="sel-col-pdf"]:checked');
     if (!sel) return;
     var nombreCol = sel.value;
+    // Buscar el ejemplo correspondiente a la columna elegida
+    var colObj = columnas.precios.find(function(c) { return c.nombre === nombreCol; }) || {};
     cerrarModalColPDF();
-    procesarPDFConColumna(lineas, nombreCol).catch(function(e) {
+    var newJobId = Date.now().toString();
+    crearBarraProgreso(newJobId);
+    procesarPDFConColumna(lineas, nombreCol, colObj.ejemplo, columnas.precios, newJobId).catch(function(e) {
       console.error(e);
-      $('lista-loading').style.display = 'none';
+      removeBarraProgreso(newJobId);
       showToast('Error: ' + (e.message || ''), 'error');
     });
   };
@@ -1282,21 +1548,19 @@ function cerrarModalColPDF() {
   if (m) m.remove();
 }
 
-async function procesarPDFConColumna(lineas, nombreColumna) {
-  var loading = $('lista-loading');
-  loading.style.display = 'block';
+async function procesarPDFConColumna(lineas, nombreColumna, ejemploColumna, todasLasColumnas, jobId) {
   filasPreview = [];
   var chunkSize = 80;
   var totalChunks = Math.ceil(lineas.length / chunkSize);
   var errores = 0;
   for (var c = 0; c < totalChunks; c++) {
-    loading.textContent = 'Procesando parte ' + (c + 1) + ' de ' + totalChunks + '... (' + filasPreview.length + ' productos encontrados)';
+    setProgresoJob(jobId, 'Procesando parte ' + (c + 1) + ' de ' + totalChunks + '... (' + filasPreview.length + ' productos)', Math.round(30 + (c / totalChunks) * 65));
     var chunkLineas = lineas.slice(c * chunkSize, (c + 1) * chunkSize);
     var items = [];
     // Hasta 3 intentos por chunk
     for (var intento = 1; intento <= 3; intento++) {
       try {
-        items = await extraerChunkConClaude(chunkLineas, nombreColumna);
+        items = await extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna, todasLasColumnas);
         break;
       } catch(chunkErr) {
         console.warn('[PDF] Chunk ' + (c + 1) + ' intento ' + intento + ' falló:', chunkErr.message);
@@ -1317,23 +1581,24 @@ async function procesarPDFConColumna(lineas, nombreColumna) {
     });
     renderPreview();
   }
-
   if (filasPreview.length === 0) {
-    loading.style.display = 'none';
+    removeBarraProgreso(jobId);
     showToast('No se pudieron extraer productos', 'error');
     return;
   }
 
   // Etapas 2-5: normalización, agrupamiento, detección de modo, cálculo
+  setProgresoJob(jobId, 'Normalizando ' + filasPreview.length + ' productos...', 97);
   try {
     var provIdPDF = $('lista-prov-select').value;
-    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provIdPDF, loading);
+    var pipeElPDF = document.getElementById('job-txt-' + jobId);
+    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provIdPDF, pipeElPDF);
   } catch(pipeErrPDF) {
     console.warn('[Pipeline PDF] Falló, usando extracción básica:', pipeErrPDF.message);
     showToast('Extraídos sin normalizar (' + pipeErrPDF.message + ')', 'warn');
   }
 
-  loading.style.display = 'none';
+  removeBarraProgreso(jobId);
   renderPreview();
   var msg = 'IA extrajo ' + filasPreview.length + ' productos';
   if (errores > 0) msg += ' (' + errores + ' partes fallaron)';
@@ -1341,11 +1606,44 @@ async function procesarPDFConColumna(lineas, nombreColumna) {
 }
 
 // extraerChunkConClaude recibe el array de líneas para poder subdividir si se trunca
-async function extraerChunkConClaude(chunkLineas, nombreColumna) {
+async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna, todasLasColumnas) {
   var textoCrudo = chunkLineas.join('\n');
   // Si el texto es muy largo, reducir a 20000 chars (unas 60-80 líneas = seguro)
   if (textoCrudo.length > 20000) textoCrudo = textoCrudo.slice(0, 20000);
-  var prompt = 'Extraé productos de esta lista de precios argentina. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques, NUNCA conviertas formato.\n\nDevolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":"texto_exacto","unidad":"...","alerta":false}]\n- nombre: nombre completo (marca, variedad, presentación)\n- precio: STRING con el texto EXACTO de la columna "' + nombreColumna + '" tal como aparece en el PDF, conservando puntos y comas (ej: "13.996,53" → devolver "13.996,53" como string). NO conviertas a número, NO saques símbolos. Es CRÍTICO mantener el formato argentino original.\n- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n- alerta: true solo si hay dos precios distintos para el mismo producto y no sabés cuál tomar\n- Ignorá encabezados, totales, líneas vacías. Incluí TODOS los productos.\n\nTexto:\n\n' + textoCrudo;
+
+  // Contexto de columnas: la elegida (con su ejemplo de valor) y las otras
+  // (con sus ejemplos) para que la IA sepa cuáles NO tomar.
+  var ctxColumna = 'COLUMNA OBJETIVO: "' + nombreColumna + '"';
+  if (ejemploColumna) {
+    ctxColumna += ' (valor típico: ' + ejemploColumna + ')';
+  }
+  var otrasCols = (todasLasColumnas || []).filter(function(c) { return c && c.nombre !== nombreColumna; });
+  if (otrasCols.length > 0) {
+    ctxColumna += '\nCOLUMNAS A IGNORAR (estos precios NO los queremos, pero pueden estar en la misma fila):';
+    otrasCols.forEach(function(c) {
+      ctxColumna += '\n  - "' + c.nombre + '"' + (c.ejemplo ? ' (valor típico: ' + c.ejemplo + ')' : '');
+    });
+  }
+
+  var prompt = 'Extraé productos de esta lista de precios argentina. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques, NUNCA conviertas formato.\n\n' +
+    ctxColumna + '\n\n' +
+    'Devolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":"texto_exacto","unidad":"...","alerta":false}]\n' +
+    '- nombre: nombre completo (marca, variedad, presentación)\n' +
+    '- precio: STRING con el texto EXACTO de la COLUMNA OBJETIVO "' + nombreColumna + '" tal como aparece en el PDF.\n' +
+    '  IMPORTANTE: en cada fila puede haber varios números (códigos, stock, distintas columnas de precio).\n' +
+    '  Usá el valor TÍPICO de la columna objetivo (' + (ejemploColumna || 'sin ejemplo') + ') como referencia de qué número buscar.\n' +
+    '  Si el orden de columnas cambia o no estás 100% seguro de cuál es el precio correcto, marcá alerta: true.\n' +
+    '  Conservá puntos y comas (ej: "13.996,53" → devolver "13.996,53" como string). NO conviertas a número.\n' +
+    '- unidad: tamaño del bulto/envase, extraído SIEMPRE del NOMBRE del producto (buscá "X N UNIDAD", ej: "X 5 LTS", "X 1 KG", "X 500 GR" → "5 lt", "1 kg", "500 g").\n' +
+    '  ⚠️ COLUMNA DE TIPO DE ENVASE: muchas listas tienen una columna con códigos abreviados junto al precio\n' +
+    '  (KG, LTS, BOL, CAJ, PAQ, LAT, FCO, POT, POM, BOT, UN., etc.).\n' +
+    '  ESOS CÓDIGOS NO SON LA UNIDAD DE TAMAÑO — son el tipo de envase o la forma de cotización.\n' +
+    '  NUNCA pongas solo "KG", "LTS", "BOL", "CAJ", "PAQ" en el campo unidad.\n' +
+    '  Extraé el tamaño numerico SOLO del nombre: "X 5 LTS" → "5 lt", "X 2.9 KG" → "2.9 kg", "X 500 GR" → "500 g".\n' +
+    '  Si el nombre no tiene tamaño explícito, usá ""\n' +
+    '- alerta: true si NO estás seguro de cuál es el precio correcto de la columna objetivo (mejor marcar dudoso que adivinar mal)\n' +
+    '- Ignorá encabezados, totales, líneas vacías. Incluí TODOS los productos.\n\n' +
+    'Texto:\n\n' + textoCrudo;
   var proveedorId = $('lista-prov-select').value;
   var resp = await fetch('/api/claude', {
     method: 'POST',
@@ -1451,11 +1749,25 @@ var SYSTEM_NORMALIZACION = [
   '   "Cocinero", "Costa del Sol", "Cañuelas", "Chacabuco", "Gallo", "Hellmann\'s",',
   '   "Noalsa", "Fargo", "La Serenísima", "Mastellone", "Sancor" no van en la clave.',
   '',
-  '2. TIPO ESPECÍFICO: usá el nombre genérico más específico posible.',
+  '2. TIPO ESPECÍFICO (CRÍTICO): usá el nombre genérico más específico posible.',
   '   "aceite girasol" ≠ "aceite oliva" ≠ "aceite maíz" (son DISTINTOS)',
   '   "harina 000" ≠ "harina 0000" ≠ "harina 00" ≠ "harina integral" (son DISTINTOS)',
   '   "arroz largo fino" ≠ "arroz doble carolina" ≠ "arroz yamaní" (son DISTINTOS)',
   '   "mayonesa" ≠ "mostaza" ≠ "ketchup"',
+  '',
+  '   PROHIBIDO devolver tipos genéricos de UNA SOLA PALABRA cuando hay subtipos.',
+  '   MAL: "aceite", "vinagre", "aceto", "harina", "arroz", "azucar", "queso",',
+  '        "cobertura", "dulce", "mermelada", "fruto seco", "fruta seca", "semillas",',
+  '        "aditivo", "edulcorante", "cacao", "conserva", "jugo", "levadura",',
+  '        "galletita", "snack", "leche".',
+  '   BIEN: "aceite girasol", "vinagre manzana", "aceto balsamico", "harina 000",',
+  '         "queso cremoso", "cobertura amarga", "dulce de leche", "mermelada frutilla",',
+  '         "cacao amargo", "levadura fresca", "leche entera", etc.',
+  '   Si el nombre del producto NO indica el subtipo específico, usá el tipo más',
+  '   probable dado el contexto. Ej: "ACEITE COCINERO X 5 LT" → "aceite girasol"',
+  '   (Cocinero es marca de aceite girasol).',
+  '   "MIEL" sí es OK (no hay subtipos relevantes en comercios).',
+  '   "SAL" sí es OK genérico salvo que diga "fina", "gruesa", "marina".',
   '',
   '3. TAMAÑO NORMALIZADO — convertí TODO a unidades base: kg, L o u.',
   '   IMPORTANTE: NUNCA dejes "cc", "ml", "gr" como unidad_base. Convertí siempre:',
@@ -1481,6 +1793,16 @@ var SYSTEM_NORMALIZACION = [
   '   - "200 x 8cc" (cc pequeño, N razonable) → tamano: 1.6, unidad_base: "L"',
   '   - "100 x 5gr" → tamano: 0.5, unidad_base: "kg"',
   '',
+  '   ⚠️ MULTIPACK ANIDADO "N CAJA (M×P gr)" — MUY IMPORTANTE:',
+  '   Cuando el formato es "N CAJA (M×P gr/cc)" o "NCAJA (M×P GR)", el precio en la lista',
+  '   es SIEMPRE de la unidad interior más pequeña (P gr/cc), NO del total del lote.',
+  '   El "N CAJA" y "M×" describen la presentación comercial, no la unidad de precio.',
+  '   Regla: usá tamano = P (la unidad interior, en kg o L).',
+  '   - "LEVADURA FRESCA LEVEX 12CAJA (20X50 GR)" → tamano: 0.05, unidad_base: "kg"  (50gr = la unidad)',
+  '   - "SAL 6CAJA (24X1KG)" → tamano: 1, unidad_base: "kg"  (1kg = la unidad)',
+  '   - "ACEITE 12CAJA (6X900CC)" → tamano: 0.9, unidad_base: "L"  (900cc = 0.9L = la unidad)',
+  '   Señal clave: si hay paréntesis con (MxP unidad) al final, P es el tamano.',
+  '',
   '   CUIDADO CON CODIGOS DE PRODUCTO: muchos productos tienen un código numérico',
   '   en el nombre que NO es cantidad. Ejemplos REALES de no-multipack:',
   '   - "Baño Blanco Aguila 9473 x 10 kg" → 9473 es CODIGO. tamano: 10, unidad: kg.',
@@ -1498,6 +1820,38 @@ var SYSTEM_NORMALIZACION = [
   '   IMPORTANTE: números seguidos de "meses", "días" o "años" son tiempo de maduración,',
   '   NO son peso ni tamaño. "24 meses", "18 meses" → ignorar, NO incluir como tamaño.',
   '   Ej: "PARMESANO EN BLOQUE 24 MESES" → clave: "queso parmesano 24 meses", tamano: 1, unidad: u',
+  '',
+  '   ⚠️ ERROR FRECUENTE DE OCR — "CC" LEÍDO EN VEZ DE "KG" o "LT":',
+  '   En PDFs con fuentes especiales, la K puede leerse como C → "KG" aparece como "CC".',
+  '   También "LT" puede aparecer como "U" o "LT" confundido con otra cosa.',
+  '   Regla: si ves "X.Xcc" Y el valor en cc resultante es absurdamente pequeño para ese producto,',
+  '   reinterpretá la unidad:',
+  '   PRODUCTOS SÓLIDOS (tamano en cc → probablemente KG):',
+  '   - mayonesa, mostaza, dulce de leche, manteca, harina, mermelada, pasta, ganache,',
+  '     arvejas, choclo, legumbres, cereales, queso, fiambres, carnes, verduras → usá KG',
+  '   - Ejemplo: "MAYONESA X 2.9CC" → tamano: 2.9, unidad_base: "kg"',
+  '   - Ejemplo: "ARVEJAS X 5CC" → tamano: 5, unidad_base: "kg"',
+  '   - Ejemplo: "CHOCLO EN GRANO X 2.5CC" → tamano: 2.5, unidad_base: "kg"',
+  '   PRODUCTOS LÍQUIDOS QUE VIENEN EN LT (tamano en cc → probablemente LT):',
+  '   - vinagre, vino, cerveza, jugos, gaseosas, caldos → si el valor > 0.5 y la presentación',
+  '     comercial no existe en pocos cc, usá L (dividí por 1000 si el valor parece estar en mL,',
+  '     o interpretá directamente como L si el valor es 1, 2, 5, etc.)',
+  '   - Ejemplo: "VINAGRE X 5CC" → tamano: 5, unidad_base: "L"  (5 litros, no 5cc)',
+  '   - Ejemplo: "VINAGRE X 0.5CC" → tamano: 0.5, unidad_base: "L"  (500mL)',
+  '   Regla práctica: si tamano_en_cc < 100 y el producto no es esencia/colorante/extracto concentrado,',
+  '   reinterpretá la unidad (KG para sólidos, L para líquidos a granel).',
+  '',
+  '   ⚠️ CAMPO "unidad" llega como código sin número — COLUMNA :UNI: del PDF:',
+  '   Algunas listas mayoristas tienen una columna de tipo de envase (:UNI:, UNIDAD, PRES) con códigos:',
+  '     KG / LTS → el precio es POR KG o POR LITRO (precio unitario). El tamaño del bulto está en el nombre.',
+  '     BOL / CAJ / PAQ / LAT / FCO / POT / POM / BOT / UN → el precio es POR ENVASE. Tamaño en el nombre.',
+  '   Si el campo `unidad` que recibes es SOLO un código (sin número), buscá el tamaño en el nombre:',
+  '   - Patrón "X N LTS/KG/GR/CC" → extraé N como tamano (ej: "X 5 LTS" → tamano: 5, unidad_base: "L")',
+  '   - Ejemplo: nombre="ACEITE GIRASOL X 5 LTS.", unidad="LTS" → tamano: 5, unidad_base: "L"',
+  '   - Ejemplo: nombre="EXTRACTO DE MALTA X 6 KG", unidad="KG"  → tamano: 6, unidad_base: "kg"',
+  '   - Ejemplo: nombre="MAYONESA X 2.9CC", unidad="BOL"         → tamano: 2.9, unidad_base: "kg" (CC→KG regla sólidos)',
+  '   - Ejemplo: nombre="LEVADURA LEVASAF X 500GR", unidad="PAQ" → tamano: 0.5, unidad_base: "kg"',
+  '   NUNCA defaultees tamano=1 si el nombre contiene "X N" con N > 1.',
   '',
   '4. FORMATO: "[tipo] [tamaño][unidad]" todo minúsculas sin acentos.',
   '   Ejemplos: "aceite girasol 5L", "harina 000 25kg", "levadura fresca 0.5kg", "mayonesa 2.9kg"',
@@ -1529,17 +1883,23 @@ var SYSTEM_DETECCION_MODO = [
   'Verificá siempre que la relación sea coherente con el tamaño.',
   '',
   'MÉTODO SECUNDARIO (1 solo proveedor o factor no coincide):',
-  '- Presentación con SOLO unidad sin número ("LTS", "KG", "BOT", "UNI", "x kg", "x lt") → UNITARIO con confianza 0.85.',
+  '- COLUMNA :UNI: de listas mayoristas: algunos PDFs tienen una columna especial con el tipo de cotización.',
+  '  Cuando el campo `unidad` es SOLO un código sin número, aplicá directamente:',
+  '  * "KG" o "LTS" solos → UNITARIO (precio ya es por kg o litro). confianza: 0.9',
+  '  * "BOL", "CAJ", "PAQ", "LAT", "FCO", "POT", "POM", "BOT", "UN." solos → PACK (precio por envase). confianza: 0.85',
+  '- Presentación con SOLO unidad sin número explícito ("x kg", "x lt", "por litro") → UNITARIO con confianza 0.85.',
   '- Presentación con envase + cantidad ("Bolsa x 25 kg", "Caja x 12 uds", "Bidón x 5 lts"):',
   '  NO asumas automáticamente PACK. Listas mayoristas frecuentemente cotizan por kg/L aunque',
   '  mencionen el envase como referencia. Usá rangos esperados del producto como sanity check:',
   '  * Si el precio (asumiendo PACK) ÷ tamaño da un valor coherente con el rango típico del producto → PACK.',
   '  * Si ese precio sería absurdamente bajo o alto por unidad → UNITARIO.',
   '  * Si dudás: PACK con confianza 0.6 (para que quede marcado "para revisar").',
-  '- Rangos típicos en ARS (2025, aprox):',
-  '  aceite girasol 800-1500/L · aceite oliva 5000-15000/L · aceto balsámico 1500-8000/L',
-  '  harina 600-1200/kg · azúcar 700-1300/kg · arroz 1200-2500/kg · sal 200-500/kg',
-  '  productos premium o gourmet pueden ser 2-5x estos valores.',
+  '- Rangos típicos en ARS (mayo 2026, precios mayoristas argentinos):',
+  '  aceite girasol 2000-6500/L · aceite maíz 2500-8000/L · aceite oliva 10000-100000/L',
+  '  vinagre 1000-9000/L · aceto balsámico 3000-60000/L',
+  '  harina 1000-6000/kg · azúcar 1200-5000/kg · arroz 2000-10000/kg · sal 300-3000/kg',
+  '  mayonesa 4000-18000/kg · mostaza 4000-22000/kg · leche 1500-9000/L · cerveza 2000-16000/L',
+  '  productos premium o gourmet pueden estar en la mitad alta de estos rangos.',
   '',
   'Devolvé SOLO un array JSON:',
   '[{',
@@ -1716,6 +2076,8 @@ function calcularPrecios(grupos, resultadosModo) {
           modoInfo ? (modoInfo.confianza || 0.5) : 0.5
         ),
         revisar: !modoInfo || (modoInfo.confianza || 0) < 0.7 || (prov.confianza_normalizacion || 1) < 0.7,
+        precio_alto_envase_chico: modoInfo ? (modoInfo.envase_chico || false) : false,
+        tamano_sospechoso: modoInfo ? (modoInfo.tamano_sospechoso || false) : false,
         razonamiento: modoInfo ? modoInfo.razonamiento : null
       });
     });
@@ -1837,6 +2199,116 @@ async function _fetchClaude(payload) {
   }
 }
 
+// Red de seguridad: si la IA devuelve un tipo generico de 1 palabra pero el
+// nombre del producto tiene info para inferir el subtipo, refinamos el tipo.
+// Esto evita que "Aceite Girasol Cocinero" se normalice como tipo="aceite"
+// (lo que mata el lookup en pl_rangos_precio).
+var SUBTIPOS_REFINAMIENTO = {
+  'aceite':   ['girasol', 'oliva', 'maiz', 'soja', 'mezcla', 'uva', 'canola', 'arroz', 'coco', 'sesamo', 'lino', 'algodon'],
+  'vinagre':  ['manzana', 'vino', 'alcohol', 'arroz', 'blanco', 'tinto'],
+  'aceto':    ['balsamico', 'modena'],
+  'harina':   ['0000', '000', '00', 'leudante', 'integral', 'maiz', 'mandioca', 'garbanzo', 'almendra', 'coco', 'arroz', 'avena', 'centeno', 'cebada', 'gluten', 'soja', 'lino', 'amaranto', 'quinoa', 'mijo'],
+  'arroz':    ['largo fino', 'doble carolina', 'yamani', 'integral', 'arborio', 'jasmin', 'basmati', 'parboiled', 'largo', 'doble'],
+  'azucar':   ['rubia', 'negra', 'impalpable', 'mascabo', 'organica', 'comun', 'refinada'],
+  'sal':      ['fina', 'gruesa', 'marina', 'parrillera', 'rosada', 'himalaya'],
+  'cacao':    ['amargo', 'dulce', 'puro', 'soluble', 'alcalino'],
+  'leche':    ['entera', 'descremada', 'condensada', 'evaporada', 'polvo', 'almendra', 'coco', 'soja', 'avena'],
+  'levadura': ['fresca', 'seca', 'instantanea'],
+  'crema':    ['leche', 'chantilly', 'pastelera'],
+  'dulce':    ['alfajorero', 'leche alfajorero', 'leche repostero', 'leche', 'batata', 'membrillo', 'frambuesa', 'frutilla', 'durazno'],
+  'cobertura':['amarga', 'leche', 'blanca', 'semiamarga'],
+  'galletita':['agua', 'dulce', 'maria', 'criolla', 'rellena', 'chocolate', 'avena', 'oblea'],
+  'fideos':   ['secos', 'frescos', 'tirabuzon', 'spaghetti', 'mostachol', 'penne', 'fettuccine', 'fusilli'],
+  'jugo':     ['naranja', 'manzana', 'multifruta', 'durazno', 'pomelo', 'limon'],
+  'colorante':['rojo', 'amarillo', 'azul', 'verde', 'negro', 'comestible'],
+  'condimento':['provenzal', 'mixto', 'criollo', 'pollo', 'pescado'],
+  'fruto':    ['seco', 'secos'],
+  'fruta':    ['seca', 'secas', 'desecada'],
+  'semillas': ['sesamo', 'lino', 'chia', 'girasol', 'calabaza', 'amapola'],
+  // Fiambrería
+  'jamon':    ['cocido', 'crudo', 'serrano', 'natural', 'paleta', 'york'],
+  'salame':   ['milan', 'fuet', 'colonia', 'tandilero'],
+  'paleta':   ['cocida', 'cruda'],
+  'mortadela':['comun', 'taco', 'italiana'],
+  'bondiola': ['ahumada', 'cruda'],
+  'morcilla': ['blanca', 'vasca', 'criolla'],
+  'aceituna': ['verde', 'negra', 'rellena', 'descarozada'],
+  'panceta':  ['ahumada', 'fresca', 'salada'],
+  // Repostería avanzada
+  'pulpa':    ['frutilla', 'durazno', 'maracuya', 'mango', 'palta', 'frambuesa', 'manzana', 'naranja'],
+  'premezcla':['brownie', 'cookies', 'muffin', 'torta', 'panettone', 'pan de queso', 'tiramisu', 'bizcochuelo', 'viena', 'polvoron'],
+  'pasta':    ['almendra', 'mani', 'avellana', 'pistacho', 'maracuya', 'mascarpone', 'sambayon', 'caramelo', 'banana', 'mango', 'tiramisu'],
+  'aditivo':  ['cotton', 'formula', 'mejora', 'tentic', 'masa', 'factura'],
+  'syrup':    ['vainilla', 'caramelo', 'avellana', 'canela', 'menta', 'chocolate'],
+  'topping':  ['frutilla', 'durazno', 'frutos del bosque', 'chocolate', 'caramelo'],
+  'gel':      ['brillo', 'neutro', 'frutilla'],
+  'jalea':    ['frio', 'caliente', 'neutro', 'frutilla'],
+  'chocolate':['semiamargo', 'leche', 'blanco', 'amargo', 'rallado'],
+  'mani':     ['fileteado', 'crocante', 'pelado', 'tostado'],
+  'nuez':     ['moscada', 'pelada', 'entera'],
+  'almendra': ['pelada', 'fileteada', 'molida', 'ramillada'],
+  'avellana': ['pelada', 'fileteada', 'molida'],
+  'mozzarella':['barra', 'cilindro', 'bocchino', 'fresca'],
+  'ricota':   ['entera', 'descremada', 'premezcla'],
+  // Carnes
+  'milanesa': ['nalga', 'peceto', 'pollo', 'cerdo'],
+  'chorizo':  ['seco', 'fresco', 'colorado', 'parrillero', 'puro', 'cerdo', 'bombon'],
+  'bife':     ['chorizo', 'lomo', 'costilla', 'ancho'],
+  'pollo':    ['entero', 'pechuga', 'pata', 'muslo', 'suprema'],
+  'lomo':     ['ahumado', 'horneado', 'entero'],
+  'mermelada':['alfajorero', 'arandano alfajorero', 'frutilla', 'durazno', 'damasco', 'damazco', 'higo', 'naranja', 'frambuesa', 'arandano', 'ciruela', 'batata', 'membrillo', 'frutos del bosque', 'manzana'],
+  // Especias
+  'pimienta': ['negra', 'blanca', 'cayena', 'mixta', 'molida'],
+  'esencia':  ['vainilla', 'almendra', 'limon', 'menta', 'naranja', 'azahar', 'banana', 'manteca', 'pan dulce', 'queso'],
+  // Quesos expandido
+  'queso':    ['cremoso', 'parmesano', 'pategrasa', 'pategras', 'rallado', 'mozzarella', 'azul', 'sardo', 'reggianito', 'provolone', 'roquefort', 'gouda', 'cheddar', 'cuartirolo', 'fontina', 'gruyere', 'mascarpone', 'port salut', 'de cabra', 'cabra', 'mar del plata', 'barra', 'fundido', 'emmental', 'danbo'],
+  // Repostería avanzada (fuente: listas de proveedores)
+  'variegato':['frutilla', 'maracuya', 'frutos rojos', 'frutos del bosque', 'avellana', 'marroc', 'caramelo', 'berries'],
+  'ganache':  ['semiamargo', 'blanco', 'mani', 'leche', 'marroc'],
+  'bano':     ['reposteria', 'moldeo', 'semiamargo', 'leche', 'blanco', 'amargo', 'marron'],
+  'mix':      ['cake', 'brownie', 'muffin', 'cookies', 'torta', 'bizcochuelo'],
+  'mousse':   ['chocolate', 'vainilla', 'frutilla', 'maracuya', 'limone'],
+  'micro':    ['galletita', 'cereal']
+};
+
+function refinarTipoGenerico(tipo, nombreOriginal) {
+  if (!tipo || !nombreOriginal) return tipo;
+  var t = String(tipo).toLowerCase().trim();
+  if (t.indexOf(' ') >= 0) return tipo; // ya es especifico (2+ palabras)
+  var n = String(nombreOriginal).toLowerCase();
+
+  // Estrategia 1: subtipos predefinidos (mas exactos)
+  var subs = SUBTIPOS_REFINAMIENTO[t];
+  if (subs) {
+    var subsOrdenados = subs.slice().sort(function(a, b) { return b.length - a.length; });
+    for (var i = 0; i < subsOrdenados.length; i++) {
+      var sub = subsOrdenados[i];
+      var re = new RegExp('\\b' + sub.replace(/\s+/g, '\\s+') + '\\b', 'i');
+      if (re.test(n)) {
+        console.log('[Norm] Tipo refinado: "' + tipo + '" → "' + (t + ' ' + sub) + '" (nombre: "' + nombreOriginal + '")');
+        return t + ' ' + sub;
+      }
+    }
+  }
+
+  // Estrategia 2: patron "tipo de PALABRA" → tipo + PALABRA
+  // Ej: "Harina de Garbanzo" → tipo "harina garbanzo"
+  //     "Aceite de Coco" → tipo "aceite coco"
+  // Cubre casos donde el subtipo no esta en la lista predefinida.
+  var rePatron = new RegExp('\\b' + t + '\\s+de\\s+([a-zñáéíóú]+)', 'i');
+  var m = n.match(rePatron);
+  if (m && m[1]) {
+    var palabra = m[1].toLowerCase();
+    // Filtrar palabras que no son subtipos
+    var stopWords = ['la', 'el', 'los', 'las', 'un', 'una', 'tipo', 'calidad', 'marca', 'segunda', 'primera'];
+    if (stopWords.indexOf(palabra) < 0 && palabra.length >= 3) {
+      console.log('[Norm] Tipo refinado por "de": "' + tipo + '" → "' + (t + ' ' + palabra) + '" (nombre: "' + nombreOriginal + '")');
+      return t + ' ' + palabra;
+    }
+  }
+  return tipo;
+}
+
 async function _normBatch(batch) {
   var prompt = batch.map(function(p) {
     return 'ID:' + p.id + ' | NOMBRE: ' + p.nombre_original +
@@ -1866,10 +2338,25 @@ async function _normBatch(batch) {
     return a.concat(b);
   }
 
+  // Indice por id para refinar el tipo con el nombre original del producto
+  var batchPorId = {};
+  batch.forEach(function(p) { batchPorId[p.id] = p; });
+  var refinar = function(arr) {
+    if (!Array.isArray(arr)) return arr;
+    return arr.map(function(item) {
+      if (!item || !item.tipo) return item;
+      var orig = batchPorId[item.id_original];
+      var nombre = orig ? (orig.nombre_original || '') : '';
+      var tipoRef = refinarTipoGenerico(item.tipo, nombre);
+      if (tipoRef !== item.tipo) item.tipo = tipoRef;
+      return item;
+    });
+  };
+
   // Intento 1: parse directo
   try {
     var parsed = JSON.parse(txt);
-    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed)) return refinar(parsed);
   } catch(e) {}
 
   // Intento 2: slice entre primer [ y último ]
@@ -1877,7 +2364,7 @@ async function _normBatch(batch) {
   if (ini >= 0 && fin > ini) {
     try {
       var parsed2 = JSON.parse(txt.slice(ini, fin + 1));
-      if (Array.isArray(parsed2)) return parsed2;
+      if (Array.isArray(parsed2)) return refinar(parsed2);
     } catch(e2) {}
   }
 
@@ -1885,7 +2372,7 @@ async function _normBatch(batch) {
   var recuperados = recuperarObjetosJsonArray(txt);
   if (recuperados.length > 0) {
     console.warn('[normBatch] JSON truncado pero recuperados ' + recuperados.length + '/' + batch.length + ' items');
-    return recuperados;
+    return refinar(recuperados);
   }
 
   console.error('[normBatch] JSON inválido. Inicio respuesta:', txt.slice(0, 300));
@@ -1953,40 +2440,52 @@ var RANGOS_PRECIO_AR = {
   // Rangos amplios: incluyen mayorista (low) y premium (high) para que el
   // algoritmo solo decida cuando UNA de las 2 interpretaciones (pack/unitario)
   // queda claramente fuera. Si ambas caen dentro -> ambiguo -> IA decide.
-  'aceite girasol':   { min: 600,  max: 4000,  unidad: 'L' },
-  'aceite oliva':     { min: 3000, max: 60000, unidad: 'L' },
-  'aceite maiz':      { min: 800,  max: 5000,  unidad: 'L' },
-  'aceite mezcla':    { min: 600,  max: 4000,  unidad: 'L' },
-  'vinagre':          { min: 300,  max: 5000,  unidad: 'L' },
-  'vinagre manzana':  { min: 500,  max: 8000,  unidad: 'L' },
-  'aceto':            { min: 1000, max: 30000, unidad: 'L' },
-  'aceto balsamico':  { min: 1000, max: 30000, unidad: 'L' },
-  'harina':           { min: 300,  max: 3000,  unidad: 'kg' },
-  'azucar':           { min: 400,  max: 2500,  unidad: 'kg' },
-  'arroz':            { min: 700,  max: 5000,  unidad: 'kg' },
-  'sal':              { min: 80,   max: 1500,  unidad: 'kg' },
-  'levadura':         { min: 1200, max: 12000, unidad: 'kg' },
-  'mayonesa':         { min: 1200, max: 8000,  unidad: 'kg' },
-  'mostaza':          { min: 1200, max: 10000, unidad: 'kg' },
-  'ketchup':          { min: 1200, max: 8000,  unidad: 'kg' },
-  'leche':            { min: 500,  max: 4000,  unidad: 'L' },
-  'agua':             { min: 80,   max: 3000,  unidad: 'L' },
-  'gaseosa':          { min: 300,  max: 4000,  unidad: 'L' },
-  'cerveza':          { min: 600,  max: 8000,  unidad: 'L' }
+  // Calibrados con precios reales Argentina mayo 2026 (ej: aceite girasol ~$3500/L).
+  'aceite girasol':   { min: 2000,  max: 6500,  unidad: 'L' },
+  'aceite oliva':     { min: 10000, max: 100000, unidad: 'L' },
+  'aceite maiz':      { min: 2500,  max: 8000,  unidad: 'L' },
+  'aceite mezcla':    { min: 2000,  max: 6500,  unidad: 'L' },
+  'vinagre':          { min: 1000,  max: 9000,  unidad: 'L' },
+  'vinagre manzana':  { min: 1500,  max: 15000, unidad: 'L' },
+  'aceto':            { min: 3000,  max: 60000, unidad: 'L' },
+  'aceto balsamico':  { min: 3000,  max: 60000, unidad: 'L' },
+  'harina':           { min: 1000,  max: 6000,  unidad: 'kg' },
+  'azucar':           { min: 1200,  max: 5000,  unidad: 'kg' },
+  'arroz':            { min: 2000,  max: 10000, unidad: 'kg' },
+  'sal':              { min: 300,   max: 3000,  unidad: 'kg' },
+  'levadura':         { min: 4000,  max: 25000, unidad: 'kg' },
+  'mayonesa':         { min: 4000,  max: 18000, unidad: 'kg' },
+  'mostaza':          { min: 4000,  max: 22000, unidad: 'kg' },
+  'ketchup':          { min: 4000,  max: 18000, unidad: 'kg' },
+  'leche':            { min: 1500,  max: 9000,  unidad: 'L' },
+  'agua':             { min: 300,   max: 6000,  unidad: 'L' },
+  'gaseosa':          { min: 1000,  max: 8000,  unidad: 'L' },
+  'cerveza':          { min: 2000,  max: 16000, unidad: 'L' }
 };
 
 // Busca el rango típico aplicable a un tipo (matching laxo: "aceite girasol marca x"
 // matchea "aceite girasol").
+// Normaliza tipo para matching laxo (idempotente con _normTipo de la cache DB)
+function _normTipoLite(t) {
+  return String(t || '').toLowerCase().trim()
+    .replace(/\b(de|del|la|el|los|las)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function rangoParaTipo(tipo, unidadBase) {
   if (!tipo) return null;
   var t = String(tipo).toLowerCase().trim();
-  // 1) Match exacto
-  if (RANGOS_PRECIO_AR[t] && RANGOS_PRECIO_AR[t].unidad === unidadBase) return RANGOS_PRECIO_AR[t];
-  // 2) Match por prefijo (la clave del catalogo aparece al inicio del tipo)
+  var tn = _normTipoLite(t);
+  // 1) Match exacto (raw o normalizado)
+  if (RANGOS_PRECIO_AR[t]  && RANGOS_PRECIO_AR[t].unidad  === unidadBase) return RANGOS_PRECIO_AR[t];
+  if (RANGOS_PRECIO_AR[tn] && RANGOS_PRECIO_AR[tn].unidad === unidadBase) return RANGOS_PRECIO_AR[tn];
+  // 2) Match por prefijo, tambien sobre el tipo normalizado (sin "de")
   var keys = Object.keys(RANGOS_PRECIO_AR);
   for (var i = 0; i < keys.length; i++) {
     var k = keys[i];
-    if (t.indexOf(k) === 0 && RANGOS_PRECIO_AR[k].unidad === unidadBase) return RANGOS_PRECIO_AR[k];
+    if (RANGOS_PRECIO_AR[k].unidad !== unidadBase) continue;
+    if (t.indexOf(k) === 0 || tn.indexOf(k) === 0) return RANGOS_PRECIO_AR[k];
   }
   return null;
 }
@@ -2043,13 +2542,27 @@ function decidirModoPorRangos(grupo) {
 // Cache en memoria de rangos cargados desde Supabase (vida = un pipeline)
 var _rangosCache = null;
 
+// Normaliza un tipo para matching: minusculas, sin articulos espanoles, sin
+// espacios extra. Asegura que "aceite de girasol" y "aceite girasol" matcheen.
+function _normTipo(t) {
+  return String(t || '').toLowerCase().trim()
+    .replace(/\b(de|del|la|el|los|las)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 async function getRangosCacheados() {
   if (_rangosCache) return _rangosCache;
   try {
     var r = await supabase.from('pl_rangos_precio').select('*');
     if (r.error) { console.warn('[Rangos] No se pudo cargar:', r.error.message); return {}; }
     var map = {};
-    (r.data || []).forEach(function(row) { map[(row.tipo_producto || '').toLowerCase()] = row; });
+    (r.data || []).forEach(function(row) {
+      var tipo = (row.tipo_producto || '').toLowerCase();
+      map[tipo] = row;                         // clave exacta
+      var norm = _normTipo(tipo);
+      if (norm && norm !== tipo) map[norm] = row;   // alias sin articulos
+    });
     _rangosCache = map;
     return map;
   } catch(e) { console.warn('[Rangos] Excepción:', e); return {}; }
@@ -2057,15 +2570,59 @@ async function getRangosCacheados() {
 
 function _invalidarRangosCache() { _rangosCache = null; }
 
+// Lookup robusto. Orden de preferencia:
+//   1. Exact match (raw o normalizado sin "de/del/la/el")
+//   2. Prefix match con origen='manual' (los seeds, la verdad ground-truth)
+//   3. Prefix match con cualquier origen (incluye auto-learned que pueden tener
+//      el brand pegado al tipo si la IA no lo limpio bien)
+// La preferencia de manual evita que una fila polucionada con brand
+// ("aceite de girasol canuelas") gane sobre la seed limpia ("aceite girasol").
+function lookupRangoCacheado(rangosMap, tipo) {
+  if (!tipo || !rangosMap) return null;
+  var t = String(tipo).toLowerCase().trim();
+  if (rangosMap[t]) return rangosMap[t];
+  var n = _normTipo(t);
+  if (n && rangosMap[n]) return rangosMap[n];
+  // Prefix: buscar TODOS los matches y elegir el mejor
+  var keys = Object.keys(rangosMap);
+  var bestManual = null, bestManualLen = 0;
+  var bestOther  = null, bestOtherLen  = 0;
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    var nk = _normTipo(k);
+    if (!nk || n.indexOf(nk) !== 0) continue;
+    var row = rangosMap[k];
+    if (row && row.origen === 'manual') {
+      // Entre las manual, preferir la mas especifica (mas larga)
+      if (nk.length > bestManualLen) { bestManual = row; bestManualLen = nk.length; }
+    } else {
+      if (nk.length > bestOtherLen) { bestOther = row; bestOtherLen = nk.length; }
+    }
+  }
+  return bestManual || bestOther || null;
+}
+
+// Factores proporcionales al precio típico: baratos varían poco (rango estrecho),
+// caros varían mucho (mayorista vs premium). Evita el 0.5/2.5 fijo que flaggeaba
+// productos baratos como anomalía.
+function _factoresPorPrecio(p) {
+  p = parseFloat(p) || 0;
+  if (p < 500)   return { min: 0.5, max: 2.0 }; // 4x
+  if (p < 2000)  return { min: 0.4, max: 3.0 }; // 7.5x
+  if (p < 10000) return { min: 0.3, max: 4.0 }; // 13x
+  return { min: 0.2, max: 5.0 };                // 25x
+}
+
 async function guardarRangoCacheado(rango) {
   if (!rango || !rango.tipo_producto) return;
   try {
+    var _ff = _factoresPorPrecio(rango.mediana_estimada);
     var r = await supabase.from('pl_rangos_precio').upsert({
       tipo_producto: (rango.tipo_producto || '').toLowerCase(),
       unidad_base: rango.unidad_base || 'kg',
       mediana_estimada: rango.mediana_estimada,
-      factor_min: rango.factor_min || 0.5,
-      factor_max: rango.factor_max || 2.5,
+      factor_min: rango.factor_min != null ? rango.factor_min : _ff.min,
+      factor_max: rango.factor_max != null ? rango.factor_max : _ff.max,
       origen: rango.origen || 'web',
       muestras: rango.muestras || 0,
       confiable: !!rango.confiable,
@@ -2076,50 +2633,143 @@ async function guardarRangoCacheado(rango) {
   } catch(e) { console.warn('[Rangos] Excepción al guardar:', e); }
 }
 
+// Helper para sembrar manualmente un rango desde la consola del browser:
+//   _seedRango('aceite girasol', 'L', 1500)
+//   _seedRango('harina 000', 'kg', 800)
+//   _seedRango('aceto balsamico', 'L', 3000)
+// Calcula los factores proporcionales al precio tipico: productos baratos
+// tienen rango mas estrecho (varian menos), caros tienen rango mas amplio
+// (mas variacion entre mayorista y premium).
+async function _seedRango(tipo, unidadBase, precioTipico) {
+  var p = parseFloat(precioTipico);
+  if (!p || p <= 0) { console.warn('[Rangos] precio invalido'); return null; }
+  var _ff = _factoresPorPrecio(p);
+  var fMin = _ff.min, fMax = _ff.max;
+  await guardarRangoCacheado({
+    tipo_producto: String(tipo || '').toLowerCase().trim(),
+    unidad_base: unidadBase,
+    mediana_estimada: p,
+    factor_min: fMin,
+    factor_max: fMax,
+    origen: 'manual',
+    muestras: 1,
+    confiable: true   // datos manuales se asumen confiables desde el primer punto
+  });
+  console.log('[Rangos] Sembrado:', tipo, '→ mediana $' + p + ' rango [$' + Math.round(p*fMin) + '-$' + Math.round(p*fMax) + ']/' + unidadBase);
+  return { min: p*fMin, max: p*fMax, mediana: p };
+}
+
+// Sembrar varios rangos de una sola vez. Recibe un array de [tipo, unidad, precio]:
+//   _seedRangos([
+//     ['aceite girasol', 'L', 1500],
+//     ['harina 000', 'kg', 800],
+//     ['aceto balsamico', 'L', 3000]
+//   ])
+async function _seedRangos(filas) {
+  if (!Array.isArray(filas)) return;
+  for (var i = 0; i < filas.length; i++) {
+    var f = filas[i];
+    if (!f || f.length < 3) continue;
+    await _seedRango(f[0], f[1], f[2]);
+  }
+  console.log('[Rangos] Sembrados ' + filas.length + ' rangos. Recargá la página para que el pipeline los use.');
+}
+
+// Multiplica factor_max para envases pequeños que son proporcionalmente más caros.
+// Ejemplos: aceite girasol 500mL vs bidón 5L → el chico cuesta ~2x más por litro.
+// tamano ya viene en unidades canónicas (kg o L).
+function factorPackPequenio(tamano, unidadBase) {
+  if (!tamano || tamano <= 0) return 1.0;
+  var u = (unidadBase || '').toLowerCase();
+  if (u !== 'kg' && u !== 'l') return 1.0; // unidades (u) no aplica
+  if (tamano <= 0.1)  return 4.0;  // ≤100g/mL: sachets, monodosis
+  if (tamano <= 0.25) return 3.0;  // ≤250g/mL: frascos chicos
+  if (tamano <= 0.5)  return 2.5;  // ≤500g/500mL: medio kilo/litro
+  if (tamano <= 1)    return 1.8;  // ≤1kg/L
+  if (tamano <= 2)    return 1.3;  // ≤2kg/L
+  return 1.0;                      // ≥2kg/L: bulk → sin ajuste
+}
+
 // Calcula el rango efectivo a partir de la mediana × factor.
-function rangoEfectivo(rangoRow) {
+// tamano (opcional) activa el ajuste de envase pequeño sobre factor_max.
+function rangoEfectivo(rangoRow, tamano) {
   if (!rangoRow || !rangoRow.mediana_estimada) return null;
   var fMin = rangoRow.factor_min != null ? rangoRow.factor_min : 0.5;
   var fMax = rangoRow.factor_max != null ? rangoRow.factor_max : 2.5;
+  var mult = factorPackPequenio(tamano, rangoRow.unidad_base);
   return {
-    min: rangoRow.mediana_estimada * fMin,
-    max: rangoRow.mediana_estimada * fMax,
-    mediana: rangoRow.mediana_estimada,
+    min:      rangoRow.mediana_estimada * fMin,
+    max:      rangoRow.mediana_estimada * fMax * mult,  // ajustado por envase chico
+    maxBase:  rangoRow.mediana_estimada * fMax,          // máximo sin ajuste (bulk)
+    mediana:  rangoRow.mediana_estimada,
     confiable: !!rangoRow.confiable,
-    unidad: rangoRow.unidad_base
+    unidad:   rangoRow.unidad_base,
+    multPack: mult
   };
 }
 
 // Detecta bulto vs unitario para una fila dada usando un rango cacheado.
-// Devuelve {modo, confianza, razonamiento} o null si no se puede decidir.
+// Devuelve {modo, confianza, razonamiento, envase_chico} o null si no se puede decidir.
+// envase_chico=true indica que el precio es alto pero válido por ser envase pequeño.
 function detectarPorRangoDinamico(fila, rangoRow) {
-  var rango = rangoEfectivo(rangoRow);
+  var tamano = parseFloat(fila.tamano) || 0;
+  var rango = rangoEfectivo(rangoRow, tamano > 0 ? tamano : null);
   if (!rango) return null;
   var precioRaw = parseFloat(fila.precio_raw || fila.precio) || 0;
-  var tamano = parseFloat(fila.tamano) || 0;
   if (precioRaw <= 0) return null;
   var precioSiUnitario = precioRaw;
   var precioSiPack = tamano > 0 ? precioRaw / tamano : null;
-  var enRango = function(v) { return v != null && v >= rango.min && v <= rango.max; };
-  var uOk = enRango(precioSiUnitario);
-  var pOk = precioSiPack != null && enRango(precioSiPack);
+
+  // ── Detección de tamano sospechoso (típico: OCR lee "KG" como "CC") ──────────
+  // Si dividir por tamano da un precio absurdo (>500× la mediana), es casi seguro
+  // que el tamano fue mal leído. Ej: "2.9CC" = 0.0029L → $10.492/0.0029 = $3.6M/L
+  // En ese caso marcamos tamano_sospechoso y no usamos la interpretación PACK.
+  var UMBRAL_ABSURDO = 500;
+  var packEsAbsurdo = precioSiPack != null && precioSiPack > rango.mediana * UMBRAL_ABSURDO;
+
+  var enRango     = function(v) { return v != null && v >= rango.min && v <= rango.max; };
+  var enRangoBase = function(v) { return v != null && v >= rango.min && v <= rango.maxBase; };
+  var uOk     = enRango(precioSiUnitario);
+  var pOk     = !packEsAbsurdo && precioSiPack != null && enRango(precioSiPack);
+  var uOkBase = enRangoBase(precioSiUnitario);
+  var pOkBase = !packEsAbsurdo && precioSiPack != null && enRangoBase(precioSiPack);
+
   // confianza base depende de si el rango es confiable (3+ muestras) o provisional
   var confBase = rango.confiable ? 0.9 : 0.65;
+  // true si entra en rango sólo gracias al ajuste de envase chico
+  var soloXEnvaseChico = function(esUnitario) {
+    return rango.multPack > 1 && (esUnitario ? (!uOkBase && uOk) : (!pOkBase && pOk));
+  };
+
+  // Si el pack da precio absurdo y unitario entra en rango → unitario pero con aviso
+  if (packEsAbsurdo && uOk) {
+    var ec = soloXEnvaseChico(true);
+    return { modo: 'unitario', confianza: 0.45, envase_chico: ec, tamano_sospechoso: true,
+      razonamiento: 'pack daría $' + Math.round(precioSiPack) + '/' + rango.unidad +
+        ' (absurdo, posible error "CC" por "KG" en OCR) — tratando como unitario' };
+  }
+
   if (uOk && !pOk) {
-    return { modo: 'unitario', confianza: confBase,
-      razonamiento: '$' + Math.round(precioSiUnitario) + '/' + rango.unidad + ' en rango (mediana $' + Math.round(rango.mediana) + ')' };
+    var ec = soloXEnvaseChico(true);
+    return { modo: 'unitario', confianza: ec ? confBase * 0.85 : confBase, envase_chico: ec,
+      razonamiento: '$' + Math.round(precioSiUnitario) + '/' + rango.unidad +
+        (ec ? ' (precio alto — envase chico)' : ' en rango') +
+        ' (mediana $' + Math.round(rango.mediana) + ')' };
   }
   if (pOk && !uOk) {
-    return { modo: 'pack', confianza: confBase,
-      razonamiento: 'precio/u=$' + Math.round(precioSiPack) + '/' + rango.unidad + ' en rango (mediana $' + Math.round(rango.mediana) + ')' };
+    var ec = soloXEnvaseChico(false);
+    return { modo: 'pack', confianza: ec ? confBase * 0.85 : confBase, envase_chico: ec,
+      razonamiento: 'precio/u=$' + Math.round(precioSiPack) + '/' + rango.unidad +
+        (ec ? ' (precio alto — envase chico)' : ' en rango') +
+        ' (mediana $' + Math.round(rango.mediana) + ')' };
   }
   if (uOk && pOk) {
     // Ambos caen (rango muy amplio o tamaño chico) → desempatar por cercanía
     var dU = Math.abs(precioSiUnitario - rango.mediana);
     var dP = Math.abs(precioSiPack - rango.mediana);
     return dU <= dP
-      ? { modo: 'unitario', confianza: 0.5, razonamiento: 'ambos en rango, unitario más cerca de mediana' }
-      : { modo: 'pack',     confianza: 0.5, razonamiento: 'ambos en rango, pack más cerca de mediana' };
+      ? { modo: 'unitario', confianza: 0.5, envase_chico: false, razonamiento: 'ambos en rango, unitario más cerca de mediana' }
+      : { modo: 'pack',     confianza: 0.5, envase_chico: false, razonamiento: 'ambos en rango, pack más cerca de mediana' };
   }
   return null;
 }
@@ -2171,36 +2821,91 @@ function detectarPorCoherenciaInterna(grupos) {
   return det;
 }
 
-// Llama al endpoint backend que busca el rango en la web (una sola vez por tipo)
+// Circuit breaker para web_search: si fallan N llamadas seguidas, cortamos
+// para no quemar tiempo cuando Anthropic esta caido (típicamente 502s).
+var _webSearchFails = 0;
+var _WEB_SEARCH_DISABLED = false;
+var _WEB_SEARCH_MAX_FAILS = 3; // bajar de 5 a 3 para cortar mas rapido
+var _webSearchAvisado = false; // para loguear "deshabilitado" una sola vez
+
+function _avisarWebSearchDeshabilitado() {
+  if (_webSearchAvisado) return;
+  _webSearchAvisado = true;
+  console.warn('[Rangos] web_search deshabilitado tras ' + _webSearchFails + ' fallos consecutivos (probable problema en Anthropic)');
+}
+
+// Llama al endpoint backend que busca el rango en la web (una sola vez por tipo).
+// IMPORTANTE: hay DOS checks de _WEB_SEARCH_DISABLED:
+//   1. Al inicio (sincronico, antes del semaforo) — para llamadas nuevas que
+//      llegan despues de que se deshabilito.
+//   2. Despues del _claudeAcquire (asincronico) — para llamadas que ya estaban
+//      encoladas en el semaforo cuando el flag se seteo. Sin este segundo
+//      check, todas las llamadas que Promise.all disparo en paralelo pasarian
+//      el primer check sincronicamente y harian fetch.
 async function buscarRangoWebCliente(tipoProducto, unidadBase) {
+  if (_WEB_SEARCH_DISABLED) return null;
+  // Defensa: NO buscar rango para tipos genericos cuando hay manuales especificas
+  var tipoNorm = _normTipo(tipoProducto);
+  if (tipoNorm && tipoNorm.indexOf(' ') < 0) {
+    var rangos = _rangosCache || {};
+    var hayManualMasEspecifica = Object.keys(rangos).some(function(k) {
+      var row = rangos[k];
+      if (!row || row.origen !== 'manual') return false;
+      var nk = _normTipo(k);
+      return nk !== tipoNorm && nk.indexOf(tipoNorm + ' ') === 0;
+    });
+    if (hayManualMasEspecifica) {
+      console.warn('[Rangos] web_search bloqueado por generico:', tipoProducto, '(hay manuales mas especificas)');
+      return null;
+    }
+  }
+  // Adquirir semaforo MANUALMENTE para poder rechequear DISABLED post-acquire
+  await _claudeAcquire();
   try {
-    var sd = await supabase.auth.getSession();
-    var token = sd.data && sd.data.session && sd.data.session.access_token;
-    if (!token) return null;
+    // SEGUNDO check: otra llamada paralela puede haber deshabilitado en el mientras
+    if (_WEB_SEARCH_DISABLED) return null;
     var resp = await fetch('/api/claude', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
       body: JSON.stringify({
         tipo: 'buscar_rango_web',
         tipo_producto: tipoProducto,
         unidad_base: unidadBase
       })
     });
-    if (!resp.ok) return null;
-    var data = await resp.json();
+    if (!resp.ok) {
+      _webSearchFails++;
+      if (_webSearchFails >= _WEB_SEARCH_MAX_FAILS) {
+        _WEB_SEARCH_DISABLED = true;
+        _avisarWebSearchDeshabilitado();
+      }
+      return null;
+    }
+    _webSearchFails = 0;
+    var data = {};
+    try { data = await resp.json(); } catch(e) {}
     return data.rango || null;
   } catch(e) {
+    _webSearchFails++;
+    if (_webSearchFails >= _WEB_SEARCH_MAX_FAILS) {
+      _WEB_SEARCH_DISABLED = true;
+      _avisarWebSearchDeshabilitado();
+    }
     console.warn('[Rangos] Búsqueda web falló:', e);
     return null;
+  } finally {
+    _claudeRelease();
   }
 }
 
 // Defensa anti-outliers: un precio no actualiza el rango si está absurdamente
-// lejos de la mediana actual (>5x más caro o >5x más barato).
-function esOutlier(precioUnit, rangoRow) {
+// lejos de la mediana actual. El threshold se amplía para envases chicos (ej:
+// un sachets de 100mL puede costar 4x más/L que un bidón de 5L → no es outlier).
+function esOutlier(precioUnit, rangoRow, tamano) {
   if (!rangoRow || !rangoRow.muestras || rangoRow.muestras === 0) return false;
   var ratio = precioUnit / rangoRow.mediana_estimada;
-  return ratio > 5 || ratio < 0.2;
+  var mult  = factorPackPequenio(tamano, rangoRow.unidad_base);
+  return ratio > 5 * mult || ratio < 0.2;
 }
 
 function _mediana(arr) {
@@ -2219,15 +2924,42 @@ async function actualizarRangosConDetecciones(filasDetectadas) {
   var preciosPorTipo = {};
   filasDetectadas.forEach(function(f) {
     if (!f.tipo || !f.modo || (f.confianza || 0) < 0.7) return;
-    var tipo = (f.tipo || '').toLowerCase().trim();
-    if (!tipo) return;
+    var tipoIA = String(f.tipo || '').toLowerCase().trim();
+    if (!tipoIA) return;
+    // Si ya hay un rango similar en cache (con o sin "de"), usar SU clave para
+    // que las actualizaciones se acumulen ahi. Esto evita crear "aceite girasol"
+    // y "aceite de girasol" como filas separadas. Pero NO normaliza ciegamente:
+    // "dulce de leche" (donde "de" es parte del nombre) queda igual si esa es
+    // la clave que ya existe.
+    var rangoExistente = lookupRangoCacheado(rangosActuales, tipoIA);
+    var tipo = rangoExistente ? rangoExistente.tipo_producto : tipoIA;
+
+    // Defensa 4: NO crear entradas genericas si ya hay tipos mas especificos
+    // de origen manual. Ej: la IA devuelve "aceite" → si ya existen "aceite
+    // girasol", "aceite oliva" como manuales, NO guardar "aceite" como
+    // entrada nueva (seria demasiado generica y contaminaria el lookup).
+    if (!rangoExistente) {
+      var tipoNorm = _normTipo(tipo);
+      var prefijoDeManual = Object.keys(rangosActuales).some(function(k) {
+        var row = rangosActuales[k];
+        if (!row || row.origen !== 'manual') return false;
+        var nk = _normTipo(k);
+        // existe un manual que EMPIEZA con este tipo (osea es mas especifico)
+        return nk !== tipoNorm && nk.indexOf(tipoNorm + ' ') === 0;
+      });
+      if (prefijoDeManual) {
+        console.warn('[Rangos] Tipo demasiado generico, no guardado (hay manuales mas especificos):', tipo);
+        return;
+      }
+    }
+
     var precioRaw = parseFloat(f.precio_raw || f.precio) || 0;
     var tamano = parseFloat(f.tamano) || 0;
     if (precioRaw <= 0) return;
     var precioUnit = f.modo === 'pack' && tamano > 0 ? precioRaw / tamano : precioRaw;
     if (precioUnit <= 0) return;
-    // Defensa 2: descartar outliers
-    if (esOutlier(precioUnit, rangosActuales[tipo])) {
+    // Defensa 2: descartar outliers (tamano amplía el umbral para envases chicos)
+    if (esOutlier(precioUnit, rangoExistente, tamano)) {
       console.warn('[Rangos] Outlier descartado:', tipo, precioUnit);
       return;
     }
@@ -2239,19 +2971,28 @@ async function actualizarRangosConDetecciones(filasDetectadas) {
   var updates = [];
   Object.keys(preciosPorTipo).forEach(function(tipo) {
     var data = preciosPorTipo[tipo];
-    var ex = rangosActuales[tipo];
+    var ex = lookupRangoCacheado(rangosActuales, tipo);
+    // PROTECCIÓN: los rangos manuales son verdad curada y verificada.
+    // El auto-aprendizaje NUNCA los pisa (evita que se re-corrompan los seeds
+    // mezclando variantes premium con básicas, como pasó con sal/miel/azúcar).
+    if (ex && ex.origen === 'manual') return;
     var medianaNueva = _mediana(data.precios);
     // Suavizar: 70% peso a nuevo, 30% a anterior (refleja inflación real)
     var medianaFinal = ex && ex.muestras > 0
       ? medianaNueva * 0.7 + ex.mediana_estimada * 0.3
       : medianaNueva;
     var muestras = (ex && ex.muestras ? ex.muestras : 0) + data.precios.length;
+    // Factores proporcionales al precio (los manuales ya se saltearon arriba).
+    // Esto además re-ensancha los auto-aprendidos viejos que tenían 0.5/2.5 fijo
+    // y causaban falsos flags en productos baratos.
+    var _ff = _factoresPorPrecio(medianaFinal);
+    var fMin = _ff.min, fMax = _ff.max;
     updates.push({
       tipo_producto: tipo,
       unidad_base: data.unidad,
       mediana_estimada: Math.round(medianaFinal * 100) / 100,
-      factor_min: 0.5,
-      factor_max: 2.5,
+      factor_min: fMin,
+      factor_max: fMax,
       origen: 'datos',
       muestras: muestras,
       confiable: muestras >= 3, // Defensa 1
@@ -2645,7 +3386,7 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     if (h) { aplicar(g, h); continue; }
 
     var tipoKey = (g.tipo || '').toLowerCase().trim();
-    var rangoRow = tipoKey ? rangosCacheados[tipoKey] : null;
+    var rangoRow = tipoKey ? lookupRangoCacheado(rangosCacheados, tipoKey) : null;
     var primerPropio = g.proveedores.find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
 
     // 2) Rango cacheado (dinámico, de pl_rangos_precio)
@@ -2676,16 +3417,21 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     gruposParaIA.push(g);
   }
 
-  // 5b) Buscar rangos web en paralelo para tipos faltantes (limitado a 6 para
-  // no saturar y porque la mayoría se cubre con cache/coherencia/rangos hardcoded)
-  var tiposABuscar = Object.values(tiposParaBuscarWeb).slice(0, 6);
+  // 5b) Buscar rangos web en paralelo para TODOS los tipos faltantes.
+  // El semaforo de _fetchClaude (_CLAUDE_MAX_CONCURRENT) limita la concurrencia
+  // automaticamente para no saturar rate limit. Sin tope: aprendemos lo que
+  // haga falta. Una vez en cache, futuras subidas lo usan sin re-fetchear.
+  var tiposABuscar = Object.values(tiposParaBuscarWeb);
   if (tiposABuscar.length) {
     if (loadingEl) loadingEl.textContent = 'Buscando rangos de referencia (' + tiposABuscar.length + ' tipos)...';
+    var completados = 0;
     var promesasWeb = tiposABuscar.map(function(t) {
       return buscarRangoWebCliente(t.tipo, t.unidad_base).then(function(rango) {
+        completados++;
+        if (loadingEl) loadingEl.textContent = 'Buscando rangos (' + completados + '/' + tiposABuscar.length + ')...';
         if (rango) { rangosCacheados[t.tipo] = rango; guardarRangoCacheado(rango); return rango; }
         return null;
-      }).catch(function() { return null; });
+      }).catch(function() { completados++; return null; });
     });
     var resultadosWeb = await Promise.all(promesasWeb);
     nWeb = resultadosWeb.filter(Boolean).length;
@@ -2694,7 +3440,7 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     gruposParaIA = [];
     pendientes.forEach(function(g2) {
       var tk = (g2.tipo || '').toLowerCase().trim();
-      var rr = tk ? rangosCacheados[tk] : null;
+      var rr = tk ? lookupRangoCacheado(rangosCacheados, tk) : null;
       var pp = g2.proveedores.find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
       if (rr && pp) {
         var det2 = detectarPorRangoDinamico({ precio_raw: pp.precio_raw, tamano: g2.tamano }, rr);
@@ -2826,9 +3572,15 @@ function renderPreview() {
       // "Si UNITARIO": precio raw es por unidad → ×tamaño da el total.
       var infoModoHtml = '';
       if (tamano > 0 && ub && ub !== 'u') {
-        var siBulto = '<strong>$' + fmt(precio / tamano) + '/' + ub + '</strong> (asume bulto)';
-        var siUnit  = '<strong>$' + fmt(precio * tamano) + '</strong> total (asume x ' + ub + ')';
-        var lblPack = '📦 bulto';
+        // Formatear el tamaño en unidad legible: 0.45kg→450g, 0.5L→500mL, 10kg→10kg
+        var tamStr = (function(t, u) {
+          if (u === 'kg') return t >= 1 ? (t === Math.floor(t) ? t + 'kg' : t + 'kg') : Math.round(t * 1000) + 'g';
+          if (u === 'L')  return t >= 1 ? (t === Math.floor(t) ? t + 'L'  : t + 'L')  : Math.round(t * 1000) + 'mL';
+          return t + (u || '');
+        })(tamano, ub);
+        var siBulto = '$' + fmt(precio / tamano) + '/' + ub;
+        var siUnit  = '$' + fmt(precio * tamano) + ' total';
+        var lblPack = '📦 ' + tamStr;
         var lblUnit = '⚖️ x ' + ub;
         var actModo = it.modo || '?';
         var bgPack = (actModo === 'pack') ? 'background:rgba(96,165,250,0.18);border-color:#60a5fa;' : '';
@@ -2852,11 +3604,17 @@ function renderPreview() {
 
       var confStr = it.confianza != null ? '<span style="opacity:0.7;">' + Math.round(it.confianza * 100) + '%</span>' : '';
       var revisarStr = it.revisar ? '<span style="color:var(--warn);font-weight:600;">⚠️ revisar</span>' : '';
+      var envChicoStr = (!it.revisar && it.precio_alto_envase_chico)
+        ? '<span style="color:#f59e0b;font-size:10px;font-weight:600;" title="El precio por kg/L es alto porque es un envase pequeño — es normal">📦 precio alto (envase pequeño)</span>'
+        : '';
+      var tamSospechosoStr = it.tamano_sospechoso
+        ? '<span style="color:#f87171;font-size:10px;font-weight:600;" title="El tamaño parece mal leído (posible OCR: \'CC\' en vez de \'KG\'). Verificá la presentación.">⚠️ verificar presentación</span>'
+        : '';
       pipelineHtml =
         '<div style="flex-basis:100%;font-size:10.5px;color:var(--text-muted);margin-top:3px;' +
         'padding:2px 4px 0;line-height:1.4;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">' +
         '<span style="color:var(--text-2);font-weight:500;">' + escapeHtml(it.clave_canonica) + '</span>' +
-        infoModoHtml + confStr + revisarStr +
+        infoModoHtml + confStr + revisarStr + envChicoStr + tamSospechosoStr +
         '</div>';
     }
 
@@ -3204,17 +3962,22 @@ function renderPlanesGrid() {
 // SISTEMA DE PEDIDOS
 // ============================================================
 
-var PEDIDO_KEY = 'pl_pedido_actual';
-var HIST_KEY = 'pl_historial';
+// Claves de localStorage escopadas por usuario para evitar que se mezclen datos entre cuentas
+function getPedidoKey() {
+  return 'pl_pedido_' + (sesion && sesion.user ? sesion.user.id : 'anon');
+}
+function getHistKey() {
+  return 'pl_historial_' + (sesion && sesion.user ? sesion.user.id : 'anon');
+}
 
 function pedidoGet() {
-  try { var v = localStorage.getItem(PEDIDO_KEY); return v ? JSON.parse(v) : { items: {} }; } catch(e) { return { items: {} }; }
+  try { var v = localStorage.getItem(getPedidoKey()); return v ? JSON.parse(v) : { items: {} }; } catch(e) { return { items: {} }; }
 }
-function pedidoSet(v) { localStorage.setItem(PEDIDO_KEY, JSON.stringify(v)); }
+function pedidoSet(v) { localStorage.setItem(getPedidoKey(), JSON.stringify(v)); }
 function histGet() {
-  try { var v = localStorage.getItem(HIST_KEY); return v ? JSON.parse(v) : []; } catch(e) { return []; }
+  try { var v = localStorage.getItem(getHistKey()); return v ? JSON.parse(v) : []; } catch(e) { return []; }
 }
-function histSet(v) { localStorage.setItem(HIST_KEY, JSON.stringify(v)); }
+function histSet(v) { localStorage.setItem(getHistKey(), JSON.stringify(v)); }
 
 function formatPrecio(n) {
   if (n == null || isNaN(n)) return '0,00';
@@ -3439,6 +4202,21 @@ function buscarEnListas(q, terminosExtra) {
       }
     });
   });
+
+  // Ordenar: primero los que EMPIEZAN con el query principal (más relevantes),
+  // después los que lo CONTIENEN en otro lugar del nombre.
+  // Ejemplo: buscar "dulce de leche" → primero "Dulce de leche repostero",
+  // después "Salsa de dulce de leche".
+  resultados.sort(function(a, b) {
+    var aNom = (a.productoLista || '').toLowerCase();
+    var bNom = (b.productoLista || '').toLowerCase();
+    var aEmpieza = aNom.indexOf(qLower) === 0 ? 0 : 1;
+    var bEmpieza = bNom.indexOf(qLower) === 0 ? 0 : 1;
+    if (aEmpieza !== bEmpieza) return aEmpieza - bEmpieza;
+    // Mismo grupo → ordenar alfabéticamente
+    return aNom < bNom ? -1 : aNom > bNom ? 1 : 0;
+  });
+
   return resultados;
 }
 
@@ -3454,6 +4232,15 @@ function renderBuscarProducto(expansionesExtras) {
   // Mostrar/ocultar botón "ver pedido"
   var ped = pedidoGet();
   var totalItems = Object.keys(ped.items || {}).filter(function(k) { return ped.items[k].qty > 0; }).length;
+
+  // IDs del último pedido confirmado (para badge "Última compra")
+  var hist = histGet();
+  var ultimoPedidoIds = {};
+  if (hist.length > 0) {
+    (hist[0].items || []).forEach(function(hit) {
+      ultimoPedidoIds[hit.itemId] = true;
+    });
+  }
   var btnVer = $('btn-ver-pedido');
   if (btnVer) btnVer.style.display = totalItems > 0 ? '' : 'none';
 
@@ -3553,16 +4340,31 @@ function renderBuscarProducto(expansionesExtras) {
         pb = parsearPrecioBase(it.precio, it.unidad, it.productoLista, 'envase');
       }
       var precioMostrar = it.precio;
+      // Mostrar la unidad/presentacion solo si NO esta ya incluida en el nombre
+      // (para no duplicar "Aceite 5L · 5L"). Match case-insensitive sin espacios.
+      var nombre = String(it.productoLista || '');
+      var unidadStr = String(it.unidad || '').trim();
+      var mostrarUnidad = '';
+      if (unidadStr) {
+        var normNombre = nombre.toLowerCase().replace(/\s+/g, '');
+        var normUnidad = unidadStr.toLowerCase().replace(/\s+/g, '');
+        if (normNombre.indexOf(normUnidad) < 0) {
+          mostrarUnidad = ' <span style="color:var(--text-muted);font-weight:500;">· ' + escapeHtml(unidadStr) + '</span>';
+        }
+      }
       var pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
-      html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + pbHtml + '</div>';
+      var ultimaBadge = ultimoPedidoIds[it.itemId]
+        ? '<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:rgba(251,191,36,0.15);color:var(--gold-bright);border:1px solid rgba(251,191,36,0.3);margin-left:4px;vertical-align:middle;white-space:nowrap;">Última compra</span>'
+        : '';
+      html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + ultimaBadge + pbHtml + '</div>';
       html += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">';
       html += '<strong style="font-size:13px;white-space:nowrap;color:#4ade80;">$' + formatPrecio(precioMostrar) + '</strong>';
       if (enPed > 0) {
-        html += '<button class="btn" data-restar="' + it.itemId + '" style="padding:2px 7px;font-size:12px;">−</button>';
+        html += '<button class="btn" data-restar="' + escapeHtmlAttr(it.itemId) + '" style="padding:2px 7px;font-size:12px;">−</button>';
         html += '<span style="font-size:13px;font-weight:700;min-width:20px;text-align:center;">' + enPed + '</span>';
-        html += '<button class="btn primary" data-sumar="' + it.itemId + '" style="padding:2px 7px;font-size:12px;">+</button>';
+        html += '<button class="btn primary" data-sumar="' + escapeHtmlAttr(it.itemId) + '" style="padding:2px 7px;font-size:12px;">+</button>';
       } else {
-        html += '<button class="btn primary" data-sumar="' + it.itemId + '" style="padding:4px 10px;font-size:11px;">+ Agregar</button>';
+        html += '<button class="btn primary" data-sumar="' + escapeHtmlAttr(it.itemId) + '" style="padding:4px 10px;font-size:11px;">+ Agregar</button>';
       }
       html += '</div></div>';
     });
@@ -3826,13 +4628,13 @@ function confirmarPedido() {
     if (idx >= 0) {
       var prev = hist[idx];
       var nuevoEditCount = (prev.editCount || 0) + 1;
-      hist[idx] = { id: prev.id, fecha: prev.fecha, timestamp: prev.timestamp, items: items, total: items.reduce(function(s, it) { return s + it.subtotal; }, 0), editCount: nuevoEditCount, ultimaEdicion: Date.now() };
+      hist[idx] = { id: prev.id, fecha: prev.fecha, timestamp: prev.timestamp, items: items, total: items.reduce(function(s, it) { return s + it.subtotal; }, 0), editCount: nuevoEditCount, ultimaEdicion: Date.now(), recepcionado: prev.recepcionado !== undefined ? prev.recepcionado : false };
       histSet(hist);
       pedidoSet({ items: {} });
       actualizarBadgePedido();
       renderHistorial();
       cambiarTab('historial');
-      showToast('Pedido editado (' + nuevoEditCount + '/2)' + (nuevoEditCount >= 2 ? ' — BLOQUEADO' : ''));
+      showToast('Pedido editado y guardado');
       return;
     }
   }
@@ -3842,7 +4644,8 @@ function confirmarPedido() {
     fecha: new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
     timestamp: Date.now(),
     items: items,
-    total: items.reduce(function(s, it) { return s + it.subtotal; }, 0)
+    total: items.reduce(function(s, it) { return s + it.subtotal; }, 0),
+    recepcionado: false
   });
   if (hist.length > 100) hist = hist.slice(0, 100);
   histSet(hist);
@@ -3853,37 +4656,91 @@ function confirmarPedido() {
   showToast('Pedido guardado en historial');
 }
 
-function switchHistorialTab(tab) {
-  historialTabActual = tab;
-  var ppanel   = document.getElementById('hist-panel-proveedores');
-  var prodpanel= document.getElementById('hist-panel-produccion');
-  var btnProv  = document.getElementById('hist-btn-proveedores');
-  var btnProd  = document.getElementById('hist-btn-produccion');
-  if (tab === 'proveedores') {
-    if (ppanel)   ppanel.style.display   = '';
-    if (prodpanel)prodpanel.style.display = 'none';
-    if (btnProv)  btnProv.className  = 'btn primary';
-    if (btnProd)  btnProd.className  = 'btn';
-    renderHistorialProveedores();
-  } else {
-    if (ppanel)   ppanel.style.display   = 'none';
-    if (prodpanel)prodpanel.style.display = '';
-    if (btnProv)  btnProv.className  = 'btn';
-    if (btnProd)  btnProd.className  = 'btn primary';
-    renderHistorialProduccion();
-  }
-}
+var historialTabActual = 'recepcion';
 
 function renderHistorial() {
   switchHistorialTab(historialTabActual);
 }
 
+function switchHistorialTab(tab) {
+  historialTabActual = tab;
+  var panelRec  = document.getElementById('hist-panel-recepcion');
+  var panelHist = document.getElementById('hist-panel-historial');
+  var btnRec    = document.getElementById('hist-btn-recepcion');
+  var btnHist   = document.getElementById('hist-btn-historial');
+  if (tab === 'recepcion') {
+    if (panelRec)  panelRec.style.display  = '';
+    if (panelHist) panelHist.style.display = 'none';
+    if (btnRec)    btnRec.className  = 'btn primary';
+    if (btnHist)   btnHist.className = 'btn';
+    renderHistorialRecepcion();
+  } else {
+    if (panelRec)  panelRec.style.display  = 'none';
+    if (panelHist) panelHist.style.display = '';
+    if (btnRec)    btnRec.className  = 'btn';
+    if (btnHist)   btnHist.className = 'btn primary';
+    renderHistorialProveedores();
+  }
+}
+
+function renderHistorialRecepcion() {
+  var cont = document.getElementById('historial-content-recepcion');
+  if (!cont) return;
+  var hist = histGet().filter(function(h) { return !h.recepcionado; });
+  if (!hist.length) {
+    cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin pedidos pendientes</div><div class="empty-sub">Los pedidos confirmados aparecen acá hasta que los recepcionés</div></div>';
+    return;
+  }
+  var html = '';
+  hist.forEach(function(h) {
+    var porProv = {};
+    h.items.forEach(function(it) {
+      if (!porProv[it.proveedorId]) porProv[it.proveedorId] = { nombre: it.proveedor, items: [], total: 0 };
+      porProv[it.proveedorId].items.push(it);
+      porProv[it.proveedorId].total += it.subtotal;
+    });
+    html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:12px;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
+    html += '<div><div style="font-size:15px;font-weight:600;">' + escapeHtml(h.fecha) + '</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + '</div></div>';
+    html += '<div style="text-align:right;"><div style="font-size:11px;color:var(--text-muted);">Total</div><div style="font-size:18px;font-weight:700;">$' + formatPrecio(h.total) + '</div></div></div>';
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">';
+    Object.keys(porProv).forEach(function(pid) {
+      var p = proveedores.find(function(x) { return x.id === pid; });
+      var tel = p ? (p.telefono || '') : '';
+      var waNum = tel.replace(/[^\d]/g, '');
+      var nombre = porProv[pid].nombre;
+      var subtotal = porProv[pid].total;
+      var color = waNum ? '#25D366' : 'var(--text-muted)';
+      var attrs = waNum ? 'data-action="wa-prov" data-hist="' + h.id + '" data-prov="' + pid + '"' : 'disabled';
+      html += '<button ' + attrs + ' style="display:inline-flex;align-items:center;gap:4px;background:transparent;border:1px solid ' + color + ';color:' + color + ';padding:6px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;opacity:' + (waNum ? '1' : '0.5') + ';">📱 ' + escapeHtml(nombre) + ' <span style="opacity:0.7;font-size:10px;">$' + formatPrecio(subtotal) + '</span></button>';
+    });
+    html += '</div>';
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+    html += '<button data-action="ver-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Ver detalle</button>';
+    html += '<button data-action="recepcionar" data-id="' + h.id + '" style="background:var(--emerald);border:none;color:#fff;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">✓ Recepcionar</button>';
+    html += '<button data-action="borrar-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--danger-border);color:var(--danger);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Eliminar</button>';
+    html += '</div></div>';
+  });
+  cont.innerHTML = html;
+  cont.querySelectorAll('button[data-action]').forEach(function(btn) {
+    btn.onclick = function() {
+      var act = btn.getAttribute('data-action');
+      var id  = btn.getAttribute('data-id');
+      if (act === 'ver-hist')         verDetalleHistorial(id);
+      else if (act === 'recepcionar') recepcionarPedido(id);
+      else if (act === 'borrar-hist') borrarPedidoHist(id);
+      else if (act === 'wa-prov')     abrirWhatsAppHist(btn.getAttribute('data-hist'), btn.getAttribute('data-prov'));
+    };
+  });
+}
+
 function renderHistorialProveedores() {
   var cont = $('historial-content-prov');
   if (!cont) return;
-  var hist = histGet();
+  var hist = histGet().filter(function(h) { return h.recepcionado; });
   if (!hist.length) {
-    cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin pedidos todavía</div><div class="empty-sub">Los pedidos confirmados aparecen acá</div></div>';
+    cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin pedidos en historial</div><div class="empty-sub">Los pedidos recepcionados aparecen acá</div></div>';
     return;
   }
 
@@ -3895,14 +4752,15 @@ function renderHistorialProveedores() {
       porProv[it.proveedorId].items.push(it);
       porProv[it.proveedorId].total += it.subtotal;
     });
-    var editCount = h.editCount || 0;
-    var bloqueado = editCount >= 2;
 
     html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:12px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
     html += '<div><div style="font-size:15px;font-weight:600;">' + escapeHtml(h.fecha) + '</div>';
-    var editTag = editCount > 0 ? ' · <span style="color:' + (bloqueado ? 'var(--danger)' : 'var(--warn)') + ';">' + (bloqueado ? 'BLOQUEADO' : 'Editado ' + editCount + '/2') + '</span>' : '';
-    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + editTag + '</div></div>';
+    var faltantesCount = (h.faltantes || []).length;
+    var cambiosCount   = (h.cambios   || []).length;
+    var faltantesTag = faltantesCount > 0 ? ' · <span style="color:var(--danger);">' + faltantesCount + ' faltante' + (faltantesCount !== 1 ? 's' : '') + '</span>' : '';
+    var cambiosTag   = cambiosCount   > 0 ? ' · <span style="color:var(--gold-bright);">🔄 ' + cambiosCount + ' cambio' + (cambiosCount !== 1 ? 's' : '') + '</span>' : '';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + faltantesTag + cambiosTag + '</div></div>';
     html += '<div style="text-align:right;"><div style="font-size:11px;color:var(--text-muted);">Total</div><div style="font-size:18px;font-weight:700;">$' + formatPrecio(h.total) + '</div></div></div>';
 
     // Botones WhatsApp por proveedor
@@ -3920,9 +4778,13 @@ function renderHistorialProveedores() {
     html += '</div>';
 
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
-    html += '<button data-action="ver-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Ver detalle</button>';
-    if (!bloqueado) {
-      html += '<button data-action="editar-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--warn);color:var(--warn);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">✎ Editar (' + editCount + '/2)</button>';
+    html += '<button data-action="ver-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">👁 Ver</button>';
+    if (h.recepcionFinal) {
+      // Definitivamente cerrado: solo ver
+      html += '<button data-action="ver-recepcion" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text-muted);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">🔒 Ver recepción</button>';
+    } else {
+      // Guardado como borrador o nunca cerrado: editable
+      html += '<button data-action="editar-recepcion" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--warn);color:var(--warn);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">✎ Editar recepción</button>';
     }
     html += '<button data-action="repetir-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Repetir pedido</button>';
     html += '<button data-action="borrar-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--danger-border);color:var(--danger);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Eliminar</button>';
@@ -3934,226 +4796,14 @@ function renderHistorialProveedores() {
     btn.onclick = function() {
       var act = btn.getAttribute('data-action');
       var id = btn.getAttribute('data-id');
-      if (act === 'ver-hist') verDetalleHistorial(id);
-      else if (act === 'editar-hist') editarPedidoHist(id);
-      else if (act === 'repetir-hist') repetirPedido(id);
-      else if (act === 'borrar-hist') borrarPedidoHist(id);
-      else if (act === 'wa-prov') abrirWhatsAppHist(btn.getAttribute('data-hist'), btn.getAttribute('data-prov'));
+      if (act === 'ver-hist')              verDetalleHistorial(id);
+      else if (act === 'editar-recepcion') editarRecepcion(id);
+      else if (act === 'ver-recepcion')    verRecepcionSoloLectura(id);
+      else if (act === 'repetir-hist')     repetirPedido(id);
+      else if (act === 'borrar-hist')      borrarPedidoHist(id);
+      else if (act === 'wa-prov')          abrirWhatsAppHist(btn.getAttribute('data-hist'), btn.getAttribute('data-prov'));
     };
   });
-}
-
-function renderHistorialProduccion() {
-  var el = document.getElementById('historial-content-prod');
-  if (!el) return;
-  var hist = getProdHist();
-  if (!hist.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-emoji" style="font-size:40px;">🏭</div>' +
-      '<div class="empty-title">Sin pedidos a producción</div>' +
-      '<div class="empty-sub">Los pedidos enviados a producción aparecen acá para verificarlos</div></div>';
-    return;
-  }
-  var html = '';
-  hist.forEach(function(h) {
-    var vp = getProdVerifPedido(h.id);
-    var estadoBadge = '';
-    if (vp.estado === 'bloqueado') estadoBadge = '<span style="font-size:11px;font-weight:600;color:var(--danger);background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.25);padding:2px 8px;border-radius:99px;">Bloqueado</span>';
-    else if (vp.estado === 'confirmado') estadoBadge = '<span style="font-size:11px;font-weight:600;color:var(--emerald);background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.3);padding:2px 8px;border-radius:99px;">Confirmado</span>';
-    else estadoBadge = '<span style="font-size:11px;font-weight:600;color:var(--text-muted);background:var(--bg-elev2);border:1px solid var(--border);padding:2px 8px;border-radius:99px;">Pendiente</span>';
-
-    html += '<div class="prod-hist-card">';
-    html += '<div class="prod-hist-header">';
-    html += '<div><div class="prod-hist-fecha">' + escapeHtml(h.fecha) + '</div>';
-    html += '<div class="prod-hist-meta">' + h.items.length + ' producto' + (h.items.length !== 1 ? 's' : '') + (h.editCount ? ' · Editado ' + h.editCount + '/5' : '') + '</div></div>';
-    html += '<div style="display:flex;align-items:center;gap:8px;">' + estadoBadge + '</div>';
-    html += '</div>';
-    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
-    var vpEdits = vp.editCount || 0;
-    if (vp.estado === 'libre') {
-      html += '<button onclick="abrirVerifProdHist(\'' + h.id + '\')" style="background:var(--accent);color:white;border:none;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">✓ Verificar</button>';
-    } else if (vp.estado === 'confirmado' && vpEdits < 5) {
-      html += '<button onclick="abrirVerifProdHist(\'' + h.id + '\')" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;">Ver</button>';
-      html += '<button onclick="abrirEdicionVerifProdHist(\'' + h.id + '\')" style="background:transparent;border:1px solid var(--warn);color:var(--warn);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;">✎ Editar (' + vpEdits + '/5)</button>';
-    } else {
-      html += '<button onclick="abrirVerifProdHist(\'' + h.id + '\')" style="background:transparent;border:1px solid var(--border-hi);color:var(--text-muted);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;">Ver</button>';
-    }
-    html += '<button onclick="imprimirPedidoProdHist(\'' + h.id + '\')" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;">🖨 Imprimir</button>';
-    html += '<button onclick="borrarPedidoProdHist(\'' + h.id + '\')" style="background:transparent;border:1px solid var(--danger-border);color:var(--danger);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;">Eliminar</button>';
-    html += '</div></div>';
-  });
-  el.innerHTML = html;
-}
-
-function borrarPedidoProdHist(histId) {
-  if (!confirm('¿Eliminar este pedido del historial de producción?')) return;
-  setProdHist(getProdHist().filter(function(x) { return x.id !== histId; }));
-  renderHistorialProduccion();
-  showToast('Pedido eliminado');
-}
-
-function abrirVerifProdHist(histId) {
-  prodVerifHistActual = histId;
-  var h = getProdHist().find(function(x) { return x.id === histId; });
-  if (!h) return;
-  var fechaEl = document.getElementById('prod-verif-hist-fecha');
-  if (fechaEl) fechaEl.textContent = h.fecha;
-  var panel = document.getElementById('prod-verif-hist-panel');
-  var prodPanel = document.getElementById('hist-panel-produccion');
-  if (panel) panel.style.display = '';
-  if (prodPanel) prodPanel.style.display = 'none';
-  renderVerifProdHistContent();
-}
-
-function volverAlHistorialProduccion() {
-  prodVerifHistActual = null;
-  var panel = document.getElementById('prod-verif-hist-panel');
-  var prodPanel = document.getElementById('hist-panel-produccion');
-  if (panel) panel.style.display = 'none';
-  if (prodPanel) prodPanel.style.display = '';
-  renderHistorialProduccion();
-}
-
-function renderVerifProdHistContent() {
-  if (!prodVerifHistActual) return;
-  var h  = getProdHist().find(function(x) { return x.id === prodVerifHistActual; });
-  if (!h) return;
-  var vp = getProdVerifPedido(prodVerifHistActual);
-  var estado = vp.estado || 'libre';
-  var editCount = vp.editCount || 0;
-  var bloqueado = (estado === 'bloqueado' || (estado === 'confirmado' && editCount >= 5));
-  var editable = !bloqueado;
-
-  // Render btns
-  var btnsEl = document.getElementById('prod-verif-hist-btns');
-  if (btnsEl) {
-    var html = '<button class="btn" onclick="volverAlHistorialProduccion()">← Volver</button>';
-    if (!bloqueado) {
-      var esUltimaEdicion = (estado === 'confirmado' && editCount === 4);
-      html += '<button class="btn primary" onclick="confirmarVerifProdHist()">' +
-        (esUltimaEdicion ? '✅ Confirmar y bloquear' : '✅ Confirmar verificación') + '</button>';
-    }
-    btnsEl.innerHTML = html;
-  }
-
-  // Banner
-  var bannerEl = document.getElementById('prod-verif-hist-banner');
-  if (bannerEl) {
-    if (bloqueado) {
-      bannerEl.innerHTML = '<div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--danger);margin-bottom:12px;">Verificación bloqueada — no se puede editar más</div>';
-    } else if (estado === 'confirmado') {
-      var restantes = 5 - editCount;
-      bannerEl.innerHTML = '<div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--emerald);margin-bottom:12px;">Verificación confirmada · ' + editCount + '/5 ediciones usadas. Te quedan ' + restantes + '.</div>';
-    } else {
-      bannerEl.innerHTML = '';
-    }
-  }
-
-  // Items list
-  var listaEl = document.getElementById('prod-verif-hist-lista');
-  if (!listaEl) return;
-  var listaHtml = '';
-  h.items.forEach(function(item, idx) {
-    var saved = (vp.data || {})[item.recetaId] || {};
-    var realizado = saved.realizado !== undefined ? saved.realizado : '';
-    var estadoItem = saved.estado || 'sin';
-    var ec = estadoItem === 'ok' ? 'ok' : estadoItem === 'falta' ? 'falta' : 'sin';
-    var ei = estadoItem === 'ok' ? '✓' : estadoItem === 'falta' ? '✕' : '·';
-    listaHtml += '<div class="prod-verif-row" id="pvhrow-' + idx + '">';
-    listaHtml += '<div class="pv-nombre">' + escapeHtml(item.nombre) + '</div>';
-    listaHtml += '<div class="pv-pedido">Pedido: <strong>' + item.qty + ' u.</strong>';
-    if (item.stock !== '' && item.stock !== undefined) listaHtml += ' · Stock: ' + item.stock;
-    if (item.critico) {
-      var cv = validarCriticoProd(item.critico);
-      listaHtml += ' · <span class="crit-badge ' + cv.clase + '">' + cv.texto + '</span>';
-    }
-    listaHtml += '</div>';
-    if (editable) {
-      listaHtml += '<div class="pv-inputs">' +
-        '<input type="number" class="pv-inp" id="pvh-real-' + idx + '" min="0" placeholder="Producido" value="' + escapeHtml(String(realizado)) + '" ' +
-          'oninput="actualizarVerifProdHist(' + idx + ', \'' + item.recetaId + '\', this.value)">' +
-        '<button class="pv-estado-btn ' + ec + '" id="pvhbtn-' + idx + '" onclick="toggleVerifProdHist(' + idx + ', \'' + item.recetaId + '\')">' + ei + '</button>' +
-      '</div>';
-    } else {
-      listaHtml += '<div class="pv-inputs">' +
-        '<span style="font-size:13px;color:var(--text-muted);">' + (realizado !== '' ? realizado + ' u.' : '—') + '</span>' +
-        '<span class="pv-estado-btn ' + ec + '" style="cursor:default;">' + ei + '</span>' +
-      '</div>';
-    }
-    listaHtml += '</div>';
-  });
-  listaEl.innerHTML = listaHtml;
-}
-
-function actualizarVerifProdHist(idx, recetaId, valor) {
-  var vp = getProdVerifPedido(prodVerifHistActual);
-  if (!vp.data) vp.data = {};
-  if (!vp.data[recetaId]) vp.data[recetaId] = {};
-  vp.data[recetaId].realizado = valor;
-  var h = getProdHist().find(function(x) { return x.id === prodVerifHistActual; });
-  var item = h ? h.items.find(function(i) { return i.recetaId === recetaId; }) : null;
-  var num = parseFloat(valor);
-  var nuevoEstado;
-  if (!isNaN(num) && item && num >= item.qty) nuevoEstado = 'ok';
-  else if (!isNaN(num) && num >= 0) nuevoEstado = 'falta';
-  else nuevoEstado = 'sin';
-  vp.data[recetaId].estado = nuevoEstado;
-  setProdVerifPedido(prodVerifHistActual, vp);
-  var btn = document.getElementById('pvhbtn-' + idx);
-  if (btn) {
-    btn.className = 'pv-estado-btn ' + nuevoEstado;
-    btn.textContent = nuevoEstado === 'ok' ? '✓' : nuevoEstado === 'falta' ? '✕' : '·';
-  }
-}
-
-function toggleVerifProdHist(idx, recetaId) {
-  var vp = getProdVerifPedido(prodVerifHistActual);
-  if (!vp.data) vp.data = {};
-  if (!vp.data[recetaId]) vp.data[recetaId] = {};
-  var ciclo = { sin: 'ok', ok: 'falta', falta: 'sin' };
-  var actual = vp.data[recetaId].estado || 'sin';
-  vp.data[recetaId].estado = ciclo[actual] || 'sin';
-  setProdVerifPedido(prodVerifHistActual, vp);
-  var btn = document.getElementById('pvhbtn-' + idx);
-  if (btn) {
-    btn.className = 'pv-estado-btn ' + vp.data[recetaId].estado;
-    btn.textContent = vp.data[recetaId].estado === 'ok' ? '✓' : vp.data[recetaId].estado === 'falta' ? '✕' : '·';
-  }
-}
-
-function confirmarVerifProdHist() {
-  var vp = getProdVerifPedido(prodVerifHistActual);
-  var isFirstConfirm = (vp.estado === 'libre');
-  var editCount = vp.editCount || 0;
-
-  if (!isFirstConfirm) editCount++;
-  vp.editCount = editCount;
-
-  var bloquear = !isFirstConfirm && editCount >= 5;
-
-  if (bloquear) {
-    vp.estado = 'bloqueado';
-  } else {
-    vp.estado = 'confirmado';
-  }
-
-  setProdVerifPedido(prodVerifHistActual, vp);
-  showToast(bloquear ? 'Verificación bloqueada' :
-    isFirstConfirm ? 'Verificación confirmada' : 'Verificación actualizada · Edición ' + editCount + '/5');
-  volverAlHistorialProduccion();
-}
-
-function abrirEdicionVerifProdHist(histId) {
-  var vp = getProdVerifPedido(histId);
-  if (vp.estado === 'bloqueado' || (vp.editCount || 0) >= 5) { showToast('La verificación está bloqueada y no se puede editar más'); return; }
-  if (vp.estado !== 'confirmado') { showToast('No hay verificación confirmada para editar'); return; }
-  abrirVerifProdHist(histId);
-}
-
-function imprimirPedidoProdHist(histId) {
-  var h = getProdHist().find(function(x) { return x.id === histId; });
-  if (!h) return;
-  var html = _buildProdPrintHTML(h.items, h.fecha + ' · ' + h.items.length + ' productos', h.timestamp);
-  abrirPrintOverlay(html);
 }
 
 function verDetalleHistorial(id) {
@@ -4180,11 +4830,14 @@ function verDetalleHistorial(id) {
   abrirPrintOverlay(bodyHtml);
 }
 
+function recepcionarPedido(id) {
+  abrirModalRecepcionar(id);
+}
+
 function editarPedidoHist(histId) {
   var hist = histGet();
   var h = hist.find(function(x) { return x.id === histId; });
   if (!h) { showToast('Pedido no encontrado'); return; }
-  if ((h.editCount || 0) >= 2) { showToast('Este pedido ya se editó 2 veces, no se puede más'); return; }
   var ped = pedidoGet();
   if (ped.items && Object.keys(ped.items).filter(function(k) { return ped.items[k].qty; }).length) {
     if (!confirm('Tenés un pedido en curso. ¿Reemplazarlo con éste para editarlo?')) return;
@@ -4197,7 +4850,7 @@ function editarPedidoHist(histId) {
   pedidoSet({ items: nuevoItems, editandoHistId: histId });
   actualizarBadgePedido();
   cambiarTab('pedido');
-  showToast('Editando pedido (' + ((h.editCount || 0) + 1) + '/2). Modificá lo que necesites.');
+  showToast('Editando pedido. Modificá lo que necesites y confirmá.');
 }
 
 function repetirPedido(id) {
@@ -4234,7 +4887,7 @@ function borrarPedidoHist(histId) {
   if (!confirm('¿Eliminar este pedido del historial?')) return;
   var hist = histGet().filter(function(x) { return x.id !== histId; });
   histSet(hist);
-  renderHistorialProveedores();
+  renderHistorial();
   showToast('Pedido eliminado');
 }
 
@@ -4273,6 +4926,8 @@ function escapeHtml(s) {
     await cargarListas();
     renderHistorial();
     actualizarBadgePedido();
+    renderIngreso();
+    cambiarTab('ingreso');
     $('loader').style.display = 'none';
     $('app-shell').style.display = 'flex';
   } catch(e) {
@@ -4473,788 +5128,6 @@ async function enviarMensajeAI() {
     input.focus();
   }
 }
-</script>
-
-<script>
-// ============================================================================
-// PRODUCCIÓN — Productos + Pedido a producción
-// ============================================================================
-
-var PROD_REC_KEY    = 'pl_recetas';       // [{id, nombre, catId, subcatId}]
-var PROD_CATS_KEY   = 'pl_prod_cats';     // [{id, nombre, color}]
-var PROD_SUBCATS_KEY= 'pl_prod_subcats';  // [{id, nombre, catId}]
-var PROD_HIST_KEY   = 'pl_prod_hist';     // [{id, fecha, timestamp, items, editCount}]
-var PROD_VERIF_HIST_KEY = 'pl_prod_verif_hist'; // {histId: {data, estado, editCount}}
-
-var prodRecetaEditId   = null;
-var prodCatEditId      = null;
-var prodSubcatEditId   = null;
-var prodVerifHistActual = null;
-var historialTabActual  = 'produccion';
-
-// ——— Persistencia ———
-function getRecetas() {
-  try { return JSON.parse(localStorage.getItem(PROD_REC_KEY) || '[]'); } catch(e) { return []; }
-}
-function setRecetas(v) { localStorage.setItem(PROD_REC_KEY, JSON.stringify(v)); }
-function getProdCats()    { try { return JSON.parse(localStorage.getItem(PROD_CATS_KEY)    || '[]'); } catch(e) { return []; } }
-function setProdCats(v)   { localStorage.setItem(PROD_CATS_KEY, JSON.stringify(v)); }
-function getProdSubcats() { try { return JSON.parse(localStorage.getItem(PROD_SUBCATS_KEY) || '[]'); } catch(e) { return []; } }
-function setProdSubcats(v){ localStorage.setItem(PROD_SUBCATS_KEY, JSON.stringify(v)); }
-function getProdHist()    { try { return JSON.parse(localStorage.getItem(PROD_HIST_KEY)    || '[]'); } catch(e) { return []; } }
-function setProdHist(v)   { localStorage.setItem(PROD_HIST_KEY, JSON.stringify(v)); }
-function getProdVerifHist()  { try { return JSON.parse(localStorage.getItem(PROD_VERIF_HIST_KEY) || '{}'); } catch(e) { return {}; } }
-function setProdVerifHist(v) { localStorage.setItem(PROD_VERIF_HIST_KEY, JSON.stringify(v)); }
-function getProdVerifPedido(histId) { var all = getProdVerifHist(); return all[histId] || { data: {}, estado: 'libre', editCount: 0 }; }
-function setProdVerifPedido(histId, v) { var all = getProdVerifHist(); all[histId] = v; setProdVerifHist(all); }
-
-// ——— Día del año (Julian day 1–365) ———
-function diaDelAnio() {
-  var now = new Date();
-  var start = new Date(now.getFullYear(), 0, 0);
-  var diff = now - start;
-  var oneDay = 1000 * 60 * 60 * 24;
-  return Math.floor(diff / oneDay);
-}
-
-// ——— Validar código crítico ———
-function validarCriticoProd(cod) {
-  var hoy = diaDelAnio();
-  var c = parseInt(cod);
-  if (isNaN(c) || c < 1 || c > 365) return { clase: 'crit-nd', texto: '?' };
-  var diff = hoy - c;
-  if (diff < 0) diff += 365;
-  if (diff <= 0) return { clase: 'crit-ok',   texto: 'Hoy' };
-  if (diff === 1) return { clase: 'crit-ok',   texto: '1d'  };
-  if (diff === 2) return { clase: 'crit-ok',   texto: '2d'  };
-  if (diff <= 5)  return { clase: 'crit-warn',  texto: diff + 'd !' };
-  return { clase: 'crit-venc', texto: diff + 'd X' };
-}
-
-// ——— Render principal ———
-function renderProduccion() {
-  var activeSub = document.querySelector('.prod-subtab.active');
-  var subName = activeSub ? activeSub.id.replace('psub-', '') : 'recetas';
-  if (subName === 'recetas') renderProdRecetas();
-  else                       renderProdProducir();
-}
-
-function prodSubtab(name) {
-  document.querySelectorAll('.prod-subtab').forEach(function(b) {
-    b.classList.toggle('active', b.id === 'psub-' + name);
-  });
-  document.querySelectorAll('.prod-panel').forEach(function(p) {
-    p.classList.toggle('active', p.id === 'prod-panel-' + name);
-  });
-  if (name === 'recetas') renderProdRecetas();
-  else                    renderProdProducir();
-}
-
-// ——— Sub-tab: Productos ———
-function renderProdRecetas() {
-  var recetas = getRecetas();
-  var cats    = getProdCats();
-  var subcats = getProdSubcats();
-  var el = document.getElementById('prod-recetas-lista');
-  if (!el) return;
-  if (!recetas.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-emoji" style="font-size:40px;">📋</div>' +
-      '<div class="empty-title">Sin productos</div>' +
-      '<div class="empty-sub">Cargá los productos que fabricás con su categoría y subcategoría</div></div>';
-    return;
-  }
-
-  function recetaCard(r) {
-    return '<div class="prod-rec-card">' +
-      '<div class="prod-rec-head">' +
-        '<div class="prod-rec-nombre">' + escapeHtml(r.nombre) + '</div>' +
-      '</div>' +
-      '<div class="prod-rec-actions">' +
-        '<button class="btn" style="font-size:12px;padding:6px 14px;" onclick="abrirModalReceta(\'' + r.id + '\')">✎ Editar</button>' +
-      '</div>' +
-    '</div>';
-  }
-
-  // Group by catId → subcatId
-  var grupos = {}; // { catId: { subcatId: [receta] } }
-  recetas.forEach(function(r) {
-    var cid = r.catId || '';
-    var sid = r.subcatId || '';
-    if (!grupos[cid]) grupos[cid] = {};
-    if (!grupos[cid][sid]) grupos[cid][sid] = [];
-    grupos[cid][sid].push(r);
-  });
-
-  var html = '';
-  // First render categorized groups
-  cats.forEach(function(cat) {
-    if (!grupos[cat.id]) return;
-    var color = cat.color || '#3b82f6';
-    html += '<div class="prod-cat-header"><span class="prod-cat-tag" style="background:' + color + ';">' + escapeHtml(cat.nombre) + '</span></div>';
-    var subcatGrupo = grupos[cat.id];
-    // Subcategories within this cat
-    var subcatsDeEsta = subcats.filter(function(s) { return s.catId === cat.id; });
-    subcatsDeEsta.forEach(function(subcat) {
-      if (!subcatGrupo[subcat.id]) return;
-      html += '<div class="prod-subcat-header"><span class="prod-subcat-title">' + escapeHtml(subcat.nombre) + '</span></div>';
-      subcatGrupo[subcat.id].forEach(function(r) { html += recetaCard(r); });
-    });
-    // Recipes in this cat with no subcat
-    if (subcatGrupo['']) {
-      subcatGrupo[''].forEach(function(r) { html += recetaCard(r); });
-    }
-  });
-  // Sin categoría group
-  if (grupos['']) {
-    if (cats.length) html += '<div class="prod-cat-header"><span class="prod-cat-tag" style="background:#6b7280;">Sin categoría</span></div>';
-    var sinCatGrupo = grupos[''];
-    Object.keys(sinCatGrupo).forEach(function(sid) {
-      if (sid) {
-        var sub = subcats.find(function(s) { return s.id === sid; });
-        if (sub) html += '<div class="prod-subcat-header"><span class="prod-subcat-title">' + escapeHtml(sub.nombre) + '</span></div>';
-      }
-      sinCatGrupo[sid].forEach(function(r) { html += recetaCard(r); });
-    });
-  }
-  el.innerHTML = html;
-}
-
-// ——— Sub-tab: Hacer pedido a producción ———
-var PROD_ORDEN_KEY = 'pl_orden_prod'; // orden de producción activa
-
-function getPedidoProd()  { try { return JSON.parse(localStorage.getItem(PROD_ORDEN_KEY) || 'null'); } catch(e) { return null; } }
-function setPedidoProd(v) { localStorage.setItem(PROD_ORDEN_KEY, JSON.stringify(v)); }
-
-function renderProdProducir() {
-  var orden = getPedidoProd();
-  if (orden && orden.estado === 'ver') {
-    renderVerPedidoProd(orden);
-  } else {
-    renderArmarPedidoProd();
-  }
-}
-
-// ——— Estado 1: Armar pedido ———
-function renderArmarPedidoProd() {
-  document.getElementById('prod-armar-pedido').style.display = '';
-  document.getElementById('prod-ver-pedido').style.display = 'none';
-
-  var recetas  = getRecetas();
-  var cats     = getProdCats();
-  var subcats  = getProdSubcats();
-  var listaEl  = document.getElementById('prod-armar-lista');
-  if (!listaEl) return;
-
-  if (!recetas.length) {
-    listaEl.innerHTML = '<div class="empty"><div class="empty-emoji" style="font-size:40px;">🏭</div>' +
-      '<div class="empty-title">Sin productos cargados</div>' +
-      '<div class="empty-sub">Andá a <strong>Productos y Recetas</strong> y cargá los productos primero.</div></div>';
-    document.getElementById('prod-armar-footer').style.display = 'none';
-    return;
-  }
-  document.getElementById('prod-armar-footer').style.display = '';
-
-  // Restore previously typed values from a saved (armar) orden
-  var savedOrden = getPedidoProd();
-  var savedItems = {};
-  if (savedOrden && savedOrden.estado !== 'ver') {
-    (savedOrden.items || []).forEach(function(it) {
-      savedItems[it.recetaId] = it;
-    });
-  }
-
-  // Column header
-  var colHeader = '<div class="prod-order-col-header">' +
-    '<span class="prod-order-col-lbl" style="flex:1;">Producto</span>' +
-    '<span class="prod-order-col-lbl" style="width:66px;text-align:center;">Stock</span>' +
-    '<span class="prod-order-col-lbl" style="width:60px;text-align:center;">Cód.</span>' +
-    '<span class="prod-order-col-lbl" style="width:80px;text-align:center;">Pedir</span>' +
-  '</div>';
-
-  function recetaRow(r) {
-    var saved = savedItems[r.id] || {};
-    var stockVal = saved.stock !== undefined ? saved.stock : '';
-    var critVal  = saved.critico !== undefined ? saved.critico : '';
-    var qtyVal   = saved.qty || '';
-    var critBadge = '';
-    if (critVal !== '' && critVal !== undefined) {
-      var cv = validarCriticoProd(critVal);
-      critBadge = '<span class="crit-badge ' + cv.clase + '" id="crit-badge-' + r.id + '">' + cv.texto + '</span>';
-    } else {
-      critBadge = '<span class="crit-badge crit-nd" id="crit-badge-' + r.id + '">—</span>';
-    }
-    return '<div class="prod-order-row">' +
-      '<span class="prod-order-nombre">' + escapeHtml(r.nombre) + '</span>' +
-      '<input type="number" class="prod-stock-inp" id="prod-stock-' + r.id + '" min="0" placeholder="—" value="' + escapeHtml(String(stockVal)) + '" ' +
-        'oninput="actualizarCritBadgeProd(\'' + r.id + '\')">' +
-      '<div style="display:flex;flex-direction:column;align-items:center;gap:3px;">' +
-        '<input type="number" class="prod-crit-inp" id="prod-crit-' + r.id + '" min="1" max="365" placeholder="1-365" value="' + escapeHtml(String(critVal)) + '" ' +
-          'oninput="actualizarCritBadgeProd(\'' + r.id + '\')">' +
-        critBadge +
-      '</div>' +
-      '<input type="number" id="prod-qty-' + r.id + '" class="prod-qty-input" min="0" value="' + escapeHtml(String(qtyVal)) + '" placeholder="0">' +
-    '</div>';
-  }
-
-  // Group by cat/subcat
-  var grupos = {};
-  recetas.forEach(function(r) {
-    var cid = r.catId || '';
-    var sid = r.subcatId || '';
-    if (!grupos[cid]) grupos[cid] = {};
-    if (!grupos[cid][sid]) grupos[cid][sid] = [];
-    grupos[cid][sid].push(r);
-  });
-
-  var html = colHeader;
-
-  cats.forEach(function(cat) {
-    if (!grupos[cat.id]) return;
-    var color = cat.color || '#3b82f6';
-    html += '<div class="prod-cat-header" style="margin-top:12px;"><span class="prod-cat-tag" style="background:' + color + ';">' + escapeHtml(cat.nombre) + '</span></div>';
-    var subcatGrupo = grupos[cat.id];
-    var subcatsDeEsta = subcats.filter(function(s) { return s.catId === cat.id; });
-    subcatsDeEsta.forEach(function(subcat) {
-      if (!subcatGrupo[subcat.id]) return;
-      html += '<div class="prod-subcat-header"><span class="prod-subcat-title">' + escapeHtml(subcat.nombre) + '</span></div>';
-      subcatGrupo[subcat.id].forEach(function(r) { html += recetaRow(r); });
-    });
-    if (subcatGrupo['']) {
-      subcatGrupo[''].forEach(function(r) { html += recetaRow(r); });
-    }
-  });
-
-  if (grupos['']) {
-    if (cats.length) html += '<div class="prod-cat-header" style="margin-top:12px;"><span class="prod-cat-tag" style="background:#6b7280;">Sin categoría</span></div>';
-    var sinCatGrupo = grupos[''];
-    Object.keys(sinCatGrupo).forEach(function(sid) {
-      if (sid) {
-        var sub = subcats.find(function(s) { return s.id === sid; });
-        if (sub) html += '<div class="prod-subcat-header"><span class="prod-subcat-title">' + escapeHtml(sub.nombre) + '</span></div>';
-      }
-      sinCatGrupo[sid].forEach(function(r) { html += recetaRow(r); });
-    });
-  }
-
-  listaEl.innerHTML = html;
-}
-
-function actualizarCritBadgeProd(recetaId) {
-  var critInp = document.getElementById('prod-crit-' + recetaId);
-  var badge   = document.getElementById('crit-badge-' + recetaId);
-  if (!badge) return;
-  var val = critInp ? critInp.value.trim() : '';
-  if (!val) { badge.className = 'crit-badge crit-nd'; badge.textContent = '—'; return; }
-  var cv = validarCriticoProd(val);
-  badge.className = 'crit-badge ' + cv.clase;
-  badge.textContent = cv.texto;
-}
-
-function confirmarPedidoProduccion() {
-  var recetas = getRecetas();
-  var items = [];
-  var error = null;
-  recetas.forEach(function(r) {
-    if (error) return;
-    var inp   = document.getElementById('prod-qty-' + r.id);
-    var stockInp = document.getElementById('prod-stock-' + r.id);
-    var critInp  = document.getElementById('prod-crit-' + r.id);
-    var qty   = parseInt(inp ? inp.value : 0) || 0;
-    if (qty <= 0) return;
-    var stock  = stockInp && stockInp.value.trim() !== '' ? parseFloat(stockInp.value) : '';
-    var critico = critInp && critInp.value.trim() !== '' ? parseInt(critInp.value) : '';
-    // Validate: if stock > 0, critico is required
-    if (stock !== '' && parseFloat(stock) > 0 && (critico === '' || isNaN(critico))) {
-      error = '"' + r.nombre + '" tiene stock pero falta el código crítico.';
-      return;
-    }
-    // Validate critico range if provided
-    if (critico !== '' && !isNaN(critico) && (critico < 1 || critico > 365)) {
-      error = 'Código crítico de "' + r.nombre + '" debe estar entre 1 y 365.';
-      return;
-    }
-    items.push({
-      recetaId: r.id, nombre: r.nombre,
-      catId: r.catId || '', subcatId: r.subcatId || '',
-      qty: qty,
-      stock: stock !== '' ? parseFloat(stock) : '',
-      critico: critico !== '' && !isNaN(critico) ? critico : '',
-      producido: '', estado: 'sin'
-    });
-  });
-  if (error) { showToast(error); return; }
-  if (!items.length) { showToast('Ingresá al menos una cantidad'); return; }
-  var oldOrden   = getPedidoProd();
-  var editCount  = (oldOrden && oldOrden.editCount) ? oldOrden.editCount : 0;
-  var timestamp  = (oldOrden && oldOrden.timestamp) ? oldOrden.timestamp : Date.now();
-  var orden = {
-    fecha: new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-    timestamp: timestamp,
-    editCount: editCount,
-    estado: 'ver',
-    items: items
-  };
-  setPedidoProd(orden);
-  renderVerPedidoProd(orden);
-}
-
-// ——— Estado 2: Ver pedido ———
-function renderVerPedidoProd(orden) {
-  document.getElementById('prod-armar-pedido').style.display = 'none';
-  document.getElementById('prod-ver-pedido').style.display = '';
-  var tit = document.getElementById('prod-ver-titulo');
-  if (tit) tit.textContent = 'Pedido — ' + orden.fecha;
-
-  var accsEl = document.getElementById('prod-ver-acciones');
-  if (accsEl) {
-    var editCount = orden.editCount || 0;
-    var editDis = editCount >= 5 ? ' disabled' : '';
-    accsEl.innerHTML =
-      '<button class="btn"' + editDis + ' onclick="volverAEditarProdForm()" title="Editar pedido">✎ Editar (' + editCount + '/5)</button>' +
-      '<button class="btn" onclick="imprimirPedidoProd()">🖨 Imprimir</button>' +
-      '<button class="btn primary" onclick="enviarPedidoAProdHistorial()">→ Enviar a producción</button>';
-  }
-
-  var cats    = getProdCats();
-  var subcats = getProdSubcats();
-
-  // Group items by cat → subcat
-  var grupos = {};
-  orden.items.forEach(function(item) {
-    var cid = item.catId || '';
-    var sid = item.subcatId || '';
-    if (!grupos[cid]) grupos[cid] = {};
-    if (!grupos[cid][sid]) grupos[cid][sid] = [];
-    grupos[cid][sid].push(item);
-  });
-
-  function itemRow(item) {
-    var critBadge = '';
-    if (item.critico !== '' && item.critico !== undefined) {
-      var cv = validarCriticoProd(item.critico);
-      critBadge = ' <span class="crit-badge ' + cv.clase + '">' + cv.texto + '</span>';
-    }
-    return '<div class="prod-ver-item">' +
-      '<span>' + escapeHtml(item.nombre) + critBadge + '</span>' +
-      '<div style="display:flex;align-items:center;gap:10px;">' +
-        (item.stock !== '' ? '<span style="font-size:12px;color:var(--text-muted);">Stock: ' + item.stock + '</span>' : '') +
-        '<span class="prod-ver-qty">' + item.qty + ' u.</span>' +
-      '</div>' +
-    '</div>';
-  }
-
-  var html = '';
-
-  function renderGrupo(grupo) {
-    var subcatIds = Object.keys(grupo);
-    subcatIds.forEach(function(sid) {
-      if (sid) {
-        var sub = subcats.find(function(s) { return s.id === sid; });
-        if (sub) html += '<div class="prod-subcat-header"><span class="prod-subcat-title">' + escapeHtml(sub.nombre) + '</span></div>';
-      }
-      grupo[sid].forEach(function(item) { html += itemRow(item); });
-    });
-  }
-
-  cats.forEach(function(cat) {
-    if (!grupos[cat.id]) return;
-    var color = cat.color || '#3b82f6';
-    html += '<div class="prod-ver-card">';
-    html += '<div class="prod-ver-card-header"><span class="prod-cat-tag" style="background:' + color + ';">' + escapeHtml(cat.nombre) + '</span></div>';
-    renderGrupo(grupos[cat.id]);
-    html += '</div>';
-  });
-
-  if (grupos['']) {
-    html += '<div class="prod-ver-card">';
-    if (cats.length) html += '<div class="prod-ver-card-header"><span class="prod-cat-tag" style="background:#6b7280;">Sin categoría</span></div>';
-    renderGrupo(grupos['']);
-    html += '</div>';
-  }
-
-  var contentEl = document.getElementById('prod-ver-content');
-  if (contentEl) contentEl.innerHTML = html || '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">Sin items</div>';
-}
-
-function volverAEditarProdForm() {
-  var orden = getPedidoProd();
-  if (!orden) return;
-  if ((orden.editCount || 0) >= 5) { showToast('Límite de ediciones alcanzado (5/5)'); return; }
-  if (!confirm('¿Volver a editar el pedido?')) return;
-  orden.editCount = (orden.editCount || 0) + 1;
-  orden.estado = 'armar';
-  setPedidoProd(orden);
-  renderArmarPedidoProd();
-}
-
-function _buildProdPrintHTML(items, titulo, timestamp) {
-  var cats    = getProdCats();
-  var subcats = getProdSubcats();
-
-  var nextDay    = new Date((timestamp || Date.now()) + 24 * 60 * 60 * 1000);
-  var fechaSig   = nextDay.toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-
-  // Group items by catId
-  var byCat = {};
-  items.forEach(function(item) {
-    var cid = item.catId || '';
-    if (!byCat[cid]) byCat[cid] = {};
-    var sid = item.subcatId || '';
-    if (!byCat[cid][sid]) byCat[cid][sid] = [];
-    byCat[cid][sid].push(item);
-  });
-
-  function critRevisar(item) {
-    if (!item.critico && item.critico !== 0) return '';
-    var cv = validarCriticoProd(item.critico);
-    if (cv.clase === 'crit-venc') return ' <strong style="color:#922B21;">REVISAR</strong>';
-    return '';
-  }
-
-  function buildTableRows(rowItems) {
-    return rowItems.map(function(item, idx) {
-      var bg = idx % 2 === 0 ? '#f9f9f9' : '#fff';
-      var stk = (item.stock !== '' && item.stock !== undefined) ? item.stock : '—';
-      var crit = item.critico ? String(item.critico) : '—';
-      return '<tr style="background:' + bg + ';">' +
-        '<td style="padding:3px 5px;border-bottom:1px solid #eee;">' + escapeHtml(item.nombre) + critRevisar(item) + '</td>' +
-        '<td style="padding:3px 5px;border-bottom:1px solid #eee;text-align:center;color:#888;">' + stk + '</td>' +
-        '<td style="padding:3px 5px;border-bottom:1px solid #eee;text-align:center;color:#888;">' + crit + '</td>' +
-        '<td style="padding:3px 5px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">' + item.qty + ' u.</td>' +
-      '</tr>';
-    }).join('');
-  }
-
-  function buildSubcatRows(subcatGrupo) {
-    var html = '';
-    var subcatsSorted = Object.keys(subcatGrupo);
-    subcatsSorted.forEach(function(sid) {
-      if (sid) {
-        var sub = subcats.find(function(s) { return s.id === sid; });
-        if (sub) html += '<tr><td colspan="4" style="padding:4px 5px;font-size:9px;font-weight:600;text-transform:uppercase;color:#888;background:#f0ede8;border-bottom:1px solid #ddd;">' + escapeHtml(sub.nombre) + '</td></tr>';
-      }
-      html += buildTableRows(subcatGrupo[sid]);
-    });
-    return html;
-  }
-
-  function buildCatBloque(cat, subcatGrupo) {
-    var color = cat ? (cat.color || '#3b82f6') : '#6b7280';
-    var nombre = cat ? cat.nombre : 'Sin categoría';
-    var tblRows = buildSubcatRows(subcatGrupo);
-    return '<div class="cat-bloque">' +
-      '<h2 style="font-family:Georgia,serif;font-size:12px;margin:0 0 4px;color:' + color + ';padding-bottom:2px;border-bottom:1px solid ' + color + ';">' + escapeHtml(nombre) + '</h2>' +
-      '<table style="width:100%;border-collapse:collapse;font-size:10px;">' +
-        '<thead><tr style="background:#f5f5f5;">' +
-          '<th style="padding:3px 5px;text-align:left;border-bottom:1px solid #ddd;">Producto</th>' +
-          '<th style="padding:3px 5px;text-align:center;border-bottom:1px solid #ddd;color:#999;">Stock</th>' +
-          '<th style="padding:3px 5px;text-align:center;border-bottom:1px solid #ddd;color:#999;">Cód.</th>' +
-          '<th style="padding:3px 5px;text-align:right;border-bottom:1px solid #ddd;">Pedir</th>' +
-        '</tr></thead>' +
-        '<tbody>' + tblRows + '</tbody>' +
-      '</table>' +
-    '</div>';
-  }
-
-  // Build blocks list with estimated heights
-  var bloques = [];
-  cats.forEach(function(cat) {
-    if (!byCat[cat.id]) return;
-    var rowCount = 0;
-    Object.values(byCat[cat.id]).forEach(function(arr) { rowCount += arr.length; });
-    var subcatCount = Object.keys(byCat[cat.id]).filter(function(k){ return k !== ''; }).length;
-    var altura = 22 + 14 + subcatCount * 16 + rowCount * 14;
-    bloques.push({ html: buildCatBloque(cat, byCat[cat.id]), altura: altura, nombre: cat.nombre });
-  });
-  if (byCat['']) {
-    var rowCount = 0;
-    Object.values(byCat['']).forEach(function(arr) { rowCount += arr.length; });
-    var subcatCount = Object.keys(byCat['']).filter(function(k){ return k !== ''; }).length;
-    var altura = 22 + 14 + subcatCount * 16 + rowCount * 14;
-    bloques.push({ html: buildCatBloque(null, byCat['']), altura: altura, nombre: 'Sin categoría' });
-  }
-
-  if (!bloques.length) return '<p style="color:#888;">Sin productos.</p>';
-
-  // Bin-packing: first-fit decreasing into 2-column pages
-  var ALTURA_COL = 560;
-  var bloquesOrdenados = bloques.slice().sort(function(a, b) { return b.altura - a.altura; });
-  var columnas = [];
-  bloquesOrdenados.forEach(function(b) {
-    var puesto = false;
-    for (var i = 0; i < columnas.length; i++) {
-      if (columnas[i].usado + b.altura <= ALTURA_COL) {
-        columnas[i].items.push(b);
-        columnas[i].usado += b.altura;
-        puesto = true;
-        break;
-      }
-    }
-    if (!puesto) columnas.push({ items: [b], usado: b.altura });
-  });
-
-  // Restore original category order within each column
-  var ordenOriginal = {};
-  bloques.forEach(function(b, idx) { ordenOriginal[b.nombre] = idx; });
-  columnas.forEach(function(c) {
-    c.items.sort(function(a, b) { return (ordenOriginal[a.nombre] || 0) - (ordenOriginal[b.nombre] || 0); });
-  });
-
-  // Group columns into pages (2 per page)
-  var paginas = [];
-  for (var i = 0; i < columnas.length; i += 2) {
-    paginas.push([columnas[i], columnas[i + 1] || null]);
-  }
-
-  var CSS = [
-    '@page{size:A4;margin:10mm}',
-    'body{font-family:Arial,sans-serif;font-size:10px;color:#1C1512;max-width:100%;margin:0;padding:0}',
-    '.cabecera{font-size:11px;color:#555;margin-bottom:8px;padding-bottom:4px;border-bottom:2px solid #ddd;font-weight:500;}',
-    '.pagina{page-break-after:always;break-after:page}',
-    '.pagina:last-child{page-break-after:auto;break-after:auto}',
-    '.cols{display:flex;gap:10px;align-items:flex-start}',
-    '.col{flex:1;min-width:0}',
-    '.cat-bloque{page-break-inside:avoid;break-inside:avoid;margin-bottom:10px}',
-    '@media print{button{display:none!important}.pagina{page-break-after:always!important}.pagina:last-child{page-break-after:auto!important}.cat-bloque{page-break-inside:avoid!important}}'
-  ].join('');
-
-  var paginasHtml = paginas.map(function(cols) {
-    var col1 = cols[0] ? cols[0].items.map(function(b) { return b.html; }).join('') : '';
-    var col2 = cols[1] ? cols[1].items.map(function(b) { return b.html; }).join('') : '';
-    return '<div class="pagina"><div class="cols"><div class="col">' + col1 + '</div><div class="col">' + col2 + '</div></div></div>';
-  }).join('');
-
-  return '<style>' + CSS + '</style>' +
-    '<div class="cabecera">Para el: <strong>' + escapeHtml(fechaSig) + '</strong> &nbsp;·&nbsp; ' + escapeHtml(titulo) + '</div>' +
-    paginasHtml;
-}
-
-function imprimirPedidoProd() {
-  var orden = getPedidoProd();
-  if (!orden || !orden.items || !orden.items.length) { showToast('No hay pedido para imprimir'); return; }
-  var html = _buildProdPrintHTML(orden.items, orden.fecha + ' · ' + orden.items.length + ' productos', orden.timestamp);
-  abrirPrintOverlay(html);
-}
-
-function enviarPedidoAProdHistorial() {
-  var orden = getPedidoProd();
-  if (!orden) return;
-  if (!confirm('¿Enviar pedido a producción? Quedará en el historial para verificar.')) return;
-  var hist = getProdHist();
-  hist.unshift({
-    id: Date.now().toString(),
-    fecha: orden.fecha,
-    timestamp: Date.now(),
-    items: orden.items,
-    editCount: orden.editCount || 0
-  });
-  if (hist.length > 50) hist = hist.slice(0, 50);
-  setProdHist(hist);
-  setPedidoProd(null);
-  showToast('Pedido enviado a producción');
-  cambiarTab('historial');
-  setTimeout(function() { switchHistorialTab('produccion'); }, 100);
-}
-
-
-// ——— Modal: Receta ———
-function actualizarSubcatsProdModal() {
-  var catId = document.getElementById('rec-cat').value;
-  var subcats = getProdSubcats();
-  var sel = document.getElementById('rec-subcat');
-  if (!sel) return;
-  sel.innerHTML = '<option value="">Sin subcategoría</option>' +
-    subcats.filter(function(s) { return s.catId === catId; }).map(function(s) {
-      return '<option value="' + s.id + '">' + escapeHtml(s.nombre) + '</option>';
-    }).join('');
-}
-
-function abrirModalReceta(id) {
-  prodRecetaEditId = id || null;
-  var receta = id ? getRecetas().find(function(r) { return r.id === id; }) : null;
-  var $t = document.getElementById('modal-receta-titulo');
-  if ($t) $t.textContent = id ? 'Editar producto' : 'Nuevo producto';
-  document.getElementById('rec-nombre').value = receta ? receta.nombre : '';
-
-  var cats = getProdCats();
-  var catSel = document.getElementById('rec-cat');
-  if (catSel) {
-    catSel.innerHTML = '<option value="">Sin categoría</option>' +
-      cats.map(function(c) {
-        return '<option value="' + c.id + '"' + (receta && receta.catId === c.id ? ' selected' : '') + '>' + escapeHtml(c.nombre) + '</option>';
-      }).join('');
-  }
-  var subcats = getProdSubcats();
-  var subcatSel = document.getElementById('rec-subcat');
-  var selCatId = receta ? (receta.catId || '') : '';
-  if (subcatSel) {
-    subcatSel.innerHTML = '<option value="">Sin subcategoría</option>' +
-      subcats.filter(function(s) { return s.catId === selCatId; }).map(function(s) {
-        return '<option value="' + s.id + '"' + (receta && receta.subcatId === s.id ? ' selected' : '') + '>' + escapeHtml(s.nombre) + '</option>';
-      }).join('');
-  }
-
-  var btnBorrar = document.getElementById('btn-borrar-receta');
-  if (btnBorrar) btnBorrar.style.display = id ? '' : 'none';
-  document.getElementById('modal-receta').classList.add('open');
-  setTimeout(function() { document.getElementById('rec-nombre').focus(); }, 100);
-}
-
-function cerrarModalReceta() {
-  document.getElementById('modal-receta').classList.remove('open');
-}
-
-function guardarReceta() {
-  var nombre = document.getElementById('rec-nombre').value.trim();
-  if (!nombre) { document.getElementById('rec-nombre').focus(); return; }
-
-  var catId    = (document.getElementById('rec-cat')    || {}).value || '';
-  var subcatId = (document.getElementById('rec-subcat') || {}).value || '';
-
-  var recetas = getRecetas();
-  if (prodRecetaEditId) {
-    recetas = recetas.map(function(r) {
-      return r.id === prodRecetaEditId
-        ? { id: r.id, nombre: nombre, catId: catId, subcatId: subcatId }
-        : r;
-    });
-    showToast('Producto actualizado');
-  } else {
-    recetas.push({ id: Date.now().toString(), nombre: nombre, catId: catId, subcatId: subcatId });
-    showToast('Producto agregado');
-  }
-  setRecetas(recetas);
-  cerrarModalReceta();
-  renderProduccion();
-}
-
-function borrarReceta() {
-  if (!prodRecetaEditId) return;
-  var rec = getRecetas().find(function(r) { return r.id === prodRecetaEditId; });
-  if (!confirm('¿Eliminar la receta "' + (rec ? rec.nombre : '') + '"?')) return;
-  setRecetas(getRecetas().filter(function(r) { return r.id !== prodRecetaEditId; }));
-  cerrarModalReceta();
-  showToast('Receta eliminada');
-  renderProduccion();
-}
-
-// ——— Modales: Categorías de producción ———
-function abrirModalProdCat(id) {
-  prodCatEditId = id || null;
-  var cat = id ? getProdCats().find(function(c) { return c.id === id; }) : null;
-  var tit = document.getElementById('modal-prod-cat-titulo');
-  if (tit) tit.textContent = id ? 'Editar categoría' : 'Nueva categoría';
-  var inp = document.getElementById('prod-cat-nombre');
-  if (inp) inp.value = cat ? cat.nombre : '';
-  var col = document.getElementById('prod-cat-color');
-  if (col) col.value = cat ? (cat.color || '#3b82f6') : '#3b82f6';
-  var btnBorrar = document.getElementById('btn-borrar-prod-cat');
-  if (btnBorrar) btnBorrar.style.display = id ? '' : 'none';
-  document.getElementById('modal-prod-cat').classList.add('open');
-  setTimeout(function() { if (inp) inp.focus(); }, 100);
-}
-
-function cerrarModalProdCat() {
-  document.getElementById('modal-prod-cat').classList.remove('open');
-}
-
-function guardarProdCat() {
-  var nombre = (document.getElementById('prod-cat-nombre') || {}).value.trim();
-  if (!nombre) { document.getElementById('prod-cat-nombre').focus(); return; }
-  var color = (document.getElementById('prod-cat-color') || {}).value || '#3b82f6';
-  var cats = getProdCats();
-  if (prodCatEditId) {
-    cats = cats.map(function(c) { return c.id === prodCatEditId ? { id: c.id, nombre: nombre, color: color } : c; });
-    showToast('Categoría actualizada');
-  } else {
-    cats.push({ id: Date.now().toString(), nombre: nombre, color: color });
-    showToast('Categoría agregada');
-  }
-  setProdCats(cats);
-  cerrarModalProdCat();
-  renderProdRecetas();
-}
-
-function borrarProdCat() {
-  if (!prodCatEditId) return;
-  var cat = getProdCats().find(function(c) { return c.id === prodCatEditId; });
-  if (!confirm('¿Eliminar la categoría "' + (cat ? cat.nombre : '') + '"? Los productos quedarán sin categoría.')) return;
-  setProdCats(getProdCats().filter(function(c) { return c.id !== prodCatEditId; }));
-  // Clear catId from recipes
-  setRecetas(getRecetas().map(function(r) {
-    return r.catId === prodCatEditId ? Object.assign({}, r, { catId: '', subcatId: '' }) : r;
-  }));
-  cerrarModalProdCat();
-  showToast('Categoría eliminada');
-  renderProdRecetas();
-}
-
-// ——— Modales: Subcategorías de producción ———
-function abrirModalProdSubcat(id) {
-  prodSubcatEditId = id || null;
-  var sub = id ? getProdSubcats().find(function(s) { return s.id === id; }) : null;
-  var tit = document.getElementById('modal-prod-subcat-titulo');
-  if (tit) tit.textContent = id ? 'Editar subcategoría' : 'Nueva subcategoría';
-  var inp = document.getElementById('prod-subcat-nombre');
-  if (inp) inp.value = sub ? sub.nombre : '';
-  // Populate cat select
-  var cats = getProdCats();
-  var catSel = document.getElementById('prod-subcat-cat');
-  if (catSel) {
-    catSel.innerHTML = '<option value="">Sin categoría</option>' +
-      cats.map(function(c) {
-        return '<option value="' + c.id + '"' + (sub && sub.catId === c.id ? ' selected' : '') + '>' + escapeHtml(c.nombre) + '</option>';
-      }).join('');
-  }
-  var btnBorrar = document.getElementById('btn-borrar-prod-subcat');
-  if (btnBorrar) btnBorrar.style.display = id ? '' : 'none';
-  document.getElementById('modal-prod-subcat').classList.add('open');
-  setTimeout(function() { if (inp) inp.focus(); }, 100);
-}
-
-function cerrarModalProdSubcat() {
-  document.getElementById('modal-prod-subcat').classList.remove('open');
-}
-
-function guardarProdSubcat() {
-  var nombre = (document.getElementById('prod-subcat-nombre') || {}).value.trim();
-  if (!nombre) { document.getElementById('prod-subcat-nombre').focus(); return; }
-  var catId = (document.getElementById('prod-subcat-cat') || {}).value || '';
-  var subs = getProdSubcats();
-  if (prodSubcatEditId) {
-    subs = subs.map(function(s) { return s.id === prodSubcatEditId ? { id: s.id, nombre: nombre, catId: catId } : s; });
-    showToast('Subcategoría actualizada');
-  } else {
-    subs.push({ id: Date.now().toString(), nombre: nombre, catId: catId });
-    showToast('Subcategoría agregada');
-  }
-  setProdSubcats(subs);
-  cerrarModalProdSubcat();
-  renderProdRecetas();
-}
-
-function borrarProdSubcat() {
-  if (!prodSubcatEditId) return;
-  var sub = getProdSubcats().find(function(s) { return s.id === prodSubcatEditId; });
-  if (!confirm('¿Eliminar la subcategoría "' + (sub ? sub.nombre : '') + '"? Los productos quedarán sin subcategoría.')) return;
-  setProdSubcats(getProdSubcats().filter(function(s) { return s.id !== prodSubcatEditId; }));
-  setRecetas(getRecetas().map(function(r) {
-    return r.subcatId === prodSubcatEditId ? Object.assign({}, r, { subcatId: '' }) : r;
-  }));
-  cerrarModalProdSubcat();
-  showToast('Subcategoría eliminada');
-  renderProdRecetas();
-}
-
-// ——— (fin módulo producción) ———
-
-// Cerrar modal receta al click fuera
-document.getElementById('modal-receta').addEventListener('click', function(e) {
-  if (e.target === this) cerrarModalReceta();
-});
-document.getElementById('rec-nombre').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') guardarReceta();
-});
 </script>
 
 <!-- Botón flotante asistente -->

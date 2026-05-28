@@ -389,12 +389,18 @@
 <div class="modal-overlay modal-lg" id="modal-recepcionar" style="display:none;">
   <div class="modal">
     <h3>Recepcionar pedido</h3>
-    <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;" id="modal-rec-fecha"></div>
-    <p style="font-size:12px;color:var(--text-muted);margin:0 0 14px;">Marcá lo que recibiste. Desmarcá lo que no llegó. Usá 🔄 si vino algo diferente al pedido.</p>
-    <div id="modal-rec-items" style="max-height:55vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
-    <div class="modal-actions" style="margin-top:16px;">
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px;" id="modal-rec-fecha"></div>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Tildá lo que llegó. Lo que quede destildado queda como faltante. Usá 🔄 si vino algo diferente al pedido.</p>
+    <!-- Barra de acciones rápidas -->
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button onclick="seleccionarTodosRecepcion()" style="flex:1;background:transparent;border:1px solid var(--border-hi);color:var(--text-2);padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer;">☑️ Seleccionar todos</button>
+      <button onclick="limpiarSeleccionRecepcion()" style="flex:1;background:transparent;border:1px solid var(--border-hi);color:var(--text-2);padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer;">🗑️ Limpiar todo</button>
+    </div>
+    <div id="modal-rec-items" style="max-height:52vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
+    <div class="modal-actions" style="margin-top:16px;flex-wrap:wrap;gap:8px;">
       <button class="btn" onclick="cerrarModalRecepcionar()">Cancelar</button>
-      <button class="btn primary" onclick="guardarRecepcion()">✓ Guardar recepción</button>
+      <button class="btn" onclick="guardarRecepcion(false)" style="border-color:var(--emerald);color:var(--emerald);">💾 Guardar</button>
+      <button class="btn primary" onclick="guardarRecepcion(true)">✅ Guardar definitivamente</button>
     </div>
   </div>
 </div>
@@ -845,8 +851,17 @@ function abrirModalRecepcionar(id) {
   });
 
   // Pre-cargar faltantes y cambios existentes (para edición)
+  // Si es primera vez (nunca se guardó una recepción), todos empiezan destildados.
+  // El usuario tilda lo que efectivamente llegó.
+  var tieneDatosRecepcion = h.recepcionado || (h.faltantes && h.faltantes.length > 0) || (h.cambios && h.cambios.length > 0) || h._recepcionGuardada;
   var faltantesExistentes = {};
-  (h.faltantes || []).forEach(function(f) { faltantesExistentes[f.itemId] = true; });
+  if (!tieneDatosRecepcion) {
+    // Primera recepción: todos destildados (nada llegó aún)
+    h.items.forEach(function(it) { faltantesExistentes[it.itemId] = true; });
+  } else {
+    // Edición: restaurar estado previo
+    (h.faltantes || []).forEach(function(f) { faltantesExistentes[f.itemId] = true; });
+  }
   var cambiosExistentes = {};
   (h.cambios || []).forEach(function(c) { cambiosExistentes[c.itemId] = true; });
 
@@ -924,13 +939,27 @@ function cerrarModalRecepcionar() {
   recepcionandoId = null;
 }
 
-function guardarRecepcion() {
+function seleccionarTodosRecepcion() {
+  $('modal-rec-items').querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+    if (!cb.checked) { cb.checked = true; actualizarEstiloFilaRecepcion(cb.getAttribute('data-item-id')); }
+  });
+}
+
+function limpiarSeleccionRecepcion() {
+  $('modal-rec-items').querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+    if (cb.checked) { cb.checked = false; actualizarEstiloFilaRecepcion(cb.getAttribute('data-item-id')); }
+  });
+}
+
+// definitivo=false → guarda borrador (editable después)
+// definitivo=true  → cierra definitivamente (solo lectura)
+function guardarRecepcion(definitivo) {
   if (!recepcionandoId) return;
   var hist = histGet();
   var idx = hist.findIndex(function(x) { return x.id === recepcionandoId; });
   if (idx < 0) return;
 
-  // Recopilar items no recibidos (unchecked)
+  // Recopilar items no recibidos (unchecked = faltantes)
   var faltantes = [];
   $('modal-rec-items').querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
     if (!cb.checked) {
@@ -940,7 +969,7 @@ function guardarRecepcion() {
     }
   });
 
-  // Recopilar items marcados como cambio (llegaron pero diferentes)
+  // Recopilar items marcados como cambio
   var cambios = [];
   $('modal-rec-items').querySelectorAll('button[data-cambio-id]').forEach(function(btn) {
     if (btn.getAttribute('data-cambio-active') === 'true') {
@@ -950,10 +979,12 @@ function guardarRecepcion() {
     }
   });
 
-  hist[idx].recepcionado = true;
-  hist[idx].fechaRecepcion = Date.now();
-  hist[idx].faltantes = faltantes;
-  hist[idx].cambios = cambios;
+  hist[idx].recepcionado    = true;          // mover a historial siempre
+  hist[idx]._recepcionGuardada = true;        // marca que ya tiene datos guardados
+  hist[idx].recepcionFinal  = !!definitivo;   // definitivo = no editable
+  hist[idx].fechaRecepcion  = Date.now();
+  hist[idx].faltantes       = faltantes;
+  hist[idx].cambios         = cambios;
   histSet(hist);
 
   cerrarModalRecepcionar();
@@ -963,15 +994,38 @@ function guardarRecepcion() {
   var partes = [];
   if (faltantes.length > 0) partes.push(faltantes.length + ' faltante' + (faltantes.length !== 1 ? 's' : ''));
   if (cambios.length > 0) partes.push(cambios.length + ' cambio' + (cambios.length !== 1 ? 's' : ''));
-  if (partes.length > 0) {
-    showToast('Recepción guardada · ' + partes.join(' · '));
+  var resumen = partes.length > 0 ? ' · ' + partes.join(' · ') : ' completo';
+  if (definitivo) {
+    showToast('Recepción cerrada definitivamente ✅' + resumen);
   } else {
-    showToast('Pedido recepcionado completo ✓');
+    showToast('Recepción guardada 💾' + resumen + ' — podés seguir editando');
   }
 }
 
 function editarRecepcion(id) {
   abrirModalRecepcionar(id);
+}
+
+function verRecepcionSoloLectura(id) {
+  // Abre el modal pero deshabilita todos los controles (solo lectura)
+  abrirModalRecepcionar(id);
+  // Después de renderizar, deshabilitar inputs y botones de acción
+  setTimeout(function() {
+    var items = $('modal-rec-items');
+    if (!items) return;
+    items.querySelectorAll('input[type="checkbox"]').forEach(function(cb) { cb.disabled = true; });
+    items.querySelectorAll('button[data-cambio-id]').forEach(function(btn) { btn.disabled = true; btn.style.opacity = '0.5'; });
+    // Reemplazar footer: solo cerrar
+    var actions = $('modal-recepcionar').querySelector('.modal-actions');
+    if (actions) {
+      actions.innerHTML = '<div style="font-size:11px;color:var(--text-muted);flex:1;">🔒 Recepción cerrada definitivamente</div>' +
+        '<button class="btn" onclick="cerrarModalRecepcionar()">Cerrar</button>';
+    }
+    // Deshabilitar Limpiar/Seleccionar todos
+    $('modal-recepcionar').querySelectorAll('button[onclick*="Recepcion"]').forEach(function(b) {
+      b.disabled = true; b.style.opacity = '0.4';
+    });
+  }, 0);
 }
 
 // ============================================================
@@ -4107,6 +4161,21 @@ function buscarEnListas(q, terminosExtra) {
       }
     });
   });
+
+  // Ordenar: primero los que EMPIEZAN con el query principal (más relevantes),
+  // después los que lo CONTIENEN en otro lugar del nombre.
+  // Ejemplo: buscar "dulce de leche" → primero "Dulce de leche repostero",
+  // después "Salsa de dulce de leche".
+  resultados.sort(function(a, b) {
+    var aNom = (a.productoLista || '').toLowerCase();
+    var bNom = (b.productoLista || '').toLowerCase();
+    var aEmpieza = aNom.indexOf(qLower) === 0 ? 0 : 1;
+    var bEmpieza = bNom.indexOf(qLower) === 0 ? 0 : 1;
+    if (aEmpieza !== bEmpieza) return aEmpieza - bEmpieza;
+    // Mismo grupo → ordenar alfabéticamente
+    return aNom < bNom ? -1 : aNom > bNom ? 1 : 0;
+  });
+
   return resultados;
 }
 
@@ -4250,11 +4319,11 @@ function renderBuscarProducto(expansionesExtras) {
       html += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">';
       html += '<strong style="font-size:13px;white-space:nowrap;color:#4ade80;">$' + formatPrecio(precioMostrar) + '</strong>';
       if (enPed > 0) {
-        html += '<button class="btn" data-restar="' + it.itemId + '" style="padding:2px 7px;font-size:12px;">−</button>';
+        html += '<button class="btn" data-restar="' + escapeHtmlAttr(it.itemId) + '" style="padding:2px 7px;font-size:12px;">−</button>';
         html += '<span style="font-size:13px;font-weight:700;min-width:20px;text-align:center;">' + enPed + '</span>';
-        html += '<button class="btn primary" data-sumar="' + it.itemId + '" style="padding:2px 7px;font-size:12px;">+</button>';
+        html += '<button class="btn primary" data-sumar="' + escapeHtmlAttr(it.itemId) + '" style="padding:2px 7px;font-size:12px;">+</button>';
       } else {
-        html += '<button class="btn primary" data-sumar="' + it.itemId + '" style="padding:4px 10px;font-size:11px;">+ Agregar</button>';
+        html += '<button class="btn primary" data-sumar="' + escapeHtmlAttr(it.itemId) + '" style="padding:4px 10px;font-size:11px;">+ Agregar</button>';
       }
       html += '</div></div>';
     });
@@ -4668,8 +4737,14 @@ function renderHistorialProveedores() {
     html += '</div>';
 
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
-    html += '<button data-action="ver-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Ver</button>';
-    html += '<button data-action="editar-recepcion" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--warn);color:var(--warn);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">✎ Editar recepción</button>';
+    html += '<button data-action="ver-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">👁 Ver</button>';
+    if (h.recepcionFinal) {
+      // Definitivamente cerrado: solo ver
+      html += '<button data-action="ver-recepcion" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text-muted);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">🔒 Ver recepción</button>';
+    } else {
+      // Guardado como borrador o nunca cerrado: editable
+      html += '<button data-action="editar-recepcion" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--warn);color:var(--warn);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">✎ Editar recepción</button>';
+    }
     html += '<button data-action="repetir-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Repetir pedido</button>';
     html += '<button data-action="borrar-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--danger-border);color:var(--danger);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Eliminar</button>';
     html += '</div></div>';
@@ -4682,6 +4757,7 @@ function renderHistorialProveedores() {
       var id = btn.getAttribute('data-id');
       if (act === 'ver-hist')              verDetalleHistorial(id);
       else if (act === 'editar-recepcion') editarRecepcion(id);
+      else if (act === 'ver-recepcion')    verRecepcionSoloLectura(id);
       else if (act === 'repetir-hist')     repetirPedido(id);
       else if (act === 'borrar-hist')      borrarPedidoHist(id);
       else if (act === 'wa-prov')          abrirWhatsAppHist(btn.getAttribute('data-hist'), btn.getAttribute('data-prov'));

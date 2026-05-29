@@ -425,9 +425,12 @@
   <div class="modal">
     <h3 id="modal-lista-titulo">Cargar lista de precios</h3>
 
+    <!-- Barra de pestañas: una por cada lista que se está cargando en paralelo -->
+    <div id="cargas-tabs" class="cargas-tabs"></div>
+
     <div class="form-row">
       <label for="lista-prov-select">Proveedor *</label>
-      <select id="lista-prov-select"></select>
+      <select id="lista-prov-select" onchange="onCambiarProvCarga(this.value)"></select>
     </div>
 
     <div class="upload-zone">
@@ -516,9 +519,59 @@ var logoFile = null;       // archivo File seleccionado para logo
 var logoActualUrl = null;  // URL del logo actual (modo edición)
 var logoQuitado = false;   // usuario quitó el logo explícitamente
 var listas = [];
-var listaEditandoId = null;  // id del proveedor cuya lista estamos editando
-var filasPreview = [];  // [{productoLista, precio}, ...] del preview de la nueva lista
+var listaEditandoId = null;  // id del proveedor cuya lista estamos editando (ficha activa en modo edición)
 var verListaItems = [];  // items en la modal de ver lista (para filtrar)
+
+// ============================================================
+// CARGAS EN PARALELO (pestañas)
+// Cada "ficha" es una lista que se está cargando en su propia pestaña.
+// Reemplaza al viejo filasPreview global: ahora cada ficha tiene el suyo.
+// ============================================================
+var cargas = [];            // [{ id, proveedorId, esEdicion, titulo, estado, jobId, filasPreview, cancelado, error }]
+var cargaActivaId = null;   // id de la ficha visible en el cuerpo del modal
+var _cargaSeq = 0;          // contador para ids únicos de ficha
+
+function cargaActiva() {
+  for (var i = 0; i < cargas.length; i++) { if (cargas[i].id === cargaActivaId) return cargas[i]; }
+  return null;
+}
+function cargaPorId(id) {
+  for (var i = 0; i < cargas.length; i++) { if (cargas[i].id === id) return cargas[i]; }
+  return null;
+}
+function nuevaFicha(opts) {
+  opts = opts || {};
+  _cargaSeq++;
+  return {
+    id: 'carga-' + _cargaSeq,
+    proveedorId: opts.proveedorId || '',
+    esEdicion: !!opts.esEdicion,
+    titulo: opts.titulo || 'Nueva lista',
+    estado: opts.estado || 'idle',   // 'idle' | 'procesando' | 'listo' | 'error'
+    jobId: null,
+    filasPreview: opts.filasPreview || [],
+    cancelado: false,
+    error: null
+  };
+}
+// Renderiza el preview SOLO si la ficha es la activa (las que procesan en
+// segundo plano no tocan el cuerpo visible).
+function renderPreviewSiActiva(ficha) {
+  if (ficha && ficha.id === cargaActivaId) renderPreview();
+}
+// Marca una ficha como lista: limpia la barra, actualiza la pestaña y avisa.
+function finalizarCargaListo(ficha, n) {
+  if (ficha.jobId) removeBarraProgreso(ficha.jobId);
+  if (ficha.cancelado) return;
+  ficha.estado = 'listo';
+  renderTabsCargas();
+  renderPreviewSiActiva(ficha);
+  if (ficha.id === cargaActivaId) {
+    showToast('IA extrajo ' + n + ' productos');
+  } else {
+    showToast('Lista de "' + (ficha.titulo || '') + '" lista para revisar (' + n + ')', 'ok');
+  }
+}
 
 // ============================================================
 // SISTEMA DE EMPLEADOS
@@ -1410,48 +1463,187 @@ function abrirModalLista(proveedorId) {
     }
   }
 
-  listaEditandoId = proveedorId || null;
-  filasPreview = [];
+  // Arrancar con una sola ficha (pestaña)
+  cargas = [];
+  _cargaSeq = 0;
+  $('lista-loading-container').innerHTML = '';
 
-  // Llenar select de proveedores
+  if (proveedorId) {
+    // Modo edición: cargar lista existente en la primera ficha
+    var lista = listas.find(function(l) { return l.proveedor_id === proveedorId; });
+    var prov = proveedores.find(function(p) { return p.id === proveedorId; });
+    var ficha = nuevaFicha({
+      proveedorId: proveedorId,
+      esEdicion: true,
+      titulo: prov ? prov.nombre : 'Lista',
+      estado: 'listo',
+      filasPreview: (lista && lista.items || []).map(function(it) {
+        return { productoLista: it.productoLista, precio: parseFloat(it.precio), unidad: it.unidad || '' };
+      })
+    });
+    cargas.push(ficha);
+  } else {
+    // Modo carga nueva: ficha vacía con el primer proveedor libre preseleccionado
+    var pid = primerProveedorLibre(null);
+    var provN = proveedores.find(function(p) { return p.id === pid; });
+    cargas.push(nuevaFicha({ proveedorId: pid, titulo: provN ? provN.nombre : 'Nueva lista' }));
+  }
+
+  cargaActivaId = cargas[0].id;
+  $('modal-lista').classList.add('open');
+  renderTabsCargas();
+  renderCuerpoCarga();
+}
+
+// Primer proveedor que NO esté tomado por otra ficha abierta (excluyendo fichaId)
+function primerProveedorLibre(fichaId) {
+  var tomados = {};
+  cargas.forEach(function(c) { if (c.id !== fichaId && c.proveedorId) tomados[c.proveedorId] = true; });
+  for (var i = 0; i < proveedores.length; i++) {
+    if (!tomados[proveedores[i].id]) return proveedores[i].id;
+  }
+  return '';
+}
+
+// Llena el <select> de proveedores para la ficha dada, deshabilitando los que
+// ya están tomados por OTRA pestaña (regla: un proveedor por pestaña).
+function llenarProvSelect(ficha) {
   var sel = $('lista-prov-select');
+  var tomados = {};
+  cargas.forEach(function(c) { if (c.id !== ficha.id && c.proveedorId) tomados[c.proveedorId] = true; });
   sel.innerHTML = '';
   proveedores.forEach(function(p) {
     var opt = document.createElement('option');
     opt.value = p.id;
-    opt.textContent = p.nombre;
+    opt.textContent = p.nombre + (tomados[p.id] ? ' (en otra pestaña)' : '');
+    if (tomados[p.id]) opt.disabled = true;
     sel.appendChild(opt);
   });
+  sel.value = ficha.proveedorId || '';
+  // En edición o mientras procesa, no se puede cambiar el proveedor
+  sel.disabled = ficha.esEdicion || ficha.estado === 'procesando';
+}
 
-  if (proveedorId) {
-    // Modo edición: cargar lista existente
-    var lista = listas.find(function(l) { return l.proveedor_id === proveedorId; });
-    if (lista) {
-      sel.value = proveedorId;
-      sel.disabled = true;
-      filasPreview = (lista.items || []).map(function(it) {
-        return { productoLista: it.productoLista, precio: parseFloat(it.precio), unidad: it.unidad || '' };
-      });
-      $('modal-lista-titulo').textContent = 'Editar lista de precios';
-      $('btn-eliminar-lista').style.display = 'inline-flex';
-      renderPreview();
-    }
-  } else {
-    sel.disabled = false;
-    $('modal-lista-titulo').textContent = 'Cargar lista de precios';
-    $('btn-eliminar-lista').style.display = 'none';
-    $('preview-tabla').style.display = 'none';
-    $('preview-info').textContent = '';
-    $('btn-guardar-lista').disabled = true;
+// Renderiza la barra de pestañas
+function renderTabsCargas() {
+  var cont = $('cargas-tabs');
+  if (!cont) return;
+  var iconos = { idle: '', procesando: '⏳', listo: '✓', error: '⚠️' };
+  var html = '';
+  cargas.forEach(function(c) {
+    var act = (c.id === cargaActivaId) ? ' activa' : '';
+    var estCls = ' est-' + c.estado;
+    var ic = iconos[c.estado] || '';
+    html += '<button class="carga-tab' + act + estCls + '" onclick="activarCargaTab(\'' + c.id + '\')">' +
+      (ic ? '<span class="carga-tab-ic">' + ic + '</span>' : '') +
+      '<span class="carga-tab-lbl">' + escapeHtml(c.titulo || 'Lista') + '</span>' +
+      '<span class="carga-tab-x" onclick="event.stopPropagation();cerrarCargaTab(\'' + c.id + '\')" title="Descartar">×</span>' +
+      '</button>';
+  });
+  // Botón "+" para agregar otra lista (oculto en plan free)
+  if (profile.plan !== 'free') {
+    html += '<button class="carga-tab-add" onclick="nuevaCargaTab()" title="Cargar otra lista">+</button>';
+  }
+  cont.innerHTML = html;
+  // Una sola pestaña: no tiene sentido la barra salvo que el usuario pueda sumar más
+  cont.style.display = (cargas.length <= 1 && profile.plan === 'free') ? 'none' : 'flex';
+}
+
+// Renderiza el cuerpo del modal (selector + carga + preview) según la ficha activa
+function renderCuerpoCarga() {
+  var ficha = cargaActiva();
+  if (!ficha) return;
+  listaEditandoId = ficha.esEdicion ? ficha.proveedorId : null;
+  $('modal-lista-titulo').textContent = ficha.esEdicion ? 'Editar lista de precios' : 'Cargar lista de precios';
+  llenarProvSelect(ficha);
+  $('btn-eliminar-lista').style.display = ficha.esEdicion ? 'inline-flex' : 'none';
+
+  // Mostrar solo la barra de progreso de la ficha activa (si está procesando)
+  var cont = $('lista-loading-container');
+  Array.prototype.forEach.call(cont.children, function(ch) { ch.style.display = 'none'; });
+  if (ficha.estado === 'procesando' && ficha.jobId) {
+    var bar = document.getElementById('job-' + ficha.jobId);
+    if (bar) bar.style.display = '';
   }
 
-  $('modal-lista').classList.add('open');
+  renderPreview(); // renderiza la ficha activa
+  if (ficha.estado === 'error' && ficha.error) {
+    $('preview-info').textContent = '⚠️ ' + ficha.error + ' — volvé a subir el archivo.';
+  }
+}
+
+function onCambiarProvCarga(provId) {
+  var ficha = cargaActiva();
+  if (!ficha) return;
+  // No permitir elegir un proveedor ya tomado por otra pestaña
+  var tomadoPorOtra = cargas.some(function(c) { return c.id !== ficha.id && c.proveedorId === provId; });
+  if (tomadoPorOtra) {
+    showToast('Ese proveedor ya está en otra pestaña', 'error');
+    $('lista-prov-select').value = ficha.proveedorId || '';
+    return;
+  }
+  ficha.proveedorId = provId;
+  var prov = proveedores.find(function(p) { return p.id === provId; });
+  if (prov && (!ficha.esEdicion)) ficha.titulo = prov.nombre;
+  renderTabsCargas();
+}
+
+function nuevaCargaTab() {
+  if (profile.plan === 'free') {
+    showToast('El plan Free permite 1 lista. Mejorá a Pro para cargar varias.', 'error');
+    return;
+  }
+  var pid = primerProveedorLibre(null);
+  if (!pid) {
+    showToast('No quedan proveedores libres para otra pestaña', 'error');
+    return;
+  }
+  var prov = proveedores.find(function(p) { return p.id === pid; });
+  var ficha = nuevaFicha({ proveedorId: pid, titulo: prov ? prov.nombre : 'Nueva lista' });
+  cargas.push(ficha);
+  cargaActivaId = ficha.id;
+  renderTabsCargas();
+  renderCuerpoCarga();
+}
+
+function activarCargaTab(id) {
+  if (!cargaPorId(id)) return;
+  cargaActivaId = id;
+  renderTabsCargas();
+  renderCuerpoCarga();
+}
+
+function cerrarCargaTab(id) {
+  var ficha = cargaPorId(id);
+  if (!ficha) return;
+  if (ficha.estado === 'procesando') {
+    if (!confirm('La lista de "' + (ficha.titulo || '') + '" está procesando. ¿Cancelarla?')) return;
+    ficha.cancelado = true;
+  }
+  if (ficha.jobId) removeBarraProgreso(ficha.jobId);
+  cargas = cargas.filter(function(c) { return c.id !== id; });
+  if (cargas.length === 0) { _cerrarModalListaReal(); return; }
+  if (cargaActivaId === id) cargaActivaId = cargas[0].id;
+  renderTabsCargas();
+  renderCuerpoCarga();
 }
 
 function cerrarModalLista() {
+  var procesando = cargas.filter(function(c) { return c.estado === 'procesando'; });
+  if (procesando.length > 0) {
+    if (!confirm('Hay ' + procesando.length + ' lista(s) procesando. Si cerrás, se cancelan. ¿Cerrar igual?')) return;
+  }
+  cargas.forEach(function(c) { c.cancelado = true; if (c.jobId) removeBarraProgreso(c.jobId); });
+  _cerrarModalListaReal();
+}
+
+function _cerrarModalListaReal() {
   $('modal-lista').classList.remove('open');
   $('lista-input-img').value = '';
-  filasPreview = [];
+  $('lista-loading-container').innerHTML = '';
+  $('cargas-tabs').innerHTML = '';
+  cargas = [];
+  cargaActivaId = null;
   listaEditandoId = null;
 }
 
@@ -1549,6 +1741,14 @@ async function procesarArchivo(event) {
   var file = event.target.files[0];
   if (!file) return;
 
+  var ficha = cargaActiva();
+  if (!ficha) { event.target.value = ''; return; }
+  if (!ficha.proveedorId) {
+    showToast('Elegí un proveedor para esta pestaña', 'error');
+    event.target.value = '';
+    return;
+  }
+
   // Validar tamaño (max 20 MB)
   var maxBytes = 20 * 1024 * 1024;
   if (file.size > maxBytes) {
@@ -1560,8 +1760,7 @@ async function procesarArchivo(event) {
   // Validar límite del plan free ANTES de procesar
   if (profile.plan === 'free') {
     // Si ya tiene una lista y NO está editando esa misma, bloquear
-    var proveedorElegido = $('lista-prov-select').value;
-    var listaExistenteEseProv = listas.find(function(l) { return l.proveedor_id === proveedorElegido; });
+    var listaExistenteEseProv = listas.find(function(l) { return l.proveedor_id === ficha.proveedorId; });
     if (listas.length >= 1 && !listaExistenteEseProv) {
       showToast('El plan Free permite 1 lista. Mejorá a Pro para listas ilimitadas.', 'error');
       event.target.value = '';
@@ -1575,30 +1774,42 @@ async function procesarArchivo(event) {
     file.type === 'application/vnd.ms-excel' ||
     file.type === 'text/csv';
 
-  var jobId = Date.now().toString();
-  crearBarraProgreso(jobId);
+  ficha.estado = 'procesando';
+  ficha.cancelado = false;
+  ficha.error = null;
+  ficha.jobId = Date.now().toString();
+  crearBarraProgreso(ficha.jobId);
+  renderTabsCargas();
+  renderCuerpoCarga(); // muestra la barra de la ficha activa
+  event.target.value = ''; // liberar el input para la próxima pestaña
 
   try {
     if (esExcel) {
-      await procesarExcel(file, jobId);
+      await procesarExcel(file, ficha);
     } else if (esPDF) {
-      await procesarPDF(file, jobId);
+      await procesarPDF(file, ficha);
     } else {
-      await procesarImagen(file, jobId);
+      await procesarImagen(file, ficha);
     }
   } catch(e) {
     console.error('procesarArchivo error:', e);
-    removeBarraProgreso(jobId);
-    showToast('Error: ' + (e.message || 'no se pudo procesar'), 'error');
-  } finally {
-    event.target.value = '';
+    if (ficha.jobId) removeBarraProgreso(ficha.jobId);
+    if (!ficha.cancelado) {
+      ficha.estado = 'error';
+      ficha.error = e.message || 'no se pudo procesar';
+      showToast('Error en "' + (ficha.titulo || '') + '": ' + ficha.error, 'error');
+      renderTabsCargas();
+      renderPreviewSiActiva(ficha);
+    }
   }
 }
 
 // ============================================================
 // PROCESAR IMAGEN (foto): una sola llamada con visión
 // ============================================================
-async function procesarImagen(file, jobId) {
+async function procesarImagen(file, ficha) {
+  var jobId = ficha.jobId;
+  var proveedorId = ficha.proveedorId;
   var tiposValidos = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
   var mimeType = file.type || 'image/jpeg';
   if (mimeType === 'image/jpg') mimeType = 'image/jpeg';
@@ -1607,10 +1818,8 @@ async function procesarImagen(file, jobId) {
   }
 
   setProgresoJob(jobId, 'Procesando imagen con IA...', 30);
-  $('btn-guardar-lista').disabled = true;
 
   var base64 = await fileToBase64(file);
-  var proveedorId = $('lista-prov-select').value;
   var prompt = 'Extraé productos de esta lista de precios argentina. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques, NUNCA conviertas formato.\n\nDevolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":"texto_exacto","unidad":"...","alerta":false}]\n- nombre: nombre completo (marca, variedad, presentación)\n- precio: STRING con el texto EXACTO del precio tal como aparece en la imagen, conservando puntos y comas del formato argentino (ej: "13.996,53" → devolver "13.996,53"). NO conviertas a número.\n- unidad: presentación (ej: "5 lt", "1 kg", "500 g"). Si está en el nombre, extraéla. Si no hay info, usá ""\n- alerta: true solo si hay dos precios distintos para el mismo producto y no sabés cuál tomar\n- Ignorá encabezados, totales, fechas y filas que no sean productos';
 
   var items = await llamarClaudeProcesarLista({
@@ -1626,38 +1835,37 @@ async function procesarImagen(file, jobId) {
     }]
   });
 
-  filasPreview = items
+  if (ficha.cancelado) return;
+
+  ficha.filasPreview = items
     .map(function(it) {
       return { productoLista: limpiarNombreProducto(it.nombre), precio: parsePrecio(it.precio), unidad: String(it.unidad || '').trim(), alerta: !!it.alerta };
     })
     .filter(function(it) { return it.productoLista && it.precio !== null && it.precio > 0; });
 
-  if (filasPreview.length === 0) {
-    removeBarraProgreso(jobId);
-    showToast('No se detectaron productos. Probá con una foto de mejor calidad', 'error');
-    return;
+  if (ficha.filasPreview.length === 0) {
+    throw new Error('No se detectaron productos. Probá con una foto de mejor calidad');
   }
 
   // Etapas 2-5: normalización, agrupamiento, detección de modo, cálculo
   setProgresoJob(jobId, 'Normalizando productos...', 80);
   try {
-    var provId = $('lista-prov-select').value;
     var pipeEl = document.getElementById('job-txt-' + jobId);
-    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provId, pipeEl);
+    ficha.filasPreview = await ejecutarPipelineNormalizacion(ficha.filasPreview, proveedorId, pipeEl);
   } catch(pipeErr) {
     console.warn('[Pipeline] Falló, usando extracción básica:', pipeErr.message);
     showToast('Extraídos sin normalizar (' + pipeErr.message + ')', 'warn');
   }
 
-  removeBarraProgreso(jobId);
-  renderPreview();
-  showToast('IA extrajo ' + filasPreview.length + ' productos');
+  if (ficha.cancelado) return;
+  finalizarCargaListo(ficha, ficha.filasPreview.length);
 }
 
 // ============================================================
 // PROCESAR EXCEL/CSV: parsear local → líneas de texto → mismo pipeline que PDF
 // ============================================================
-async function procesarExcel(file, jobId) {
+async function procesarExcel(file, ficha) {
+  var jobId = ficha.jobId;
   if (typeof XLSX === 'undefined') {
     throw new Error('La librería de Excel no cargó. Recargá la página.');
   }
@@ -1705,7 +1913,8 @@ async function procesarExcel(file, jobId) {
   // 3. Detectar columnas de precio con IA (mismo pipeline que el PDF)
   setProgresoJob(jobId, 'Detectando columnas...', 28);
   var muestra = lineas.slice(0, 60).join('\n');
-  var columnas = await detectarColumnasPDF(muestra);
+  var columnas = await detectarColumnasPDF(muestra, ficha.proveedorId);
+  if (ficha.cancelado) return;
 
   if (!columnas || !columnas.precios || !columnas.precios.length) {
     throw new Error('No se detectaron columnas de precio en el Excel');
@@ -1713,17 +1922,18 @@ async function procesarExcel(file, jobId) {
 
   // 4. Si hay UNA columna, procesar directo. Si hay varias, mostrar selector
   if (columnas.precios.length === 1) {
-    await procesarPDFConColumna(lineas, columnas.precios[0].nombre, columnas.precios[0].ejemplo, columnas.precios, jobId);
+    await procesarPDFConColumna(lineas, columnas.precios[0].nombre, columnas.precios[0].ejemplo, columnas.precios, ficha);
   } else {
     removeBarraProgreso(jobId);
-    mostrarSelectorColumnasPDF(lineas, columnas, jobId);
+    mostrarSelectorColumnasPDF(lineas, columnas, ficha);
   }
 }
 
 // ============================================================
 // PROCESAR PDF: extraer texto local → detectar columnas → chunks
 // ============================================================
-async function procesarPDF(file, jobId) {
+async function procesarPDF(file, ficha) {
+  var jobId = ficha.jobId;
   if (typeof pdfjsLib === 'undefined') {
     throw new Error('PDF.js no cargó. Recargá la página.');
   }
@@ -1758,7 +1968,8 @@ async function procesarPDF(file, jobId) {
   // 2. Detectar columnas con IA usando una muestra
   setProgresoJob(jobId, 'Detectando columnas...', 28);
   var muestra = lineas.slice(0, 60).join('\n');
-  var columnas = await detectarColumnasPDF(muestra);
+  var columnas = await detectarColumnasPDF(muestra, ficha.proveedorId);
+  if (ficha.cancelado) return;
 
   if (!columnas || !columnas.precios || !columnas.precios.length) {
     throw new Error('No se detectaron columnas de precio en el PDF');
@@ -1766,16 +1977,15 @@ async function procesarPDF(file, jobId) {
 
   // 3. Si hay UNA columna sola, procesar directo. Si hay varias, mostrar selector
   if (columnas.precios.length === 1) {
-    await procesarPDFConColumna(lineas, columnas.precios[0].nombre, columnas.precios[0].ejemplo, columnas.precios, jobId);
+    await procesarPDFConColumna(lineas, columnas.precios[0].nombre, columnas.precios[0].ejemplo, columnas.precios, ficha);
   } else {
     removeBarraProgreso(jobId);
-    mostrarSelectorColumnasPDF(lineas, columnas, jobId);
+    mostrarSelectorColumnasPDF(lineas, columnas, ficha);
   }
 }
 
-async function detectarColumnasPDF(muestraTexto) {
+async function detectarColumnasPDF(muestraTexto, proveedorId) {
   var prompt = 'Mirá esta muestra de una lista de precios de un distribuidor argentino. Identificá las columnas que parecen ser PRECIOS (puede haber varias: precio lista, precio con descuento, precio mayorista, precio por mayor, etc).\n\nDevolvé EXCLUSIVAMENTE un JSON con este formato:\n{"precios":[{"nombre":"nombre/encabezado de la columna","ejemplo":"valor de ejemplo"}, ...]}\n\nIMPORTANTE:\n- Solo columnas de PRECIO (números monetarios). No incluyas códigos, cantidades de stock, ni descripciones.\n- Si ves columnas como "PRECIO UNIT" y "PRECIO CAJA", incluí ambas — son precios diferentes.\n- El ejemplo debe ser un valor numérico real de esa columna.\n\nMuestra:\n\n' + muestraTexto;
-  var proveedorId = $('lista-prov-select').value;
   var resp = await fetch('/api/claude', {
     method: 'POST',
     headers: {
@@ -1805,7 +2015,7 @@ async function detectarColumnasPDF(muestraTexto) {
   }
 }
 
-function mostrarSelectorColumnasPDF(lineas, columnas, jobId) {
+function mostrarSelectorColumnasPDF(lineas, columnas, ficha) {
   // Crear modal dinámico
   var opciones = columnas.precios.map(function(c, idx) {
     return '<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;background:var(--bg-elev2);">' +
@@ -1815,16 +2025,25 @@ function mostrarSelectorColumnasPDF(lineas, columnas, jobId) {
       (c.ejemplo ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">ej: ' + escapeHtml(c.ejemplo) + '</div>' : '') +
       '</div></label>';
   }).join('');
+  var provNom = (proveedores.find(function(p){ return p.id === ficha.proveedorId; }) || {}).nombre || '';
   var modalHtml = '<div class="modal-overlay open" id="col-pdf-modal" style="z-index:600;">' +
     '<div class="modal" style="max-width:500px;">' +
-    '<h3>Elegí la columna de precio</h3>' +
+    '<h3>Elegí la columna de precio' + (provNom ? ' — ' + escapeHtml(provNom) : '') + '</h3>' +
     '<p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">La IA detectó varias columnas con precios. ¿Cuál querés tomar?</p>' +
     opciones +
     '<div class="modal-actions">' +
-    '<button class="btn" onclick="cerrarModalColPDF()">Cancelar</button>' +
+    '<button class="btn" id="btn-cancelar-col-pdf">Cancelar</button>' +
     '<button class="btn primary" id="btn-confirmar-col-pdf">Procesar</button>' +
     '</div></div></div>';
   document.body.insertAdjacentHTML('beforeend', modalHtml);
+  document.getElementById('btn-cancelar-col-pdf').onclick = function() {
+    cerrarModalColPDF();
+    // Volver la ficha a "idle" para que el usuario pueda re-subir
+    ficha.estado = 'idle';
+    if (ficha.jobId) removeBarraProgreso(ficha.jobId);
+    renderTabsCargas();
+    renderPreviewSiActiva(ficha);
+  };
   document.getElementById('btn-confirmar-col-pdf').onclick = function() {
     var sel = document.querySelector('input[name="sel-col-pdf"]:checked');
     if (!sel) return;
@@ -1832,12 +2051,18 @@ function mostrarSelectorColumnasPDF(lineas, columnas, jobId) {
     // Buscar el ejemplo correspondiente a la columna elegida
     var colObj = columnas.precios.find(function(c) { return c.nombre === nombreCol; }) || {};
     cerrarModalColPDF();
-    var newJobId = Date.now().toString();
-    crearBarraProgreso(newJobId);
-    procesarPDFConColumna(lineas, nombreCol, colObj.ejemplo, columnas.precios, newJobId).catch(function(e) {
+    crearBarraProgreso(ficha.jobId);
+    renderCuerpoCarga();
+    procesarPDFConColumna(lineas, nombreCol, colObj.ejemplo, columnas.precios, ficha).catch(function(e) {
       console.error(e);
-      removeBarraProgreso(newJobId);
-      showToast('Error: ' + (e.message || ''), 'error');
+      if (ficha.jobId) removeBarraProgreso(ficha.jobId);
+      if (!ficha.cancelado) {
+        ficha.estado = 'error';
+        ficha.error = e.message || '';
+        showToast('Error en "' + (ficha.titulo || '') + '": ' + ficha.error, 'error');
+        renderTabsCargas();
+        renderPreviewSiActiva(ficha);
+      }
     });
   };
 }
@@ -1847,19 +2072,21 @@ function cerrarModalColPDF() {
   if (m) m.remove();
 }
 
-async function procesarPDFConColumna(lineas, nombreColumna, ejemploColumna, todasLasColumnas, jobId) {
-  filasPreview = [];
+async function procesarPDFConColumna(lineas, nombreColumna, ejemploColumna, todasLasColumnas, ficha) {
+  var jobId = ficha.jobId;
+  ficha.filasPreview = [];
   var chunkSize = 80;
   var totalChunks = Math.ceil(lineas.length / chunkSize);
   var errores = 0;
   for (var c = 0; c < totalChunks; c++) {
-    setProgresoJob(jobId, 'Procesando parte ' + (c + 1) + ' de ' + totalChunks + '... (' + filasPreview.length + ' productos)', Math.round(30 + (c / totalChunks) * 65));
+    if (ficha.cancelado) return;
+    setProgresoJob(jobId, 'Procesando parte ' + (c + 1) + ' de ' + totalChunks + '... (' + ficha.filasPreview.length + ' productos)', Math.round(30 + (c / totalChunks) * 65));
     var chunkLineas = lineas.slice(c * chunkSize, (c + 1) * chunkSize);
     var items = [];
     // Hasta 3 intentos por chunk
     for (var intento = 1; intento <= 3; intento++) {
       try {
-        items = await extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna, todasLasColumnas);
+        items = await extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna, todasLasColumnas, ficha.proveedorId);
         break;
       } catch(chunkErr) {
         console.warn('[PDF] Chunk ' + (c + 1) + ' intento ' + intento + ' falló:', chunkErr.message);
@@ -1875,37 +2102,35 @@ async function procesarPDFConColumna(lineas, nombreColumna, ejemploColumna, toda
     items.forEach(function(it) {
       var p = parsePrecio(it.precio);
       if (it.nombre && p !== null && p > 0) {
-        filasPreview.push({ productoLista: limpiarNombreProducto(it.nombre), precio: p, unidad: String(it.unidad || '').trim(), alerta: !!it.alerta });
+        ficha.filasPreview.push({ productoLista: limpiarNombreProducto(it.nombre), precio: p, unidad: String(it.unidad || '').trim(), alerta: !!it.alerta });
       }
     });
-    renderPreview();
+    renderPreviewSiActiva(ficha);
   }
-  if (filasPreview.length === 0) {
-    removeBarraProgreso(jobId);
-    showToast('No se pudieron extraer productos', 'error');
-    return;
+  if (ficha.cancelado) return;
+  if (ficha.filasPreview.length === 0) {
+    throw new Error('No se pudieron extraer productos');
   }
 
   // Etapas 2-5: normalización, agrupamiento, detección de modo, cálculo
-  setProgresoJob(jobId, 'Normalizando ' + filasPreview.length + ' productos...', 97);
+  setProgresoJob(jobId, 'Normalizando ' + ficha.filasPreview.length + ' productos...', 97);
   try {
-    var provIdPDF = $('lista-prov-select').value;
     var pipeElPDF = document.getElementById('job-txt-' + jobId);
-    filasPreview = await ejecutarPipelineNormalizacion(filasPreview, provIdPDF, pipeElPDF);
+    ficha.filasPreview = await ejecutarPipelineNormalizacion(ficha.filasPreview, ficha.proveedorId, pipeElPDF);
   } catch(pipeErrPDF) {
     console.warn('[Pipeline PDF] Falló, usando extracción básica:', pipeErrPDF.message);
     showToast('Extraídos sin normalizar (' + pipeErrPDF.message + ')', 'warn');
   }
 
-  removeBarraProgreso(jobId);
-  renderPreview();
-  var msg = 'IA extrajo ' + filasPreview.length + ' productos';
+  if (ficha.cancelado) return;
+  var msg = 'IA extrajo ' + ficha.filasPreview.length + ' productos';
   if (errores > 0) msg += ' (' + errores + ' partes fallaron)';
-  showToast(msg, errores > 0 ? 'warn' : 'ok');
+  finalizarCargaListo(ficha, ficha.filasPreview.length);
+  if (errores > 0) showToast(msg, 'warn');
 }
 
 // extraerChunkConClaude recibe el array de líneas para poder subdividir si se trunca
-async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna, todasLasColumnas) {
+async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna, todasLasColumnas, proveedorId) {
   var textoCrudo = chunkLineas.join('\n');
   // Si el texto es muy largo, reducir a 20000 chars (unas 60-80 líneas = seguro)
   if (textoCrudo.length > 20000) textoCrudo = textoCrudo.slice(0, 20000);
@@ -1943,7 +2168,6 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna,
     '- alerta: true si NO estás seguro de cuál es el precio correcto de la columna objetivo (mejor marcar dudoso que adivinar mal)\n' +
     '- Ignorá encabezados, totales, líneas vacías. Incluí TODOS los productos.\n\n' +
     'Texto:\n\n' + textoCrudo;
-  var proveedorId = $('lista-prov-select').value;
   var resp = await fetch('/api/claude', {
     method: 'POST',
     headers: {
@@ -1969,8 +2193,8 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna,
   if (data.stop_reason === 'max_tokens' && chunkLineas.length > 10) {
     console.warn('[PDF] Chunk truncado por max_tokens (' + chunkLineas.length + ' líneas), subdividiendo...');
     var mitad = Math.ceil(chunkLineas.length / 2);
-    var a = await extraerChunkConClaude(chunkLineas.slice(0, mitad), nombreColumna);
-    var b = await extraerChunkConClaude(chunkLineas.slice(mitad), nombreColumna);
+    var a = await extraerChunkConClaude(chunkLineas.slice(0, mitad), nombreColumna, ejemploColumna, todasLasColumnas, proveedorId);
+    var b = await extraerChunkConClaude(chunkLineas.slice(mitad), nombreColumna, ejemploColumna, todasLasColumnas, proveedorId);
     return a.concat(b);
   }
 
@@ -3861,13 +4085,15 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
 }
 
 function renderPreview() {
+  var ficha = cargaActiva();
   var tabla = $('preview-tabla');
-  if (filasPreview.length === 0) {
+  if (!ficha || ficha.filasPreview.length === 0) {
     tabla.style.display = 'none';
     $('preview-info').textContent = '';
     $('btn-guardar-lista').disabled = true;
     return;
   }
+  var filasPreview = ficha.filasPreview;
   var alertas  = filasPreview.filter(function(it) { return it.alerta; }).length;
   var revisares = filasPreview.filter(function(it) { return it.revisar; }).length;
   var conModo  = filasPreview.filter(function(it) { return it.modo; }).length;
@@ -3968,6 +4194,9 @@ function renderPreview() {
 }
 
 function editarFilaPreview(idx, campo, valor) {
+  var ficha = cargaActiva(); if (!ficha) return;
+  var filasPreview = ficha.filasPreview;
+  if (!filasPreview[idx]) return;
   if (campo === 'nombre') filasPreview[idx].productoLista = valor;
   else if (campo === 'unidad') filasPreview[idx].unidad = valor;
   else if (campo === 'precio') {
@@ -3980,7 +4209,8 @@ function editarFilaPreview(idx, campo, valor) {
 // precio_unitario según el tamaño. El precio crudo (it.precio) NO se toca:
 // solo cambia la interpretación de qué significa ese precio.
 function setModoPreview(idx, modo) {
-  var it = filasPreview[idx];
+  var ficha = cargaActiva(); if (!ficha) return;
+  var it = ficha.filasPreview[idx];
   if (!it) return;
   if (modo !== 'pack' && modo !== 'unitario') return;
   if (it.modo === modo) return; // ya está así
@@ -4001,13 +4231,15 @@ function setModoPreview(idx, modo) {
 }
 // Alias backwards-compat (por si algún render viejo lo usó)
 function flipModoPreview(idx) {
-  var it = filasPreview[idx];
+  var ficha = cargaActiva(); if (!ficha) return;
+  var it = ficha.filasPreview[idx];
   if (!it) return;
   setModoPreview(idx, (it.modo === 'pack') ? 'unitario' : 'pack');
 }
 
 function borrarFilaPreview(idx) {
-  filasPreview.splice(idx, 1);
+  var ficha = cargaActiva(); if (!ficha) return;
+  ficha.filasPreview.splice(idx, 1);
   renderPreview();
 }
 
@@ -4015,13 +4247,15 @@ function borrarFilaPreview(idx) {
 // Guardar lista (con snapshot de la versión anterior)
 // ============================================================
 async function guardarLista() {
-  var proveedorId = $('lista-prov-select').value;
+  var ficha = cargaActiva();
+  if (!ficha) return;
+  var proveedorId = ficha.proveedorId;
   if (!proveedorId) {
     showToast('Seleccioná un proveedor', 'error');
     return;
   }
   // Filtrar filas válidas
-  var items = filasPreview.filter(function(it) {
+  var items = ficha.filasPreview.filter(function(it) {
     return it.productoLista && it.productoLista.trim() && it.precio > 0;
   });
   if (items.length === 0) {
@@ -4077,7 +4311,16 @@ async function guardarLista() {
     }
 
     showToast('Lista guardada (' + items.length + ' items)', 'success');
-    cerrarModalLista();
+    // Cerrar SOLO esta pestaña (las otras siguen cargando/pendientes)
+    if (ficha.jobId) removeBarraProgreso(ficha.jobId);
+    cargas = cargas.filter(function(c) { return c.id !== ficha.id; });
+    if (cargas.length === 0) {
+      _cerrarModalListaReal();
+    } else {
+      if (cargaActivaId === ficha.id) cargaActivaId = cargas[0].id;
+      renderTabsCargas();
+      renderCuerpoCarga();
+    }
     await cargarListas();
   } catch(e) {
     console.error('guardarLista', e);

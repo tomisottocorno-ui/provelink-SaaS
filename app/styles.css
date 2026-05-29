@@ -2006,3 +2006,75 @@ h3 { font-size: 18px; }
 .prod-hist-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .prod-hist-body { display: none; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
 .prod-hist-body.open { display: block; }
+
+/* ============================================================
+   Pestañas de carga de listas en paralelo
+   ============================================================ */
+.cargas-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+  align-items: center;
+}
+.carga-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 6px 10px;
+  background: var(--bg-elev2);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-family: var(--f-sans);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.carga-tab:hover { background: var(--bg-elev3); color: var(--text); }
+.carga-tab.activa {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.carga-tab.est-listo { border-color: rgba(16, 185, 129, 0.5); }
+.carga-tab.est-error { border-color: var(--danger-border); }
+.carga-tab.est-procesando .carga-tab-ic { animation: cargaPulse 1.2s ease-in-out infinite; }
+.carga-tab-lbl {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.carga-tab-ic { font-size: 11px; flex-shrink: 0; }
+.carga-tab-x {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.6;
+}
+.carga-tab-x:hover { opacity: 1; background: rgba(255, 255, 255, 0.1); }
+.carga-tab-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: var(--bg-elev2);
+  border: 1px dashed var(--border-x);
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.carga-tab-add:hover { background: var(--bg-elev3); color: var(--accent); border-color: var(--accent); }
+@keyframes cargaPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }

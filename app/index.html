@@ -2608,7 +2608,10 @@ function calcularPrecios(grupos, resultadosModo) {
           prov.confianza_normalizacion || 1,
           modoInfo ? (modoInfo.confianza || 0.5) : 0.5
         ),
-        revisar: !modoInfo || (modoInfo.confianza || 0) < 0.7 || (prov.confianza_normalizacion || 1) < 0.7,
+        // Desactivado: confiamos en la decisión de Haiku siempre. El usuario
+        // puede corregir manualmente con los botones 📦/⚖️ si nota algo raro,
+        // pero no se le muestra ningún aviso para no generar fricción.
+        revisar: false,
         precio_alto_envase_chico: modoInfo ? (modoInfo.envase_chico || false) : false,
         tamano_sospechoso: modoInfo ? (modoInfo.tamano_sospechoso || false) : false,
         razonamiento: modoInfo ? modoInfo.razonamiento : null
@@ -4106,8 +4109,7 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
   });
 
   console.log('[Pipeline] Completado: ' + resultado.length + ' items · ' +
-    resultado.filter(function(r){return r.modo;}).length + ' con modo detectado · ' +
-    resultado.filter(function(r){return r.revisar;}).length + ' para revisar');
+    resultado.filter(function(r){return r.modo;}).length + ' con modo detectado');
 
   // Etapa 6: Afinar rangos en pl_rangos_precio con los datos detectados
   // (defensas anti-outlier internas; solo data con confianza >= 0.7 alimenta).
@@ -4130,14 +4132,11 @@ function renderPreview() {
   }
   var filasPreview = ficha.filasPreview;
   var alertas  = filasPreview.filter(function(it) { return it.alerta; }).length;
-  var revisares = filasPreview.filter(function(it) { return it.revisar; }).length;
   var conModo  = filasPreview.filter(function(it) { return it.modo; }).length;
 
   var infoMsg = '';
   if (conModo > 0) {
-    infoMsg = '✅ Pipeline: ' + conModo + ' productos normalizados';
-    if (revisares > 0) infoMsg += ' · ⚠️ ' + revisares + ' para revisar (fondo naranja)';
-    infoMsg += '. Editá si hace falta y guardá.';
+    infoMsg = '✅ Pipeline: ' + conModo + ' productos normalizados. Editá si hace falta y guardá.';
   } else if (alertas > 0) {
     infoMsg = 'La IA marcó ' + alertas + ' producto(s) con precio dudoso. Revisalos antes de guardar.';
   } else {
@@ -4147,8 +4146,9 @@ function renderPreview() {
 
   var html = '';
   filasPreview.forEach(function(it, idx) {
-    var necesitaFlag = it.alerta || it.revisar;
-    var alertStyle = necesitaFlag
+    // Solo fondo naranja para alertas explícitas de la IA (precios dudosos),
+    // ya no para "revisar" (ese flag fue desactivado).
+    var alertStyle = it.alerta
       ? 'background:var(--warn-soft);border-color:var(--warn-border);border-width:1px;border-style:solid;'
       : '';
 
@@ -4196,8 +4196,8 @@ function renderPreview() {
       }
 
       var confStr = it.confianza != null ? '<span style="opacity:0.7;">' + Math.round(it.confianza * 100) + '%</span>' : '';
-      var revisarStr = it.revisar ? '<span style="color:var(--warn);font-weight:600;">⚠️ revisar</span>' : '';
-      var envChicoStr = (!it.revisar && it.precio_alto_envase_chico)
+      var revisarStr = '';  // flag "revisar" desactivado
+      var envChicoStr = it.precio_alto_envase_chico
         ? '<span style="color:#f59e0b;font-size:10px;font-weight:600;" title="El precio por kg/L es alto porque es un envase pequeño — es normal">📦 precio alto (envase pequeño)</span>'
         : '';
       var tamSospechosoStr = it.tamano_sospechoso

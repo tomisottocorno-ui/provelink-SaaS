@@ -47,6 +47,10 @@
         <span class="icon-slot" data-icon="file"></span>
         <span>Pedidos</span>
       </button>
+      <button class="sidebar-link" data-tab="metricas" onclick="cambiarTab('metricas')" id="side-link-metricas">
+        <span class="icon-slot" data-icon="chart"></span>
+        <span>Métricas</span>
+      </button>
     </nav>
     <div class="sidebar-footer">
       <div class="sidebar-user" onclick="toggleMenu()">
@@ -89,6 +93,7 @@
       <button class="tab-btn" data-tab="listas" onclick="cambiarTab('listas')">Listas</button>
       <button class="tab-btn" data-tab="pedido" onclick="cambiarTab('pedido')">Pedido</button>
       <button class="tab-btn" data-tab="historial" onclick="cambiarTab('historial')">Pedidos</button>
+      <button class="tab-btn" data-tab="metricas" onclick="cambiarTab('metricas')">Métricas</button>
     </div>
 
     <!-- ============ TAB: INGRESO (home) ============ -->
@@ -116,6 +121,19 @@
         </button>
       </div>
       <div id="ingreso-pendientes" style="margin-top:24px;"></div>
+      <div id="ingreso-metricas-preview" style="margin-top:24px;"></div>
+    </div>
+
+    <!-- ============ TAB: MÉTRICAS ============ -->
+    <div class="tab-section" id="tab-metricas">
+      <div class="seccion-titulo">
+        <h2>Métricas</h2>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button class="btn" id="metricas-periodo-mes" onclick="setMetricasPeriodo('mes')" style="font-size:12px;padding:6px 12px;">Mes</button>
+          <button class="btn" id="metricas-periodo-anio" onclick="setMetricasPeriodo('anio')" style="font-size:12px;padding:6px 12px;">Año</button>
+        </div>
+      </div>
+      <div id="metricas-content"></div>
     </div>
 
     <!-- ============ TAB: PROVEEDORES ============ -->
@@ -1026,24 +1044,391 @@ function renderIngreso() {
 
   // Mostrar pedidos pendientes de recepción
   var cont = $('ingreso-pendientes');
-  if (!cont) return;
-  var pendientes = histGet().filter(function(h) { return !h.recepcionado; });
-  if (!pendientes.length) { cont.innerHTML = ''; return; }
-  var html = '<div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);border-radius:12px;padding:14px 16px;">';
-  html += '<div style="font-size:13px;font-weight:600;color:var(--emerald-bright);margin-bottom:8px;">📥 ' + pendientes.length + ' pedido' + (pendientes.length !== 1 ? 's' : '') + ' pendiente' + (pendientes.length !== 1 ? 's' : '') + ' de recepción</div>';
-  pendientes.forEach(function(h) {
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(16,185,129,0.15);">';
-    html += '<span style="font-size:12px;color:var(--text);">' + escapeHtml(h.fecha) + ' · $' + formatPrecio(h.total) + '</span>';
-    html += '<button onclick="irARecepcionar()" style="background:var(--emerald);border:none;color:#fff;padding:4px 10px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;">Recepcionar</button>';
-    html += '</div>';
-  });
-  html += '</div>';
-  cont.innerHTML = html;
+  if (cont) {
+    var pendientes = histGet().filter(function(h) { return !h.recepcionado; });
+    if (!pendientes.length) {
+      cont.innerHTML = '';
+    } else {
+      var html = '<div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);border-radius:12px;padding:14px 16px;">';
+      html += '<div style="font-size:13px;font-weight:600;color:var(--emerald-bright);margin-bottom:8px;">📥 ' + pendientes.length + ' pedido' + (pendientes.length !== 1 ? 's' : '') + ' pendiente' + (pendientes.length !== 1 ? 's' : '') + ' de recepción</div>';
+      pendientes.forEach(function(h) {
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(16,185,129,0.15);">';
+        html += '<span style="font-size:12px;color:var(--text);">' + escapeHtml(h.fecha) + ' · $' + formatPrecio(h.total) + '</span>';
+        html += '<button onclick="irARecepcionar()" style="background:var(--emerald);border:none;color:#fff;padding:4px 10px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;">Recepcionar</button>';
+        html += '</div>';
+      });
+      html += '</div>';
+      cont.innerHTML = html;
+    }
+  }
+
+  // Preview de métricas debajo
+  renderMetricasPreview();
 }
 
 function irARecepcionar() {
   cambiarTab('historial');
   switchHistorialTab('recepcion');
+}
+
+// ============================================================
+// MÉTRICAS — Dashboard de gastos y aumentos de precios
+// ============================================================
+//
+// Fuente de datos:
+//   - Gastos: pedidos confirmados del historial local (histGet())
+//   - Aumentos de precios: cruza productos del historial con las listas
+//     activas (memoria) para detectar variación entre lo que pagaste y el
+//     precio actual.
+// Todo se calcula client-side, no consume IA.
+
+var metricasPeriodo = 'mes'; // 'mes' (últimas 8 semanas + meses) | 'anio' (12 meses)
+
+function setMetricasPeriodo(p) {
+  metricasPeriodo = p;
+  renderMetricas();
+}
+
+function fmt$(n) {
+  if (n == null || isNaN(n)) return '0';
+  var abs = Math.abs(n);
+  if (abs >= 1000000) return (n / 1000000).toFixed(1).replace('.0', '') + 'M';
+  if (abs >= 10000) return Math.round(n / 1000) + 'k';
+  if (abs >= 1000) return (n / 1000).toFixed(1).replace('.0', '') + 'k';
+  return Math.round(n).toString();
+}
+
+function fmt$full(n) {
+  if (n == null || isNaN(n)) return '$0';
+  return '$' + Number(n).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+}
+
+// Devuelve clave YYYY-WW (año + semana ISO) para agrupar pedidos por semana
+function _claveSemana(ts) {
+  var d = new Date(ts);
+  // ISO week: Thursday in current week decides the year
+  var target = new Date(d.valueOf());
+  var dayNr = (d.getDay() + 6) % 7;
+  target.setDate(target.getDate() - dayNr + 3);
+  var firstThursday = new Date(target.getFullYear(), 0, 4);
+  var week = 1 + Math.round(((target - firstThursday) / 86400000 - 3 + ((firstThursday.getDay() + 6) % 7)) / 7);
+  return target.getFullYear() + '-W' + (week < 10 ? '0' + week : week);
+}
+
+function _claveMes(ts) {
+  var d = new Date(ts);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+function _nombreMes(yyyymm) {
+  var meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  var p = yyyymm.split('-');
+  return meses[parseInt(p[1], 10) - 1] + ' ' + p[0].slice(2);
+}
+
+// Devuelve [{clave, label, total}] para las últimas N semanas/meses
+function gastosPorPeriodo(modo, n) {
+  var hist = histGet();
+  var agrupado = {};
+  hist.forEach(function(h) {
+    var ts = h.timestamp || Date.parse(h.fecha) || Date.now();
+    var k = modo === 'semana' ? _claveSemana(ts) : _claveMes(ts);
+    if (!agrupado[k]) agrupado[k] = { clave: k, total: 0, count: 0 };
+    agrupado[k].total += h.total || 0;
+    agrupado[k].count += 1;
+  });
+
+  var ahora = new Date();
+  var bins = [];
+  for (var i = n - 1; i >= 0; i--) {
+    var d = new Date(ahora);
+    var k, label;
+    if (modo === 'semana') {
+      d.setDate(d.getDate() - i * 7);
+      k = _claveSemana(d.getTime());
+      label = 'S' + k.split('W')[1];
+    } else {
+      d.setMonth(d.getMonth() - i);
+      k = _claveMes(d.getTime());
+      label = _nombreMes(k);
+    }
+    bins.push({
+      clave: k,
+      label: label,
+      total: agrupado[k] ? agrupado[k].total : 0,
+      count: agrupado[k] ? agrupado[k].count : 0
+    });
+  }
+  return bins;
+}
+
+// Normaliza nombre para agrupar en historial: lowercase + sin signos + sin
+// espacios múltiples. Imperfecto pero práctico (no tenemos clave_canonica
+// en histórico).
+function _normNombreHist(s) {
+  return String(s || '').toLowerCase()
+    .replace(/[^\w\sáéíóúñ]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
+// Top productos más pedidos del historial: agrupa por nombre normalizado,
+// cuenta cantidad total comprada (suma qty) y guarda evolución de precio.
+function topProductosPedidos(n) {
+  var hist = histGet();
+  var byKey = {};
+  hist.forEach(function(h) {
+    var ts = h.timestamp || Date.parse(h.fecha) || Date.now();
+    (h.items || []).forEach(function(it) {
+      var k = _normNombreHist(it.productoLista);
+      if (!k) return;
+      if (!byKey[k]) byKey[k] = { nombre: it.productoLista, qtyTotal: 0, gastado: 0, precios: [], proveedor: it.proveedor };
+      byKey[k].qtyTotal += it.qty || 0;
+      byKey[k].gastado += it.subtotal || 0;
+      byKey[k].precios.push({ ts: ts, precio: it.precio || 0 });
+    });
+  });
+  // Orden por qty total descendente
+  var arr = Object.keys(byKey).map(function(k) { return byKey[k]; });
+  arr.sort(function(a, b) { return b.qtyTotal - a.qtyTotal; });
+  // Para cada uno: calcular delta primer→último precio
+  arr.forEach(function(p) {
+    p.precios.sort(function(a, b) { return a.ts - b.ts; });
+    var primero = p.precios[0] && p.precios[0].precio || 0;
+    var ultimo = p.precios[p.precios.length - 1] && p.precios[p.precios.length - 1].precio || 0;
+    p.precioInicial = primero;
+    p.precioFinal = ultimo;
+    p.delta = primero > 0 ? ((ultimo - primero) / primero) * 100 : 0;
+  });
+  return arr.slice(0, n);
+}
+
+// Sparkline SVG mínima. data = [num, num, ...] o [{x:ts, y:precio}, ...]
+function sparkline(data, opts) {
+  opts = opts || {};
+  var w = opts.w || 80;
+  var h = opts.h || 24;
+  var pad = 2;
+  if (!data || data.length === 0) return '<svg width="' + w + '" height="' + h + '"></svg>';
+  var ys = data.map(function(d) { return typeof d === 'number' ? d : d.y; });
+  var min = Math.min.apply(null, ys);
+  var max = Math.max.apply(null, ys);
+  var range = max - min || 1;
+  var stepX = (w - pad * 2) / (ys.length > 1 ? ys.length - 1 : 1);
+  var pts = ys.map(function(y, i) {
+    var px = pad + i * stepX;
+    var py = pad + (h - pad * 2) * (1 - (y - min) / range);
+    return px.toFixed(1) + ',' + py.toFixed(1);
+  }).join(' ');
+  var color = opts.color || '#60a5fa';
+  // Área tenue debajo
+  var areaPts = pts + ' ' + (pad + (ys.length - 1) * stepX).toFixed(1) + ',' + (h - pad).toFixed(1) +
+                ' ' + pad + ',' + (h - pad).toFixed(1);
+  return '<svg width="' + w + '" height="' + h + '" style="display:block;">' +
+    '<polygon points="' + areaPts + '" fill="' + color + '" opacity="0.12"/>' +
+    '<polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>' +
+    '</svg>';
+}
+
+// Bar chart SVG mínimo. data = [{label, value}, ...]
+function barChart(data, opts) {
+  opts = opts || {};
+  var w = opts.w || 600;
+  var h = opts.h || 180;
+  var padTop = 16, padBot = 28, padL = 8, padR = 8;
+  if (!data || data.length === 0) return '<svg width="' + w + '" height="' + h + '"></svg>';
+  var max = Math.max.apply(null, data.map(function(d) { return d.value; })) || 1;
+  var innerH = h - padTop - padBot;
+  var slot = (w - padL - padR) / data.length;
+  var barW = Math.max(8, slot * 0.6);
+  var color = opts.color || '#60a5fa';
+  var bars = data.map(function(d, i) {
+    var bh = (d.value / max) * innerH;
+    var x = padL + i * slot + (slot - barW) / 2;
+    var y = padTop + innerH - bh;
+    var labelY = h - padBot + 14;
+    var labelX = padL + i * slot + slot / 2;
+    return '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) +
+           '" height="' + bh.toFixed(1) + '" rx="3" fill="' + color + '"/>' +
+           '<text x="' + labelX.toFixed(1) + '" y="' + labelY +
+           '" text-anchor="middle" font-size="10" fill="var(--text-muted)" font-family="inherit">' +
+           d.label + '</text>' +
+           (d.value > 0 ? '<text x="' + labelX.toFixed(1) + '" y="' + (y - 4).toFixed(1) +
+           '" text-anchor="middle" font-size="10" fill="var(--text)" font-family="inherit">$' +
+           fmt$(d.value) + '</text>' : '');
+  }).join('');
+  return '<svg width="100%" height="' + h + '" viewBox="0 0 ' + w + ' ' + h +
+         '" preserveAspectRatio="none" style="display:block;">' + bars + '</svg>';
+}
+
+function renderMetricas() {
+  var cont = $('metricas-content');
+  if (!cont) return;
+  var hist = histGet();
+  if (!hist.length) {
+    cont.innerHTML = '<div class="empty"><div class="empty-emoji">📊</div><div class="empty-title">Sin datos todavía</div><div class="empty-sub">Confirmá pedidos para empezar a ver métricas.</div></div>';
+    return;
+  }
+
+  // KPIs principales
+  var ahora = Date.now();
+  var unMes  = 30 * 24 * 60 * 60 * 1000;
+  var unaSem = 7  * 24 * 60 * 60 * 1000;
+  var dosSem = 14 * 24 * 60 * 60 * 1000;
+  var dosMes = 60 * 24 * 60 * 60 * 1000;
+  var gastoMes = 0, gastoSem = 0, gastoMesPrev = 0, gastoSemPrev = 0, nPedidosMes = 0, nPedidosSem = 0;
+  hist.forEach(function(h) {
+    var ts = h.timestamp || Date.parse(h.fecha) || 0;
+    var diff = ahora - ts;
+    if (diff <= unMes)  { gastoMes += h.total || 0; nPedidosMes++; }
+    if (diff <= unaSem) { gastoSem += h.total || 0; nPedidosSem++; }
+    if (diff > unMes && diff <= dosMes) gastoMesPrev += h.total || 0;
+    if (diff > unaSem && diff <= dosSem) gastoSemPrev += h.total || 0;
+  });
+  var deltaMes = gastoMesPrev > 0 ? ((gastoMes - gastoMesPrev) / gastoMesPrev) * 100 : null;
+  var deltaSem = gastoSemPrev > 0 ? ((gastoSem - gastoSemPrev) / gastoSemPrev) * 100 : null;
+
+  // Datasets para charts según periodo seleccionado
+  var binsSem = gastosPorPeriodo('semana', 8);
+  var binsMes = gastosPorPeriodo('mes', metricasPeriodo === 'anio' ? 12 : 6);
+
+  // Sparklines
+  var sparkSem = sparkline(binsSem.map(function(b) { return b.total; }), { w: 90, h: 30, color: '#60a5fa' });
+  var sparkMes = sparkline(binsMes.map(function(b) { return b.total; }), { w: 90, h: 30, color: '#a78bfa' });
+
+  // Botones de período activo
+  var btnMes  = $('metricas-periodo-mes');
+  var btnAnio = $('metricas-periodo-anio');
+  if (btnMes)  btnMes.className  = metricasPeriodo === 'mes'  ? 'btn primary' : 'btn';
+  if (btnAnio) btnAnio.className = metricasPeriodo === 'anio' ? 'btn primary' : 'btn';
+
+  var html = '';
+
+  // ===== KPI CARDS =====
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px;">';
+  html += _kpiCard('Gasto últimos 30 días', fmt$full(gastoMes), deltaMes, nPedidosMes + ' pedidos', sparkMes);
+  html += _kpiCard('Gasto últimos 7 días',  fmt$full(gastoSem), deltaSem, nPedidosSem + ' pedidos', sparkSem);
+  html += _kpiCard('Total histórico', fmt$full(hist.reduce(function(s, h) { return s + (h.total || 0); }, 0)), null, hist.length + ' pedidos', '');
+  html += '</div>';
+
+  // ===== CHART GASTOS POR SEMANA =====
+  html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:16px;">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">';
+  html += '<h3 style="font-size:14px;margin:0;font-weight:600;">Gastos por semana</h3>';
+  html += '<span style="font-size:11px;color:var(--text-muted);">Últimas 8</span>';
+  html += '</div>';
+  html += barChart(binsSem.map(function(b) { return { label: b.label, value: b.total }; }), { h: 180, color: '#60a5fa' });
+  html += '</div>';
+
+  // ===== CHART GASTOS POR MES =====
+  html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:24px;">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">';
+  html += '<h3 style="font-size:14px;margin:0;font-weight:600;">Gastos por mes</h3>';
+  html += '<span style="font-size:11px;color:var(--text-muted);">Últimos ' + (metricasPeriodo === 'anio' ? 12 : 6) + '</span>';
+  html += '</div>';
+  html += barChart(binsMes.map(function(b) { return { label: b.label, value: b.total }; }), { h: 180, color: '#a78bfa' });
+  html += '</div>';
+
+  // ===== TOP 20 PRODUCTOS CON AUMENTO =====
+  var tops = topProductosPedidos(20);
+  if (tops.length > 0) {
+    html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:18px;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px;">';
+    html += '<div><h3 style="font-size:14px;margin:0 0 2px;font-weight:600;">Aumentos en los más pedidos</h3>';
+    html += '<p style="margin:0;font-size:11px;color:var(--text-muted);">Top ' + tops.length + ' productos · Δ% entre primer y último pedido</p></div>';
+    html += '</div>';
+    html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+    tops.forEach(function(p, idx) {
+      var spark = sparkline(p.precios.map(function(x) { return x.precio; }), { w: 70, h: 22,
+        color: p.delta > 5 ? '#f87171' : p.delta < -5 ? '#4ade80' : '#94a3b8' });
+      var deltaCol = p.delta > 5 ? '#f87171' : p.delta < -5 ? '#4ade80' : 'var(--text-muted)';
+      var deltaTxt = (p.delta >= 0 ? '+' : '') + p.delta.toFixed(1) + '%';
+      var deltaIcon = p.delta > 5 ? '↑' : p.delta < -5 ? '↓' : '→';
+      html += '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;background:var(--bg-elev2);">';
+      html += '<span style="font-size:11px;color:var(--text-muted);font-family:var(--f-mono);min-width:22px;">' + String(idx + 1).padStart(2, '0') + '</span>';
+      html += '<div style="flex:1;min-width:0;">';
+      html += '<div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(p.nombre) + '</div>';
+      html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + p.qtyTotal + ' u · $' + Number(p.precioFinal).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + ' c/u</div>';
+      html += '</div>';
+      html += '<div style="flex-shrink:0;">' + spark + '</div>';
+      html += '<div style="flex-shrink:0;min-width:64px;text-align:right;">';
+      html += '<div style="font-size:13px;font-weight:600;color:' + deltaCol + ';">' + deltaIcon + ' ' + deltaTxt + '</div>';
+      html += '<div style="font-size:10px;color:var(--text-muted);">' + p.precios.length + ' comp.</div>';
+      html += '</div>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  cont.innerHTML = html;
+}
+
+function _kpiCard(label, value, delta, sub, spark) {
+  var deltaHtml = '';
+  if (delta != null && !isNaN(delta)) {
+    var col = delta > 0 ? '#f87171' : delta < 0 ? '#4ade80' : 'var(--text-muted)';
+    var sign = delta > 0 ? '+' : '';
+    var icon = delta > 0 ? '↑' : delta < 0 ? '↓' : '→';
+    deltaHtml = '<span style="font-size:11px;font-weight:600;color:' + col + ';">' + icon + ' ' + sign + delta.toFixed(1) + '%</span>';
+  }
+  return '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">' +
+      '<div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.04em;">' + escapeHtml(label) + '</div>' +
+      (spark ? '<div style="flex-shrink:0;">' + spark + '</div>' : '') +
+    '</div>' +
+    '<div style="font-size:24px;font-weight:700;margin-top:6px;letter-spacing:-0.02em;">' + value + '</div>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-top:4px;">' +
+      deltaHtml +
+      '<span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(sub) + '</span>' +
+    '</div>' +
+    '</div>';
+}
+
+// Preview compacta para mostrar abajo del Inicio
+function renderMetricasPreview() {
+  var cont = $('ingreso-metricas-preview');
+  if (!cont) return;
+  var hist = histGet();
+  if (!hist.length) { cont.innerHTML = ''; return; }
+
+  var ahora = Date.now();
+  var unMes = 30 * 24 * 60 * 60 * 1000;
+  var gastoMes = 0, nPedidosMes = 0;
+  hist.forEach(function(h) {
+    var ts = h.timestamp || Date.parse(h.fecha) || 0;
+    if (ahora - ts <= unMes) { gastoMes += h.total || 0; nPedidosMes++; }
+  });
+
+  var binsSem = gastosPorPeriodo('semana', 8);
+  var sparkSem = sparkline(binsSem.map(function(b) { return b.total; }), { w: 110, h: 32, color: '#60a5fa' });
+
+  // Mini top 3
+  var tops = topProductosPedidos(3);
+  var topsHtml = '';
+  tops.forEach(function(p) {
+    var deltaCol = p.delta > 5 ? '#f87171' : p.delta < -5 ? '#4ade80' : 'var(--text-muted)';
+    var deltaTxt = (p.delta >= 0 ? '+' : '') + p.delta.toFixed(0) + '%';
+    topsHtml += '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:11px;">' +
+      '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">' + escapeHtml(p.nombre) + '</span>' +
+      '<span style="color:' + deltaCol + ';font-weight:600;margin-left:8px;">' + deltaTxt + '</span>' +
+      '</div>';
+  });
+
+  var html = '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">' +
+      '<div>' +
+        '<div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Tus métricas</div>' +
+        '<div style="font-size:22px;font-weight:700;letter-spacing:-0.02em;">' + fmt$full(gastoMes) + '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">últimos 30 días · ' + nPedidosMes + ' pedidos</div>' +
+      '</div>' +
+      '<div style="flex-shrink:0;">' + sparkSem + '</div>' +
+    '</div>' +
+    (topsHtml ? '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px;">' +
+      '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">Aumentos top 3</div>' +
+      topsHtml + '</div>' : '') +
+    '<button onclick="cambiarTab(\'metricas\')" style="width:100%;background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:9px 14px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Ir a métricas →</button>' +
+  '</div>';
+
+  cont.innerHTML = html;
 }
 
 // ============================================================
@@ -1313,7 +1698,8 @@ var TAB_PERM_MAP = {
   'ver-pedido': 'pedido',
   'resumen':    'pedido',
   'historial':  'historial',
-  'verif-hist': 'verificar'
+  'verif-hist': 'verificar',
+  'metricas':   'historial'
 };
 
 function tabPermitida(tab) {
@@ -1340,6 +1726,7 @@ function cambiarTab(tab) {
   if (tab === 'ver-pedido') renderVerPedido();
   if (tab === 'resumen') renderResumen();
   if (tab === 'historial') renderHistorial();
+  if (tab === 'metricas') renderMetricas();
   window.scrollTo(0, 0);
 }
 
@@ -1351,7 +1738,8 @@ function aplicarPermisosUI() {
     { tab: 'proveedores', side: 'side-link-prov' },
     { tab: 'listas',      side: 'side-link-listas' },
     { tab: 'pedido',      side: 'side-link-pedido' },
-    { tab: 'historial',   side: 'side-link-historial' }
+    { tab: 'historial',   side: 'side-link-historial' },
+    { tab: 'metricas',    side: 'side-link-metricas' }
   ];
   tabs.forEach(function(t) {
     var allowed = tabPermitida(t.tab);

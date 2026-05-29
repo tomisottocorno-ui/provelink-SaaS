@@ -29,6 +29,8 @@ window.Icon = (function() {
     info: function(o){ return svg('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>', o); },
     alert: function(o){ return svg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>', o); },
     factory: function(o){ return svg('<path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M17 22v-5"/><path d="M7 22v-3"/><path d="M12 22v-4"/>', o); },
+    chart: function(o){ return svg('<line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/>', o); },
+    trendUp: function(o){ return svg('<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>', o); },
     truck: function(o){
       var size = (o && o.size) || 24;
       var cls = (o && o.cls) || 'icon';

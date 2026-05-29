@@ -785,7 +785,7 @@ function renderPlanBanner() {
     var max = LIMITES.free.proveedores;
     if (proveedores.length >= max) {
       banner.classList.add('warn');
-      txt.innerHTML = 'Llegaste al límite del plan <strong>Free</strong> (' + max + ' proveedores). Mejorá a <strong>Pro</strong> para tener ilimitados + asistente IA.';
+      txt.innerHTML = 'Llegaste al límite del plan <strong>Free</strong> (' + max + ' proveedores). Mejorá a <strong>Pro</strong> para tener ilimitados.';
       banner.style.display = 'flex';
     } else {
       banner.classList.remove('warn');
@@ -1775,6 +1775,15 @@ function aplicarPermisosUI() {
       el.style.display = allowed ? '' : 'none';
     });
   });
+
+  // 1b) Asistente IA: solo plan Max (business). El backend devuelve PLAN_SIN_IA
+  // para Free y Pro, así que el FAB tiene que estar oculto para evitar confusión.
+  var planActualUI = (profile && profile.plan) || 'free';
+  var tieneIA = LIMITES[planActualUI] && LIMITES[planActualUI].ia;
+  // Empleado: además del plan, requiere permiso 'ia'
+  if (esEmpleado()) tieneIA = tieneIA && canAccess('ia');
+  var aiFab = $('ai-fab');
+  if (aiFab) aiFab.style.display = tieneIA ? '' : 'none';
 
   // 2) Menu items que solo el owner ve
   var menuEmp = $('menu-empleados');
@@ -5494,13 +5503,25 @@ function renderBuscarProducto(expansionesExtras) {
   var ped = pedidoGet();
   var totalItems = Object.keys(ped.items || {}).filter(function(k) { return ped.items[k].qty > 0; }).length;
 
-  // IDs del último pedido confirmado (para badge "Última compra")
+  // Productos del último pedido confirmado (para badge "Última compra").
+  // Matcheo por NOMBRE NORMALIZADO + PROVEEDOR (no por itemId) porque el
+  // itemId cambia cuando se re-procesa una lista (nuevo pipeline = nuevos ids).
+  // El nombre + proveedor es estable entre re-cargas.
   var hist = histGet();
-  var ultimoPedidoIds = {};
+  var ultimoPedidoKeys = {};
   if (hist.length > 0) {
     (hist[0].items || []).forEach(function(hit) {
-      ultimoPedidoIds[hit.itemId] = true;
+      var nombre = String(hit.productoLista || '').toLowerCase().trim().replace(/\s+/g, ' ');
+      var prov = String(hit.proveedorId || hit.proveedor || '');
+      ultimoPedidoKeys[nombre + '|' + prov] = true;
+      // También guardar el itemId por si todavía matchea (compatibilidad)
+      if (hit.itemId) ultimoPedidoKeys['__id__' + hit.itemId] = true;
     });
+  }
+  function _esUltimaCompra(it) {
+    if (ultimoPedidoKeys['__id__' + it.itemId]) return true;
+    var nombre = String(it.productoLista || '').toLowerCase().trim().replace(/\s+/g, ' ');
+    return !!ultimoPedidoKeys[nombre + '|' + it.proveedorId];
   }
   var btnVer = $('btn-ver-pedido');
   if (btnVer) btnVer.style.display = totalItems > 0 ? '' : 'none';
@@ -5617,7 +5638,7 @@ function renderBuscarProducto(expansionesExtras) {
         }
       }
       var pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
-      var ultimaBadge = ultimoPedidoIds[it.itemId]
+      var ultimaBadge = _esUltimaCompra(it)
         ? '<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:rgba(251,191,36,0.15);color:var(--gold-bright);border:1px solid rgba(251,191,36,0.3);margin-left:4px;vertical-align:middle;white-space:nowrap;">Última compra</span>'
         : '';
       html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + ultimaBadge + pbHtml + '</div>';
@@ -6261,8 +6282,9 @@ document.addEventListener('keydown', function(e) {
 var aiHistorial = [];
 
 function abrirAsistente() {
-  if (!profile || (profile.plan || 'free') === 'free') {
-    showToast('El asistente IA requiere plan Pro o superior.', 'error');
+  var planAct = (profile && profile.plan) || 'free';
+  if (!LIMITES[planAct] || !LIMITES[planAct].ia) {
+    showToast('El asistente IA está disponible solo en el plan Max.', 'error');
     return;
   }
   var m = $('ai-modal');
@@ -6394,7 +6416,7 @@ async function enviarMensajeAI() {
     var data = await resp.json();
     if (!resp.ok) {
       var msg = data.error || 'Error';
-      if (data.codigo === 'PLAN_SIN_IA') msg = 'Tu plan no incluye el asistente IA. Mejorá a Pro.';
+      if (data.codigo === 'PLAN_SIN_IA') msg = 'Tu plan no incluye el asistente IA. Mejorá a Max.';
       else if (data.codigo === 'CUOTA_IA_AGOTADA') msg = 'Llegaste al límite mensual de consultas IA (' + data.limite + ').';
       renderMensajeAI('assistant', msg);
       aiHistorial.pop();

@@ -98,14 +98,34 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // 3) Cargar profile del usuario (siempre el del OWNER)
-    const { data: profile, error: profileError } = await sb
-      .from('profiles')
-      .select('plan, plan_estado, consultas_ia_mes, consultas_ia_reset, listas_procesadas_mes, listas_procesadas_reset')
-      .eq('id', userId)
-      .single();
+    // 3) Cargar profile del usuario (siempre el del OWNER).
+    // Si las columnas nuevas (listas_procesadas_*) no existen porque no se corrió
+    // la migración SQL v2, hacemos un fallback al select básico para no romper.
+    let profile = null;
+    let profileError = null;
+    {
+      const r1 = await sb
+        .from('profiles')
+        .select('plan, plan_estado, consultas_ia_mes, consultas_ia_reset, listas_procesadas_mes, listas_procesadas_reset')
+        .eq('id', userId)
+        .single();
+      if (r1.error && /listas_procesadas_/.test(r1.error.message || '')) {
+        // Columnas nuevas no existen aún → fallback sin ellas
+        const r2 = await sb
+          .from('profiles')
+          .select('plan, plan_estado, consultas_ia_mes, consultas_ia_reset')
+          .eq('id', userId)
+          .single();
+        profile = r2.data;
+        profileError = r2.error;
+      } else {
+        profile = r1.data;
+        profileError = r1.error;
+      }
+    }
     if (profileError || !profile) {
-      return res.status(404).json({ error: 'Profile no encontrado' });
+      console.error('Profile error:', profileError);
+      return res.status(404).json({ error: 'Profile no encontrado', detalle: profileError && profileError.message });
     }
 
     const plan = profile.plan || 'free';

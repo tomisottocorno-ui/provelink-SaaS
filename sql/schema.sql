@@ -229,8 +229,8 @@ as $$
 begin
   case plan_text
     when 'free' then return 0;
-    when 'pro' then return 150;
-    when 'business' then return 500;
+    when 'pro' then return 0;        -- Pro NO tiene asistente IA
+    when 'business' then return 500; -- Max: 500 consultas/mes
     else return 0;
   end case;
 end;
@@ -243,13 +243,35 @@ immutable
 as $$
 begin
   case plan_text
-    when 'free' then return 3;
+    when 'free' then return 2;       -- Free: 2 proveedores máximo
     when 'pro' then return 999;
     when 'business' then return 999;
-    else return 3;
+    else return 2;
   end case;
 end;
 $$;
+
+create or replace function public.limite_listas_mes(plan_text text)
+returns int
+language plpgsql
+immutable
+as $$
+begin
+  case plan_text
+    when 'free' then return 2;       -- Free: 2 procesamientos de lista por mes
+    when 'pro' then return 999;
+    when 'business' then return 999;
+    else return 2;
+  end case;
+end;
+$$;
+
+-- Contador de listas procesadas en el mes (reset a los 30 días)
+alter table public.profiles add column if not exists listas_procesadas_mes int default 0;
+alter table public.profiles add column if not exists listas_procesadas_reset timestamptz default now();
+
+-- ID de preapproval de Mercado Pago (suscripción recurrente)
+alter table public.profiles add column if not exists mp_preapproval_id text;
 
 
 -- ============================================================================

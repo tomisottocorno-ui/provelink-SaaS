@@ -626,10 +626,13 @@ function canAccess(perm) {
 }
 
 // Límites por plan (espejo de la función SQL)
+// - Free: 2 proveedores, 2 listas/mes, SIN IA, SIN métricas
+// - Pro ($40k/mes): proveedores y listas ilimitados, SIN IA, SIN métricas
+// - Max (business, $70k/mes): TODO ilimitado, IA con 500 consultas/mes, métricas
 var LIMITES = {
-  free:     { proveedores: 3,   consultasIA: 0,   empleados: 0 },
-  pro:      { proveedores: 999, consultasIA: 150, empleados: 2 },
-  business: { proveedores: 999, consultasIA: 500, empleados: 10 }
+  free:     { proveedores: 2,   listasMes: 2,   consultasIA: 0,   empleados: 0,  metricas: false, ia: false },
+  pro:      { proveedores: 999, listasMes: 999, consultasIA: 0,   empleados: 2,  metricas: false, ia: false },
+  business: { proveedores: 999, listasMes: 999, consultasIA: 500, empleados: 10, metricas: true,  ia: true  }
 };
 
 // ============================================================
@@ -1383,10 +1386,16 @@ function _kpiCard(label, value, delta, sub, spark) {
     '</div>';
 }
 
-// Preview compacta para mostrar abajo del Inicio
+// Preview compacta para mostrar abajo del Inicio.
+// Solo se renderiza si el plan tiene acceso a Métricas (Max).
 function renderMetricasPreview() {
   var cont = $('ingreso-metricas-preview');
   if (!cont) return;
+  var planActual = (profile && profile.plan) || 'free';
+  if (!LIMITES[planActual] || !LIMITES[planActual].metricas) {
+    cont.innerHTML = '';
+    return;
+  }
   var hist = histGet();
   if (!hist.length) { cont.innerHTML = ''; return; }
 
@@ -1703,6 +1712,13 @@ var TAB_PERM_MAP = {
 };
 
 function tabPermitida(tab) {
+  // Gating por PLAN (independiente del rol):
+  // - Métricas: solo plan Max (business)
+  if (tab === 'metricas') {
+    var planActual = (profile && profile.plan) || 'free';
+    if (!LIMITES[planActual] || !LIMITES[planActual].metricas) return false;
+  }
+  // Gating por ROL DE EMPLEADO
   if (esOwner()) return true;
   var perm = TAB_PERM_MAP[tab];
   if (perm === null || typeof perm === 'undefined') return true;
@@ -1842,14 +1858,11 @@ function abrirModalLista(proveedorId) {
     return;
   }
 
-  // Plan free: máximo 1 lista. Si ya tiene una y no está editando esa misma, bloquear
-  if (profile.plan === 'free') {
-    var yaEditandoEsta = proveedorId && listas.some(function(l) { return l.proveedor_id === proveedorId; });
-    if (listas.length >= 1 && !yaEditandoEsta) {
-      showToast('El plan Free permite 1 lista. Mejorá a Pro para cargar más.', 'error');
-      return;
-    }
-  }
+  // El límite "2 listas por mes" del plan Free se valida en el backend
+  // (api/claude.js mira el contador `listas_procesadas_mes`). El frontend
+  // ya no bloquea por cantidad de listas activas — pueden tener una por
+  // proveedor sin tope. Si pasan el límite mensual, el backend devuelve
+  // error LIMITE_LISTAS_FREE_MES y mostramos el mensaje ahí.
 
   // Arrancar con una sola ficha (pestaña)
   cargas = [];
@@ -1978,7 +1991,7 @@ function onCambiarProvCarga(provId) {
 
 function nuevaCargaTab() {
   if (profile.plan === 'free') {
-    showToast('El plan Free permite 1 lista. Mejorá a Pro para cargar varias.', 'error');
+    showToast('El plan Free permite 2 listas por mes. Cargá una a la vez. Mejorá a Pro para varias en paralelo.', 'error');
     return;
   }
   var pid = primerProveedorLibre(null);
@@ -2145,16 +2158,9 @@ async function procesarArchivo(event) {
     return;
   }
 
-  // Validar límite del plan free ANTES de procesar
-  if (profile.plan === 'free') {
-    // Si ya tiene una lista y NO está editando esa misma, bloquear
-    var listaExistenteEseProv = listas.find(function(l) { return l.proveedor_id === ficha.proveedorId; });
-    if (listas.length >= 1 && !listaExistenteEseProv) {
-      showToast('El plan Free permite 1 lista. Mejorá a Pro para listas ilimitadas.', 'error');
-      event.target.value = '';
-      return;
-    }
-  }
+  // Límite del plan Free (2 listas/mes) se valida en backend.
+  // Si pasan el cap, /api/claude responde 403 con codigo LIMITE_LISTAS_FREE_MES
+  // y mostramos el mensaje del backend.
 
   var esPDF = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   var esExcel = /\.(xlsx|xls|csv)$/i.test(file.name) ||
@@ -5094,9 +5100,9 @@ async function eliminarCuenta() {
 // PLANES
 // ============================================================
 var PLANES_INFO = [
-  { id: 'free',     nombre: 'Free',    precio: 'Gratis',       color: 'var(--emerald)', features: ['3 proveedores','1 lista de precios','Sin asistente IA'] },
-  { id: 'pro',      nombre: 'Pro',     precio: '$20 USD/mes',  color: 'var(--accent)',  features: ['Proveedores ilimitados','Listas ilimitadas','150 consultas IA/mes'] },
-  { id: 'business', nombre: 'Max',     precio: '$100 USD/mes', color: 'var(--gold)',    features: ['Todo de Pro','500 consultas IA/mes','Prioridad en soporte'] }
+  { id: 'free',     nombre: 'Free',    precio: 'Gratis',         color: 'var(--emerald)', features: ['Hasta 2 proveedores','2 listas por mes','Comparador de precios','Pedidos por WhatsApp'] },
+  { id: 'pro',      nombre: 'Pro',     precio: '$40.000 / mes',  color: 'var(--accent)',  features: ['Proveedores ilimitados','Listas ilimitadas','Histórico de precios','Sistema de empleados'] },
+  { id: 'business', nombre: 'Max',     precio: '$70.000 / mes',  color: 'var(--gold)',    features: ['Todo lo del plan Pro','Dashboard de métricas','Asistente IA · 500 consultas/mes','Soporte prioritario'] }
 ];
 
 function abrirPlanes() {

@@ -4005,11 +4005,30 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     gruposParaIA.push(g);
   }
 
-  // 5b) Buscar rangos web en paralelo para TODOS los tipos faltantes.
-  // El semaforo de _fetchClaude (_CLAUDE_MAX_CONCURRENT) limita la concurrencia
-  // automaticamente para no saturar rate limit. Sin tope: aprendemos lo que
-  // haga falta. Una vez en cache, futuras subidas lo usan sin re-fetchear.
-  var tiposABuscar = Object.values(tiposParaBuscarWeb);
+  // 5b) Buscar rangos web en paralelo — CON TOPE para controlar costo.
+  // Cada búsqueda web con Sonnet+web_search cuesta ~$0.10-0.30. Sin tope, una
+  // lista grande puede gastar varios dólares. Capeamos a MAX_WEB_POR_LISTA y los
+  // tipos sobrantes caen en el fallback (rangos hardcoded → Haiku → revisar manual).
+  // Priorizamos los tipos más comunes (que aparecen en más grupos de esta lista)
+  // para que el cap sea útil: aprendemos primero lo que más se va a usar.
+  var MAX_WEB_POR_LISTA = 5;
+  var tiposABuscarTodos = Object.values(tiposParaBuscarWeb);
+  // Contar cuántas veces aparece cada tipo en los grupos pendientes
+  var freqPorTipo = {};
+  gruposParaIA.forEach(function(gr) {
+    var tk = (gr.tipo || '').toLowerCase().trim();
+    if (tk) freqPorTipo[tk] = (freqPorTipo[tk] || 0) + 1;
+  });
+  tiposABuscarTodos.sort(function(a, b) {
+    return (freqPorTipo[b.tipo] || 0) - (freqPorTipo[a.tipo] || 0);
+  });
+  var tiposABuscar = tiposABuscarTodos.slice(0, MAX_WEB_POR_LISTA);
+  var tiposSaltados = tiposABuscarTodos.length - tiposABuscar.length;
+  if (tiposSaltados > 0) {
+    console.log('[Rangos] ' + tiposABuscarTodos.length + ' tipos sin rango; buscando los ' +
+                tiposABuscar.length + ' más frecuentes (saltando ' + tiposSaltados +
+                ' para controlar costo — caen en fallback Haiku).');
+  }
   if (tiposABuscar.length) {
     if (loadingEl) loadingEl.textContent = 'Buscando rangos de referencia (' + tiposABuscar.length + ' tipos)...';
     var completados = 0;

@@ -99,25 +99,37 @@
     <!-- ============ TAB: INGRESO (home) ============ -->
     <div class="tab-section active" id="tab-ingreso">
       <div style="padding:8px 0 24px;">
-        <h2 style="margin:0 0 4px;font-size:22px;" id="ingreso-saludo">¡Buen día! 👋</h2>
+        <h2 style="margin:0 0 4px;font-size:22px;" id="ingreso-saludo">¡Buen día!</h2>
         <p style="margin:0;color:var(--text-muted);font-size:13px;">¿Qué querés hacer hoy?</p>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <button onclick="cambiarTab('pedido')" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:var(--bg-elev);border:1px solid var(--border-hi);border-radius:16px;padding:24px 12px;cursor:pointer;font-family:inherit;">
-          <span style="font-size:32px;">🛒</span>
-          <span style="font-size:13px;font-weight:600;color:var(--text);">Armar pedido</span>
+      <div class="home-cards">
+        <button class="home-card" onclick="cambiarTab('pedido')">
+          <span class="home-card-ic ic-blue icon-slot" data-icon="cart"></span>
+          <span class="home-card-txt">
+            <span class="home-card-title">Armar pedido</span>
+            <span class="home-card-sub">Buscá productos y compará precios</span>
+          </span>
         </button>
-        <button onclick="irARecepcionar()" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:var(--bg-elev);border:1px solid var(--border-hi);border-radius:16px;padding:24px 12px;cursor:pointer;font-family:inherit;">
-          <span style="font-size:32px;">📥</span>
-          <span style="font-size:13px;font-weight:600;color:var(--text);">Recepcionar pedido</span>
+        <button class="home-card" onclick="irARecepcionar()">
+          <span class="home-card-ic ic-emerald icon-slot" data-icon="inbox"></span>
+          <span class="home-card-txt">
+            <span class="home-card-title">Recepcionar pedido</span>
+            <span class="home-card-sub">Cargá lo que llegó</span>
+          </span>
         </button>
-        <button onclick="cambiarTab('proveedores')" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:var(--bg-elev);border:1px solid var(--border-hi);border-radius:16px;padding:24px 12px;cursor:pointer;font-family:inherit;">
-          <span style="font-size:32px;">🏢</span>
-          <span style="font-size:13px;font-weight:600;color:var(--text);">Proveedores</span>
+        <button class="home-card" onclick="cambiarTab('proveedores')">
+          <span class="home-card-ic ic-gold icon-slot" data-icon="factory"></span>
+          <span class="home-card-txt">
+            <span class="home-card-title">Proveedores</span>
+            <span class="home-card-sub">Gestioná tus proveedores</span>
+          </span>
         </button>
-        <button onclick="cambiarTab('listas');setTimeout(function(){abrirModalLista();},100);" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:var(--bg-elev);border:1px solid var(--border-hi);border-radius:16px;padding:24px 12px;cursor:pointer;font-family:inherit;">
-          <span style="font-size:32px;">📄</span>
-          <span style="font-size:13px;font-weight:600;color:var(--text);">Cargar lista</span>
+        <button class="home-card" onclick="cambiarTab('listas');setTimeout(function(){abrirModalLista();},100);">
+          <span class="home-card-ic ic-blue icon-slot" data-icon="file"></span>
+          <span class="home-card-txt">
+            <span class="home-card-title">Cargar lista</span>
+            <span class="home-card-sub">Subí una lista de precios</span>
+          </span>
         </button>
       </div>
       <div id="ingreso-pendientes" style="margin-top:24px;"></div>
@@ -171,7 +183,7 @@
         <input type="text" class="buscador" id="buscar-producto" placeholder="Buscar producto... (ej: leche, aceite, harina)" oninput="renderBuscarProducto()">
       </div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
-        <button class="btn" id="btn-busqueda-especifica" onclick="toggleBusquedaEspecifica()" style="font-size:12px;padding:5px 12px;">🎯 Búsqueda específica</button>
+        <button class="btn" id="btn-busqueda-especifica" onclick="toggleBusquedaEspecifica()" style="font-size:12px;padding:5px 12px;"><span class="icon-slot" data-icon="target"></span> Búsqueda específica</button>
         <span id="busqueda-especifica-hint" style="font-size:11px;color:var(--text-muted);">Trae todo lo que contenga la palabra</span>
       </div>
       <div id="pedido-faltantes-sugerencia" style="margin-bottom:12px;"></div>
@@ -184,12 +196,12 @@
     <div class="tab-section" id="tab-ver-pedido">
       <div class="seccion-titulo">
         <h2>Ver pedido</h2>
-        <button class="btn" onclick="cambiarTab('pedido')">← Seguir agregando</button>
+        <button class="btn" onclick="cambiarTab('pedido')"><span class="icon-slot" data-icon="arrowLeft"></span> Seguir agregando</button>
       </div>
       <div id="ver-pedido-content"></div>
       <div id="ver-pedido-footer" style="display:none;margin-top:16px;">
         <button class="btn" onclick="limpiarPedido()" style="margin-right:8px;">Limpiar</button>
-        <button class="btn primary" onclick="irAResumen()">Ver mensajes WhatsApp →</button>
+        <button class="btn primary" onclick="irAResumen()">Ver mensajes WhatsApp <span class="icon-slot" data-icon="arrowRight"></span></button>
       </div>
     </div>
 
@@ -197,11 +209,11 @@
     <div class="tab-section" id="tab-resumen">
       <div class="seccion-titulo">
         <h2>Pedidos por proveedor</h2>
-        <button class="btn" onclick="cambiarTab('ver-pedido')">← Editar pedido</button>
+        <button class="btn" onclick="cambiarTab('ver-pedido')"><span class="icon-slot" data-icon="arrowLeft"></span> Editar pedido</button>
       </div>
       <div id="resumen-content"></div>
       <div style="margin-top:20px;text-align:center;" id="resumen-footer" style="display:none;">
-        <button class="btn primary" onclick="confirmarPedido()" style="padding:14px 32px;font-size:15px;">✓ Confirmar y guardar pedido</button>
+        <button class="btn primary" onclick="confirmarPedido()" style="padding:14px 32px;font-size:15px;"><span class="icon-slot" data-icon="check"></span> Confirmar y guardar pedido</button>
       </div>
     </div>
 
@@ -211,8 +223,8 @@
         <h2>Historial y Recepción de Pedidos</h2>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:20px;">
-        <button class="btn primary" id="hist-btn-recepcion" onclick="switchHistorialTab('recepcion')" style="flex:1;">📥 Recepción</button>
-        <button class="btn" id="hist-btn-historial" onclick="switchHistorialTab('historial')" style="flex:1;">📋 Historial</button>
+        <button class="btn primary" id="hist-btn-recepcion" onclick="switchHistorialTab('recepcion')" style="flex:1;"><span class="icon-slot" data-icon="inbox"></span> Recepción</button>
+        <button class="btn" id="hist-btn-historial" onclick="switchHistorialTab('historial')" style="flex:1;"><span class="icon-slot" data-icon="list"></span> Historial</button>
       </div>
       <div id="hist-panel-recepcion">
         <div id="historial-content-recepcion"></div>
@@ -230,8 +242,8 @@
   <div style="position:sticky;top:0;background:#111;color:white;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10;">
     <span style="font-size:14px;font-weight:600;">Vista previa</span>
     <div style="display:flex;gap:8px;">
-      <button onclick="imprimirOverlay()" style="background:white;color:#111;border:none;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">🖨️ Imprimir</button>
-      <button onclick="cerrarPrintOverlay()" style="background:transparent;color:white;border:1px solid white;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">✕ Cerrar</button>
+      <button onclick="imprimirOverlay()" style="display:inline-flex;align-items:center;gap:6px;background:white;color:#111;border:none;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;"><span class="icon-slot" data-icon="printer"></span> Imprimir</button>
+      <button onclick="cerrarPrintOverlay()" style="display:inline-flex;align-items:center;gap:6px;background:transparent;color:white;border:1px solid white;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;"><span class="icon-slot" data-icon="x"></span> Cerrar</button>
     </div>
   </div>
   <div id="print-overlay-content" style="padding:24px;max-width:800px;margin:0 auto;font-family:Arial,sans-serif;"></div>
@@ -301,7 +313,7 @@
     <div class="form-row">
       <label for="prov-telefono">Teléfono (opcional)</label>
       <div class="phone-input-wrap">
-        <span class="phone-prefix">🇦🇷 +54</span>
+        <span class="phone-prefix">+54</span>
         <input type="tel" id="prov-telefono" placeholder="11 1234 5678" class="phone-input" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)">
       </div>
     </div>
@@ -497,17 +509,17 @@
   <div class="modal">
     <h3>Recepcionar pedido</h3>
     <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px;" id="modal-rec-fecha"></div>
-    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Tildá lo que llegó. Lo que quede destildado queda como faltante. Usá 🔄 si vino algo diferente al pedido.</p>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Tildá lo que llegó. Lo que quede destildado queda como faltante. Usá el botón "Cambio" si vino algo diferente al pedido.</p>
     <!-- Barra de acciones rápidas -->
     <div style="display:flex;gap:8px;margin-bottom:10px;">
-      <button onclick="seleccionarTodosRecepcion()" style="flex:1;background:transparent;border:1px solid var(--border-hi);color:var(--text-2);padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer;">☑️ Seleccionar todos</button>
-      <button onclick="limpiarSeleccionRecepcion()" style="flex:1;background:transparent;border:1px solid var(--border-hi);color:var(--text-2);padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer;">🗑️ Limpiar todo</button>
+      <button onclick="seleccionarTodosRecepcion()" style="flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:transparent;border:1px solid var(--border-hi);color:var(--text-2);padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer;"><span class="icon-slot" data-icon="checkSquare"></span> Seleccionar todos</button>
+      <button onclick="limpiarSeleccionRecepcion()" style="flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:transparent;border:1px solid var(--border-hi);color:var(--text-2);padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer;"><span class="icon-slot" data-icon="trash"></span> Limpiar todo</button>
     </div>
     <div id="modal-rec-items" style="max-height:52vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
     <div class="modal-actions" style="margin-top:16px;flex-wrap:wrap;gap:8px;">
       <button class="btn" onclick="cerrarModalRecepcionar()">Cancelar</button>
-      <button class="btn" onclick="guardarRecepcion(false)" style="border-color:var(--emerald);color:var(--emerald);">💾 Guardar</button>
-      <button class="btn primary" onclick="guardarRecepcion(true)">✅ Guardar definitivamente</button>
+      <button class="btn" onclick="guardarRecepcion(false)" style="border-color:var(--emerald);color:var(--emerald);"><span class="icon-slot" data-icon="save"></span> Guardar</button>
+      <button class="btn primary" onclick="guardarRecepcion(true)"><span class="icon-slot" data-icon="checkCircle"></span> Guardar definitivamente</button>
     </div>
   </div>
 </div>
@@ -1041,7 +1053,7 @@ async function borrarProveedor(id) {
 function renderIngreso() {
   // Saludo dinámico por hora
   var hora = new Date().getHours();
-  var saludo = hora < 12 ? '¡Buenos días! 👋' : hora < 19 ? '¡Buenas tardes! 👋' : '¡Buenas noches! 👋';
+  var saludo = hora < 12 ? '¡Buenos días!' : hora < 19 ? '¡Buenas tardes!' : '¡Buenas noches!';
   var el = $('ingreso-saludo');
   if (el) el.textContent = saludo;
 
@@ -1053,7 +1065,7 @@ function renderIngreso() {
       cont.innerHTML = '';
     } else {
       var html = '<div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);border-radius:12px;padding:14px 16px;">';
-      html += '<div style="font-size:13px;font-weight:600;color:var(--emerald-bright);margin-bottom:8px;">📥 ' + pendientes.length + ' pedido' + (pendientes.length !== 1 ? 's' : '') + ' pendiente' + (pendientes.length !== 1 ? 's' : '') + ' de recepción</div>';
+      html += '<div style="font-size:13px;font-weight:600;color:var(--emerald-bright);margin-bottom:8px;display:inline-flex;align-items:center;gap:6px;">' + Icon.inbox({size:14}) + ' ' + pendientes.length + ' pedido' + (pendientes.length !== 1 ? 's' : '') + ' pendiente' + (pendientes.length !== 1 ? 's' : '') + ' de recepción</div>';
       pendientes.forEach(function(h) {
         html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(16,185,129,0.15);">';
         html += '<span style="font-size:12px;color:var(--text);">' + escapeHtml(h.fecha) + ' · $' + formatPrecio(h.total) + '</span>';
@@ -1268,7 +1280,7 @@ function renderMetricas() {
   if (!cont) return;
   var hist = histGet();
   if (!hist.length) {
-    cont.innerHTML = '<div class="empty"><div class="empty-emoji">📊</div><div class="empty-title">Sin datos todavía</div><div class="empty-sub">Confirmá pedidos para empezar a ver métricas.</div></div>';
+    cont.innerHTML = '<div class="empty"><div class="empty-emoji">' + Icon.chart() + '</div><div class="empty-title">Sin datos todavía</div><div class="empty-sub">Confirmá pedidos para empezar a ver métricas.</div></div>';
     return;
   }
 
@@ -1490,7 +1502,7 @@ function abrirModalRecepcionar(id) {
       html += '<input type="checkbox" data-item-id="' + it.itemId + '" ' + (noLlego ? '' : 'checked') + ' onchange="actualizarFilaRecepcion(this)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--emerald);flex-shrink:0;">';
       html += '<span style="flex:1;font-size:12px;line-height:1.3;">' + escapeHtml(it.productoLista) + '</span>';
       html += '<span style="font-size:11px;color:var(--text-muted);white-space:nowrap;">' + it.qty + ' · $' + formatPrecio(it.precio) + '</span>';
-      html += '<button data-cambio-id="' + it.itemId + '" data-cambio-active="' + cambioActive + '" onclick="toggleCambioRecepcion(this)" style="flex-shrink:0;background:transparent;border:1px solid var(--border-hi);color:var(--text-muted);padding:3px 8px;border-radius:6px;font-size:10px;cursor:pointer;white-space:nowrap;' + cambioStyle + '" title="Vino diferente al pedido">🔄 Cambio</button>';
+      html += '<button data-cambio-id="' + it.itemId + '" data-cambio-active="' + cambioActive + '" onclick="toggleCambioRecepcion(this)" style="flex-shrink:0;background:transparent;border:1px solid var(--border-hi);color:var(--text-muted);padding:3px 8px;border-radius:6px;font-size:10px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;' + cambioStyle + '" title="Vino diferente al pedido">' + Icon.refreshCw({size:11}) + ' Cambio</button>';
       html += '</div>';
     });
   });
@@ -1605,9 +1617,9 @@ function guardarRecepcion(definitivo) {
   if (cambios.length > 0) partes.push(cambios.length + ' cambio' + (cambios.length !== 1 ? 's' : ''));
   var resumen = partes.length > 0 ? ' · ' + partes.join(' · ') : ' completo';
   if (definitivo) {
-    showToast('Recepción cerrada definitivamente ✅' + resumen);
+    showToast('Recepción cerrada definitivamente' + resumen);
   } else {
-    showToast('Recepción guardada 💾' + resumen + ' — podés seguir editando');
+    showToast('Recepción guardada' + resumen + ' — podés seguir editando');
   }
 }
 
@@ -1627,7 +1639,7 @@ function verRecepcionSoloLectura(id) {
     // Reemplazar footer: solo cerrar
     var actions = $('modal-recepcionar').querySelector('.modal-actions');
     if (actions) {
-      actions.innerHTML = '<div style="font-size:11px;color:var(--text-muted);flex:1;">🔒 Recepción cerrada definitivamente</div>' +
+      actions.innerHTML = '<div style="font-size:11px;color:var(--text-muted);flex:1;display:inline-flex;align-items:center;gap:6px;">' + Icon.lock({size:13}) + ' Recepción cerrada definitivamente</div>' +
         '<button class="btn" onclick="cerrarModalRecepcionar()">Cerrar</button>';
     }
     // Deshabilitar Limpiar/Seleccionar todos
@@ -1664,7 +1676,7 @@ function renderFaltantesSugerencia() {
   if (faltantes.length > 3) nombres += ' y ' + (faltantes.length - 3) + ' más';
   var html = '<div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);border-radius:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">';
   html += '<div style="min-width:0;">';
-  html += '<div style="font-size:12px;font-weight:600;color:var(--gold-bright);margin-bottom:2px;">⚠️ ' + faltantes.length + ' faltante' + (faltantes.length !== 1 ? 's' : '') + ' del último pedido</div>';
+  html += '<div style="font-size:12px;font-weight:600;color:var(--gold-bright);margin-bottom:2px;display:inline-flex;align-items:center;gap:6px;">' + Icon.alert({size:13}) + ' ' + faltantes.length + ' faltante' + (faltantes.length !== 1 ? 's' : '') + ' del último pedido</div>';
   html += '<div style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + nombres + '</div>';
   html += '</div>';
   html += '<button onclick="cargarFaltantesAlPedido()" style="flex-shrink:0;background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.4);color:var(--gold-bright);padding:6px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Agregar al pedido</button>';
@@ -1929,7 +1941,7 @@ function llenarProvSelect(ficha) {
 function renderTabsCargas() {
   var cont = $('cargas-tabs');
   if (!cont) return;
-  var iconos = { idle: '', procesando: '⏳', listo: '✓', error: '⚠️' };
+  var iconos = { idle: '', procesando: Icon.clock({size:13}), listo: Icon.check({size:13}), error: Icon.alert({size:13}) };
   var html = '';
   cargas.forEach(function(c) {
     var act = (c.id === cargaActivaId) ? ' activa' : '';
@@ -1969,7 +1981,7 @@ function renderCuerpoCarga() {
 
   renderPreview(); // renderiza la ficha activa
   if (ficha.estado === 'error' && ficha.error) {
-    $('preview-info').textContent = '⚠️ ' + ficha.error + ' — volvé a subir el archivo.';
+    $('preview-info').textContent = ficha.error + ' — volvé a subir el archivo.';
   }
 }
 
@@ -4530,7 +4542,7 @@ function renderPreview() {
 
   var infoMsg = '';
   if (conModo > 0) {
-    infoMsg = '✅ Pipeline: ' + conModo + ' productos normalizados. Editá si hace falta y guardá.';
+    infoMsg = 'Pipeline: ' + conModo + ' productos normalizados. Editá si hace falta y guardá.';
   } else if (alertas > 0) {
     infoMsg = 'La IA marcó ' + alertas + ' producto(s) con precio dudoso. Revisalos antes de guardar.';
   } else {
@@ -4567,8 +4579,8 @@ function renderPreview() {
         })(tamano, ub);
         var siBulto = '$' + fmt(precio / tamano) + '/' + ub;
         var siUnit  = '$' + fmt(precio * tamano) + ' total';
-        var lblPack = '📦 ' + tamStr;
-        var lblUnit = '⚖️ x ' + ub;
+        var lblPack = Icon.box({size:11}) + ' ' + tamStr;
+        var lblUnit = Icon.scale({size:11}) + ' x ' + ub;
         var actModo = it.modo || '?';
         var bgPack = (actModo === 'pack') ? 'background:rgba(96,165,250,0.18);border-color:#60a5fa;' : '';
         var bgUnit = (actModo === 'unitario') ? 'background:rgba(96,165,250,0.18);border-color:#60a5fa;' : '';
@@ -4585,17 +4597,17 @@ function renderPreview() {
           '</div>';
       } else {
         // Sin tamaño o producto por unidad: solo mostrar el modo si la IA lo decidió
-        var lbl = it.modo === 'pack' ? '📦 bulto' : it.modo === 'unitario' ? '⚖️ x unidad' : '❓ sin modo';
+        var lbl = it.modo === 'pack' ? (Icon.box({size:11}) + ' bulto') : it.modo === 'unitario' ? (Icon.scale({size:11}) + ' x unidad') : 'sin modo';
         infoModoHtml = '<span style="font-size:10.5px;">' + lbl + '</span>';
       }
 
       var confStr = it.confianza != null ? '<span style="opacity:0.7;">' + Math.round(it.confianza * 100) + '%</span>' : '';
       var revisarStr = '';  // flag "revisar" desactivado
       var envChicoStr = it.precio_alto_envase_chico
-        ? '<span style="color:#f59e0b;font-size:10px;font-weight:600;" title="El precio por kg/L es alto porque es un envase pequeño — es normal">📦 precio alto (envase pequeño)</span>'
+        ? '<span style="color:#f59e0b;font-size:10px;font-weight:600;display:inline-flex;align-items:center;gap:4px;" title="El precio por kg/L es alto porque es un envase pequeño — es normal">' + Icon.box({size:10}) + ' precio alto (envase pequeño)</span>'
         : '';
       var tamSospechosoStr = it.tamano_sospechoso
-        ? '<span style="color:#f87171;font-size:10px;font-weight:600;" title="El tamaño parece mal leído (posible OCR: \'CC\' en vez de \'KG\'). Verificá la presentación.">⚠️ verificar presentación</span>'
+        ? '<span style="color:#f87171;font-size:10px;font-weight:600;display:inline-flex;align-items:center;gap:4px;" title="El tamaño parece mal leído (posible OCR: \'CC\' en vez de \'KG\'). Verificá la presentación.">' + Icon.alert({size:10}) + ' verificar presentación</span>'
         : '';
       pipelineHtml =
         '<div style="flex-basis:100%;font-size:10.5px;color:var(--text-muted);margin-top:3px;' +
@@ -5714,7 +5726,7 @@ function renderVerPedido() {
       html += '<div style="flex:1;font-size:13px;">' + escapeHtml(it.productoLista) + '<span style="color:var(--text-muted);font-size:11px;"> · $' + formatPrecio(it.precio) + ' c/u</span></div>';
       html += '<input type="number" min="0" step="1" value="' + it.qty + '" data-item-qty="' + it.itemId + '" style="width:60px;padding:5px 8px;border:1px solid var(--border-hi);border-radius:6px;background:var(--bg-elev2);color:var(--text);font-size:13px;text-align:right;">';
       html += '<span style="font-size:13px;font-weight:500;min-width:70px;text-align:right;">$' + formatPrecio(it.precio * it.qty) + '</span>';
-      html += '<button data-quitar="' + it.itemId + '" style="background:transparent;border:none;color:var(--danger);cursor:pointer;font-size:16px;padding:0 4px;">✕</button>';
+      html += '<button data-quitar="' + it.itemId + '" style="display:inline-flex;align-items:center;background:transparent;border:none;color:var(--danger);cursor:pointer;padding:0 4px;">' + Icon.x({size:15}) + '</button>';
       html += '</div>';
     });
     html += '</div></div>';
@@ -5803,13 +5815,13 @@ function renderResumen() {
 
   // ── SECCIÓN SUPERIOR: Links WhatsApp bien visibles ──
   html += '<div style="background:var(--bg-elev);border:1px solid #25D366;border-radius:14px;padding:16px;margin-bottom:20px;">';
-  html += '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#25D366;margin-bottom:12px;">📱 Enviá los pedidos por WhatsApp</div>';
+  html += '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#25D366;margin-bottom:12px;display:inline-flex;align-items:center;gap:7px;">' + Icon.message({size:13}) + ' Enviá los pedidos por WhatsApp</div>';
   html += '<div style="display:flex;flex-direction:column;gap:10px;">';
   keys.forEach(function(provId) {
     var d = provData[provId];
     if (d.waNum) {
       html += '<a href="https://wa.me/' + d.waNum + '?text=' + d.msgEnc + '" target="_blank" rel="noopener" style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:#25D366;color:white;padding:14px 18px;border-radius:10px;font-size:15px;font-weight:700;text-decoration:none;">';
-      html += '<span>📱 ' + escapeHtml(d.prov.nombre) + '</span>';
+      html += '<span style="display:inline-flex;align-items:center;gap:7px;">' + Icon.message({size:15}) + escapeHtml(d.prov.nombre) + '</span>';
       html += '<span style="font-size:13px;opacity:0.9;">$' + formatPrecio(d.total) + ' →</span>';
       html += '</a>';
     } else {
@@ -5825,7 +5837,7 @@ function renderResumen() {
     html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:16px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;">';
     html += '<div><h3 style="font-size:16px;font-weight:700;">' + escapeHtml(d.prov.nombre) + '</h3>';
-    if (d.prov.tel) html += '<div style="font-size:11px;color:var(--text-muted);">📞 ' + escapeHtml(d.prov.tel) + '</div>';
+    if (d.prov.tel) html += '<div style="font-size:11px;color:var(--text-muted);display:inline-flex;align-items:center;gap:5px;">' + Icon.phone({size:11}) + escapeHtml(d.prov.tel) + '</div>';
     html += '</div><div style="font-size:18px;font-weight:700;">$' + formatPrecio(d.total) + '</div></div>';
 
     html += '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px;">';
@@ -5976,12 +5988,12 @@ function renderHistorialRecepcion() {
       var subtotal = porProv[pid].total;
       var color = waNum ? '#25D366' : 'var(--text-muted)';
       var attrs = waNum ? 'data-action="wa-prov" data-hist="' + h.id + '" data-prov="' + pid + '"' : 'disabled';
-      html += '<button ' + attrs + ' style="display:inline-flex;align-items:center;gap:4px;background:transparent;border:1px solid ' + color + ';color:' + color + ';padding:6px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;opacity:' + (waNum ? '1' : '0.5') + ';">📱 ' + escapeHtml(nombre) + ' <span style="opacity:0.7;font-size:10px;">$' + formatPrecio(subtotal) + '</span></button>';
+      html += '<button ' + attrs + ' style="display:inline-flex;align-items:center;gap:4px;background:transparent;border:1px solid ' + color + ';color:' + color + ';padding:6px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;opacity:' + (waNum ? '1' : '0.5') + ';">' + Icon.message({size:13}) + ' ' + escapeHtml(nombre) + ' <span style="opacity:0.7;font-size:10px;">$' + formatPrecio(subtotal) + '</span></button>';
     });
     html += '</div>';
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
     html += '<button data-action="ver-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Ver detalle</button>';
-    html += '<button data-action="recepcionar" data-id="' + h.id + '" style="background:var(--emerald);border:none;color:#fff;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">✓ Recepcionar</button>';
+    html += '<button data-action="recepcionar" data-id="' + h.id + '" style="display:inline-flex;align-items:center;gap:5px;background:var(--emerald);border:none;color:#fff;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">' + Icon.check({size:13}) + ' Recepcionar</button>';
     html += '<button data-action="borrar-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--danger-border);color:var(--danger);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Eliminar</button>';
     html += '</div></div>';
   });
@@ -6025,7 +6037,7 @@ function renderHistorialProveedores() {
     var faltantesCount = (h.faltantes || []).length;
     var cambiosCount   = (h.cambios   || []).length;
     var faltantesTag = faltantesCount > 0 ? ' · <span style="color:var(--danger);">' + faltantesCount + ' faltante' + (faltantesCount !== 1 ? 's' : '') + '</span>' : '';
-    var cambiosTag   = cambiosCount   > 0 ? ' · <span style="color:var(--gold-bright);">🔄 ' + cambiosCount + ' cambio' + (cambiosCount !== 1 ? 's' : '') + '</span>' : '';
+    var cambiosTag   = cambiosCount   > 0 ? ' · <span style="color:var(--gold-bright);">' + Icon.refreshCw({size:11}) + ' ' + cambiosCount + ' cambio' + (cambiosCount !== 1 ? 's' : '') + '</span>' : '';
     html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + faltantesTag + cambiosTag + '</div></div>';
     html += '<div style="text-align:right;"><div style="font-size:11px;color:var(--text-muted);">Total</div><div style="font-size:18px;font-weight:700;">$' + formatPrecio(h.total) + '</div></div></div>';
 
@@ -6039,18 +6051,18 @@ function renderHistorialProveedores() {
       var subtotal = porProv[pid].total;
       var color = waNum ? '#25D366' : 'var(--text-muted)';
       var attrs = waNum ? 'data-action="wa-prov" data-hist="' + h.id + '" data-prov="' + pid + '"' : 'disabled';
-      html += '<button ' + attrs + ' style="display:inline-flex;align-items:center;gap:4px;background:transparent;border:1px solid ' + color + ';color:' + color + ';padding:6px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;opacity:' + (waNum ? '1' : '0.5') + ';">📱 ' + escapeHtml(nombre) + ' <span style="opacity:0.7;font-size:10px;">$' + formatPrecio(subtotal) + '</span></button>';
+      html += '<button ' + attrs + ' style="display:inline-flex;align-items:center;gap:4px;background:transparent;border:1px solid ' + color + ';color:' + color + ';padding:6px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;opacity:' + (waNum ? '1' : '0.5') + ';">' + Icon.message({size:13}) + ' ' + escapeHtml(nombre) + ' <span style="opacity:0.7;font-size:10px;">$' + formatPrecio(subtotal) + '</span></button>';
     });
     html += '</div>';
 
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
-    html += '<button data-action="ver-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">👁 Ver</button>';
+    html += '<button data-action="ver-hist" data-id="' + h.id + '" style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">' + Icon.eye({size:13}) + ' Ver</button>';
     if (h.recepcionFinal) {
       // Definitivamente cerrado: solo ver
-      html += '<button data-action="ver-recepcion" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text-muted);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">🔒 Ver recepción</button>';
+      html += '<button data-action="ver-recepcion" data-id="' + h.id + '" style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--border-hi);color:var(--text-muted);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">' + Icon.lock({size:13}) + ' Ver recepción</button>';
     } else {
       // Guardado como borrador o nunca cerrado: editable
-      html += '<button data-action="editar-recepcion" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--warn);color:var(--warn);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">✎ Editar recepción</button>';
+      html += '<button data-action="editar-recepcion" data-id="' + h.id + '" style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--warn);color:var(--warn);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">' + Icon.pencil({size:12}) + ' Editar recepción</button>';
     }
     html += '<button data-action="repetir-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Repetir pedido</button>';
     html += '<button data-action="borrar-hist" data-id="' + h.id + '" style="background:transparent;border:1px solid var(--danger-border);color:var(--danger);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Eliminar</button>';
@@ -6384,7 +6396,7 @@ async function enviarMensajeAI() {
       var msg = data.error || 'Error';
       if (data.codigo === 'PLAN_SIN_IA') msg = 'Tu plan no incluye el asistente IA. Mejorá a Pro.';
       else if (data.codigo === 'CUOTA_IA_AGOTADA') msg = 'Llegaste al límite mensual de consultas IA (' + data.limite + ').';
-      renderMensajeAI('assistant', '❌ ' + msg);
+      renderMensajeAI('assistant', msg);
       aiHistorial.pop();
       return;
     }
@@ -6392,11 +6404,11 @@ async function enviarMensajeAI() {
     aiHistorial.push({ role: 'assistant', content: contenido });
     renderMensajeAI('assistant', contenido);
     if (data.cuota && data.cuota.restantes <= 10) {
-      renderMensajeAI('assistant', '⚠️ Te quedan ' + data.cuota.restantes + ' consultas IA este mes.');
+      renderMensajeAI('assistant', 'Te quedan ' + data.cuota.restantes + ' consultas IA este mes.');
     }
   } catch(e) {
     quitarEscribiendo();
-    renderMensajeAI('assistant', '❌ Error de red: ' + e.message);
+    renderMensajeAI('assistant', 'Error de red: ' + e.message);
     aiHistorial.pop();
   } finally {
     input.disabled = false;
@@ -6409,25 +6421,25 @@ async function enviarMensajeAI() {
 
 <!-- Botón flotante asistente -->
 <button class="ai-fab" id="ai-fab" onclick="abrirAsistente()">
-  💬 <span class="ai-fab-txt">Hablar con el asistente</span>
+  <span class="icon-slot" data-icon="message"></span> <span class="ai-fab-txt">Hablar con el asistente</span>
 </button>
 
 <!-- Ventana del asistente -->
 <div id="ai-modal" style="display:none;position:fixed;bottom:80px;right:20px;width:380px;max-width:calc(100vw - 30px);height:520px;max-height:calc(100vh - 100px);background:var(--bg-elev);border:1px solid var(--border-strong);border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,0.55);z-index:91;flex-direction:column;overflow:hidden;">
   <div style="padding:12px 16px;background:linear-gradient(135deg,#1e3a5f,#0f172a);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);flex-shrink:0;">
     <div style="display:flex;align-items:center;gap:10px;">
-      <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#60a5fa);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;">🤖</div>
+      <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#60a5fa);display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0;"><span class="icon-slot" data-icon="sparkles"></span></div>
       <div>
         <div style="font-size:14px;font-weight:600;color:#60a5fa;">Asistente ProveLink</div>
         <div style="font-size:11px;color:var(--text-muted);">Buscar productos · Comparar precios</div>
       </div>
     </div>
-    <button onclick="cerrarAsistente()" style="background:transparent;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;padding:4px;line-height:1;">✕</button>
+    <button onclick="cerrarAsistente()" style="background:transparent;border:none;color:var(--text-muted);cursor:pointer;padding:4px;line-height:1;display:inline-flex;align-items:center;"><span class="icon-slot" data-icon="x"></span></button>
   </div>
   <div id="ai-chat" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;min-height:0;"></div>
   <div style="padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:6px;background:var(--bg-elev2);flex-shrink:0;">
     <input id="ai-input" type="text" placeholder="Preguntale algo..." onkeydown="if(event.key==='Enter')enviarMensajeAI()" style="flex:1;padding:10px 12px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font);">
-    <button onclick="enviarMensajeAI()" id="ai-enviar-btn" style="padding:10px 16px;background:#1d4ed8;color:#e0f0ff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">→</button>
+    <button onclick="enviarMensajeAI()" id="ai-enviar-btn" style="display:inline-flex;align-items:center;justify-content:center;padding:10px 14px;background:#1d4ed8;color:#e0f0ff;border:none;border-radius:8px;cursor:pointer;"><span class="icon-slot" data-icon="arrowRight"></span></button>
   </div>
 </div>
 

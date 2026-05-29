@@ -3581,19 +3581,62 @@ function tamanoExplicitoEnNombre(grupo) {
   });
 }
 
-// Resuelve el modo cuando el nombre trae tamaño explícito: SIEMPRE pack (el
-// precio es del bulto), salvo que pack dé un $/unidad absurdo (>500× la mediana
-// del rango) — eso delata un tamaño mal leído (OCR "CC" por "KG"), y ahí se deja
-// que lo resuelva la cascada/IA.
+// Resuelve el modo cuando el nombre trae tamaño explícito.
+//
+// Por defecto: PACK (en listas mayoristas el envase escrito en el nombre suele
+// indicar el bulto completo).
+//
+// PERO en muchas listas HORECA/Centeno el nombre dice "x 5 kg" como referencia
+// del envase y el precio está cotizado POR KG. Ej: "HARINA 000 x 25 kg" a
+// $1.200 NO es el bulto entero ($240/kg sería absurdo), es precio por kilo.
+//
+// Por eso: si hay rango disponible, chequeamos AMBAS interpretaciones contra
+// el rango antes de decidir:
+//   - Pack: precio / tamano debería caer cerca del rango típico
+//   - Unit: precio (sin dividir) debería caer cerca del rango típico
+// Si pack queda muy por DEBAJO del piso del rango (< factor_min × mediana / 2)
+// y unit cae dentro → UNITARIO. Si pack cae dentro → PACK. Si todo es ambiguo,
+// PACK con confianza media (el nombre manda como tiebreaker).
 function decidirPackPorTamanoExplicito(grupo, propio, rangoRow) {
   var precio = parseFloat(propio.precio_raw) || 0;
   var tamano = parseFloat(grupo.tamano) || 0;
   if (precio <= 0 || tamano <= 0) return null;
   var siPack = precio / tamano;
+  var siUnit = precio;
   var rg = rangoRow ? rangoEfectivo(rangoRow, tamano) : null;
-  if (rg && rg.mediana && siPack > rg.mediana * 500) return null; // tamaño sospechoso → no forzar
-  return { modo: 'pack', confianza: 0.9,
-    razonamiento: 'nombre con tamaño explícito (' + tamano + (grupo.unidad_base || '') + ') → precio del bulto' };
+
+  // Tamaño sospechoso (OCR "CC" por "KG"): pack daría $/u disparatado.
+  if (rg && rg.mediana && siPack > rg.mediana * 500) return null;
+
+  if (rg && rg.min && rg.max) {
+    var packEnRango = (siPack >= rg.min && siPack <= rg.max);
+    var unitEnRango = (siUnit >= rg.min && siUnit <= rg.max);
+    var packDemasiadoBajo = (siPack < rg.min * 0.5);  // claramente fuera por abajo
+
+    // Caso típico HORECA: nombre dice "x 5 kg" pero precio es por kg.
+    // Pack daría un $/kg muy bajo (fuera del rango), unit cae bien.
+    if (packDemasiadoBajo && unitEnRango) {
+      return { modo: 'unitario', confianza: 0.85,
+        razonamiento: 'nombre con tamaño (' + tamano + (grupo.unidad_base || '') +
+          ') pero precio coincide con rango por ' + (grupo.unidad_base || 'u') + ' → cotizado por unidad' };
+    }
+
+    // Pack cae en rango → es lo más probable, el nombre lo confirma.
+    if (packEnRango) {
+      return { modo: 'pack', confianza: 0.9,
+        razonamiento: 'nombre con tamaño explícito (' + tamano + (grupo.unidad_base || '') + ') + pack en rango → precio del bulto' };
+    }
+
+    // Pack fuera por arriba pero unit en rango → unitario.
+    if (!packEnRango && unitEnRango) {
+      return { modo: 'unitario', confianza: 0.75,
+        razonamiento: 'pack fuera de rango por arriba, unit en rango → cotizado por unidad' };
+    }
+  }
+
+  // Sin rango o ambiguo: el nombre manda → pack con confianza media.
+  return { modo: 'pack', confianza: 0.7,
+    razonamiento: 'nombre con tamaño explícito (' + tamano + (grupo.unidad_base || '') + ') → asumido bulto (sin rango para validar)' };
 }
 
 // Umbral de confianza para USAR un entry del cache. Bajo umbral = más hits =

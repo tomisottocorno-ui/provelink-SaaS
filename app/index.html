@@ -2075,7 +2075,9 @@ function cerrarModalColPDF() {
 async function procesarPDFConColumna(lineas, nombreColumna, ejemploColumna, todasLasColumnas, ficha) {
   var jobId = ficha.jobId;
   ficha.filasPreview = [];
-  var chunkSize = 80;
+  // 120 líneas por chunk: balance entre menos llamadas (más barato) y no
+  // saturar el contexto de Haiku. Con max_tokens 16k aguanta cómodo.
+  var chunkSize = 120;
   var totalChunks = Math.ceil(lineas.length / chunkSize);
   var errores = 0;
   for (var c = 0; c < totalChunks; c++) {
@@ -3928,22 +3930,27 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     return enriquecido;
   });
 
-  // Etapa 4: Detectar modo (orden de prioridad: gratis → caro)
+  // Etapa 4: Detectar modo (orden de prioridad: 100% gratis → Haiku barato)
   //   1. Heurística estructural (presentación = solo unidad sin número) → unitario
-  //   2. Rango cacheado en pl_rangos_precio (compartido entre usuarios) → pack/unitario
-  //   3. Coherencia interna (dos tamaños del mismo tipo en la lista) → pack/unitario
-  //   4. Rangos hardcodeados (fallback) → pack/unitario
-  //   5. Búsqueda web (solo si no hay rango y es un tipo común) → cachea y decide
-  //   6. IA en paralelo solo para lo que queda ambiguo
+  //   2. Tamaño explícito "x N unidad" en el nombre → pack
+  //   3. Rango cacheado en pl_rangos_precio (seed HORECA, compartido) → pack/unitario
+  //   4. Rangos hardcodeados en el código (fallback gratis) → pack/unitario
+  //   5. IA Haiku en batch para lo que queda ambiguo (~$0.001 por grupo)
+  //
+  // Búsqueda web DESACTIVADA: Sonnet+web_search cuesta $0.10-0.30 por tipo, lo
+  // que volaba el presupuesto de una lista grande. Sin ella, el peor caso por
+  // tipo desconocido es Haiku (~$0.001) o marcado "revisar" para confirmar.
+  //
+  // Coherencia interna DESACTIVADA: cruzaba precios de dos tamaños del mismo
+  // producto en la misma lista; en la práctica confundía al usuario porque
+  // marcaba con "revisar" items que estaban bien cargados.
   if (loadingEl) loadingEl.textContent = 'Detectando modo de precio...';
   var todosLosModos = [];
   var gruposParaIA = [];
-  var nRangos = 0, nRangosDinamicos = 0, nCoherencia = 0, nWeb = 0;
+  var nRangos = 0, nRangosDinamicos = 0;
 
   // Cargar rangos dinámicos (gratis, una consulta)
   var rangosCacheados = await getRangosCacheados();
-  // Pre-calcular coherencia interna para todos los grupos
-  var coherenciaMap = detectarPorCoherenciaInterna(gruposConComparacion);
 
   var aplicar = function(g, h) {
     var propios = g.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
@@ -3956,9 +3963,6 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     });
   };
 
-  // Cola de tipos que faltan en pl_rangos_precio (para buscar web en paralelo)
-  var tiposParaBuscarWeb = {};
-
   for (var iG = 0; iG < gruposConComparacion.length; iG++) {
     var g = gruposConComparacion[iG];
 
@@ -3970,14 +3974,14 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     var rangoRow = tipoKey ? lookupRangoCacheado(rangosCacheados, tipoKey) : null;
     var primerPropio = g.proveedores.find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
 
-    // 1.5) Tamaño explícito "x N unidad" en el nombre → el precio es del bulto.
-    //      Señal fuerte: el nombre manda. El rango sólo veta tamaños absurdos (OCR).
+    // 2) Tamaño explícito "x N unidad" en el nombre → el precio es del bulto.
+    //    Señal fuerte: el nombre manda. El rango sólo veta tamaños absurdos (OCR).
     if (primerPropio && tamanoExplicitoEnNombre(g)) {
       var detExp = decidirPackPorTamanoExplicito(g, primerPropio, rangoRow);
       if (detExp) { aplicar(g, detExp); nRangos++; continue; }
     }
 
-    // 2) Rango cacheado (dinámico, de pl_rangos_precio)
+    // 3) Rango cacheado (de pl_rangos_precio, seed HORECA+CENTENO ~90 tipos)
     if (rangoRow && primerPropio) {
       var det = detectarPorRangoDinamico(
         { precio_raw: primerPropio.precio_raw, tamano: g.tamano },
@@ -3986,83 +3990,20 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
       if (det) { aplicar(g, det); nRangosDinamicos++; continue; }
     }
 
-    // 3) Coherencia interna
-    if (primerPropio && coherenciaMap[primerPropio.id_original]) {
-      aplicar(g, coherenciaMap[primerPropio.id_original]);
-      nCoherencia++;
-      continue;
-    }
-
-    // 4) Rangos hardcodeados (fallback)
+    // 4) Rangos hardcodeados en el código (fallback gratis para ~20 productos básicos)
     var r = decidirModoPorRangos(g);
     if (r) { aplicar(g, r); nRangos++; continue; }
 
-    // 5) Si no hay rango cacheado y el tipo es no-trivial, marcar para buscar web
-    if (!rangoRow && tipoKey && tipoKey.length >= 3 && g.unidad_base) {
-      tiposParaBuscarWeb[tipoKey] = { tipo: tipoKey, unidad_base: g.unidad_base };
-    }
-
+    // 5) Sin rango disponible → cae a IA Haiku (último resort barato).
+    //    Si Haiku no decide con confianza alta, queda con `revisar:true` y el
+    //    usuario lo confirma con un click en el preview (botones 📦 / ⚖️).
     gruposParaIA.push(g);
   }
 
-  // 5b) Buscar rangos web en paralelo — CON TOPE para controlar costo.
-  // Cada búsqueda web con Sonnet+web_search cuesta ~$0.10-0.30. Sin tope, una
-  // lista grande puede gastar varios dólares. Capeamos a MAX_WEB_POR_LISTA y los
-  // tipos sobrantes caen en el fallback (rangos hardcoded → Haiku → revisar manual).
-  // Priorizamos los tipos más comunes (que aparecen en más grupos de esta lista)
-  // para que el cap sea útil: aprendemos primero lo que más se va a usar.
-  var MAX_WEB_POR_LISTA = 5;
-  var tiposABuscarTodos = Object.values(tiposParaBuscarWeb);
-  // Contar cuántas veces aparece cada tipo en los grupos pendientes
-  var freqPorTipo = {};
-  gruposParaIA.forEach(function(gr) {
-    var tk = (gr.tipo || '').toLowerCase().trim();
-    if (tk) freqPorTipo[tk] = (freqPorTipo[tk] || 0) + 1;
-  });
-  tiposABuscarTodos.sort(function(a, b) {
-    return (freqPorTipo[b.tipo] || 0) - (freqPorTipo[a.tipo] || 0);
-  });
-  var tiposABuscar = tiposABuscarTodos.slice(0, MAX_WEB_POR_LISTA);
-  var tiposSaltados = tiposABuscarTodos.length - tiposABuscar.length;
-  if (tiposSaltados > 0) {
-    console.log('[Rangos] ' + tiposABuscarTodos.length + ' tipos sin rango; buscando los ' +
-                tiposABuscar.length + ' más frecuentes (saltando ' + tiposSaltados +
-                ' para controlar costo — caen en fallback Haiku).');
-  }
-  if (tiposABuscar.length) {
-    if (loadingEl) loadingEl.textContent = 'Buscando rangos de referencia (' + tiposABuscar.length + ' tipos)...';
-    var completados = 0;
-    var promesasWeb = tiposABuscar.map(function(t) {
-      return buscarRangoWebCliente(t.tipo, t.unidad_base).then(function(rango) {
-        completados++;
-        if (loadingEl) loadingEl.textContent = 'Buscando rangos (' + completados + '/' + tiposABuscar.length + ')...';
-        if (rango) { rangosCacheados[t.tipo] = rango; guardarRangoCacheado(rango); return rango; }
-        return null;
-      }).catch(function() { completados++; return null; });
-    });
-    var resultadosWeb = await Promise.all(promesasWeb);
-    nWeb = resultadosWeb.filter(Boolean).length;
-    // Re-evaluar los grupos pendientes con los rangos recién obtenidos
-    var pendientes = gruposParaIA.slice();
-    gruposParaIA = [];
-    pendientes.forEach(function(g2) {
-      var tk = (g2.tipo || '').toLowerCase().trim();
-      var rr = tk ? lookupRangoCacheado(rangosCacheados, tk) : null;
-      var pp = g2.proveedores.find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
-      if (rr && pp) {
-        var det2 = detectarPorRangoDinamico({ precio_raw: pp.precio_raw, tamano: g2.tamano }, rr);
-        if (det2) { aplicar(g2, det2); nRangosDinamicos++; return; }
-      }
-      gruposParaIA.push(g2);
-    });
-  }
-
-  console.log('[Pipeline] Modo — heurística: ' + (todosLosModos.length - nRangos - nRangosDinamicos - nCoherencia) +
+  console.log('[Pipeline] Modo — heurística: ' + (todosLosModos.length - nRangos - nRangosDinamicos) +
     ' · rangos DB: ' + nRangosDinamicos +
-    ' · coherencia: ' + nCoherencia +
     ' · rangos hardcoded: ' + nRangos +
-    ' · web cacheadas: ' + nWeb +
-    ' · IA: ' + gruposParaIA.length + ' grupos');
+    ' · IA Haiku (fallback): ' + gruposParaIA.length + ' grupos');
 
   // Batches de 25 en PARALELO (cada grupo lleva varios proveedores, baja TPM)
   // Cada batch reintenta hasta 3 veces. Si falla definitivamente, contamos los

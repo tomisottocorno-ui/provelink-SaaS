@@ -2411,12 +2411,11 @@ var SYSTEM_DETECCION_MODO = [
   '  * "KG" o "LTS" solos → UNITARIO (precio ya es por kg o litro). confianza: 0.9',
   '  * "BOL", "CAJ", "PAQ", "LAT", "FCO", "POT", "POM", "BOT", "UN." solos → PACK (precio por envase). confianza: 0.85',
   '- Presentación con SOLO unidad sin número explícito ("x kg", "x lt", "por litro") → UNITARIO con confianza 0.85.',
-  '- Presentación con envase + cantidad ("Bolsa x 25 kg", "Caja x 12 uds", "Bidón x 5 lts"):',
-  '  NO asumas automáticamente PACK. Listas mayoristas frecuentemente cotizan por kg/L aunque',
-  '  mencionen el envase como referencia. Usá rangos esperados del producto como sanity check:',
-  '  * Si el precio (asumiendo PACK) ÷ tamaño da un valor coherente con el rango típico del producto → PACK.',
-  '  * Si ese precio sería absurdamente bajo o alto por unidad → UNITARIO.',
-  '  * Si dudás: PACK con confianza 0.6 (para que quede marcado "para revisar").',
+  '- Nombre con TAMAÑO EXPLÍCITO ("x 5 lt", "x 3 kg", "x 2750 cc", "x 0.95 lt", "Bidón x 5 lts"):',
+  '  El precio es el del BULTO/ENVASE completo de ese tamaño → PACK con confianza 0.9.',
+  '  El nombre MANDA: si dice "x 3 kg", el precio es por los 3 kg, NO por kg suelto.',
+  '  ÚNICA excepción → UNITARIO: si asumir PACK diera un $/unidad ABSURDO (precio ÷ tamaño',
+  '  queda muchísimo más bajo o más alto que el rango típico → señal de tamaño mal leído).',
   '- Rangos típicos en ARS (mayo 2026, precios mayoristas argentinos):',
   '  aceite girasol 2000-6500/L · aceite maíz 2500-8000/L · aceite oliva 10000-100000/L',
   '  vinagre 1000-9000/L · aceto balsámico 3000-60000/L',
@@ -3569,6 +3568,32 @@ function detectarModoHeuristico(grupo) {
   return null;
 }
 
+// Detecta si el nombre del producto trae un tamaño EXPLÍCITO tipo "x 5 lt",
+// "x 3 kg", "x 2750 cc". En las listas reales eso significa que el precio es el
+// del bulto/envase completo (modo pack), no por kg/L. El nombre manda.
+function tamanoExplicitoEnNombre(grupo) {
+  var re = /\bx\s*\d+(?:[.,]\d+)?\s*(kg|kgs|kilos?|lts?|litros?|l|grs?|gramos?|g|cc|ml)\b/i;
+  return (grupo.proveedores || []).some(function(p) {
+    if ((p.id_original || '').indexOf('ext_') === 0) return false; // solo listas propias
+    return re.test(p.nombre_original || '');
+  });
+}
+
+// Resuelve el modo cuando el nombre trae tamaño explícito: SIEMPRE pack (el
+// precio es del bulto), salvo que pack dé un $/unidad absurdo (>500× la mediana
+// del rango) — eso delata un tamaño mal leído (OCR "CC" por "KG"), y ahí se deja
+// que lo resuelva la cascada/IA.
+function decidirPackPorTamanoExplicito(grupo, propio, rangoRow) {
+  var precio = parseFloat(propio.precio_raw) || 0;
+  var tamano = parseFloat(grupo.tamano) || 0;
+  if (precio <= 0 || tamano <= 0) return null;
+  var siPack = precio / tamano;
+  var rg = rangoRow ? rangoEfectivo(rangoRow, tamano) : null;
+  if (rg && rg.mediana && siPack > rg.mediana * 500) return null; // tamaño sospechoso → no forzar
+  return { modo: 'pack', confianza: 0.9,
+    razonamiento: 'nombre con tamaño explícito (' + tamano + (grupo.unidad_base || '') + ') → precio del bulto' };
+}
+
 // Umbral de confianza para USAR un entry del cache. Bajo umbral = más hits =
 // menos llamadas IA. Los entries siempre se guardan con su confianza original.
 var CACHE_HIT_MIN_CONFIANZA = 0.6;
@@ -3944,6 +3969,13 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     var tipoKey = (g.tipo || '').toLowerCase().trim();
     var rangoRow = tipoKey ? lookupRangoCacheado(rangosCacheados, tipoKey) : null;
     var primerPropio = g.proveedores.find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+
+    // 1.5) Tamaño explícito "x N unidad" en el nombre → el precio es del bulto.
+    //      Señal fuerte: el nombre manda. El rango sólo veta tamaños absurdos (OCR).
+    if (primerPropio && tamanoExplicitoEnNombre(g)) {
+      var detExp = decidirPackPorTamanoExplicito(g, primerPropio, rangoRow);
+      if (detExp) { aplicar(g, detExp); nRangos++; continue; }
+    }
 
     // 2) Rango cacheado (dinámico, de pl_rangos_precio)
     if (rangoRow && primerPropio) {

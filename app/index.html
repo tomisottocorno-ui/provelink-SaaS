@@ -188,7 +188,7 @@
       </div>
       <div id="pedido-faltantes-sugerencia" style="margin-bottom:12px;"></div>
       <div id="buscar-content">
-        <div class="empty"><div class="empty-emoji"></div><div class="empty-title">Escribí para buscar</div></div>
+        <div class="empty"><div class="empty-emoji"><span class="icon-slot" data-icon="search"></span></div><div class="empty-title">Escribí para buscar</div></div>
       </div>
     </div>
 
@@ -5511,9 +5511,9 @@ function renderBuscarProducto(expansionesExtras) {
     clearTimeout(expandIATimer);
     var total = listas.reduce(function(s, l) { return s + (l.items || []).length; }, 0);
     if (!listas.length) {
-      cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin listas cargadas</div><div class="empty-sub">Cargá listas de precios en la pestaña "Listas"</div></div>';
+      cont.innerHTML = '<div class="empty"><div class="empty-emoji">' + Icon.list() + '</div><div class="empty-title">Sin listas cargadas</div><div class="empty-sub">Cargá listas de precios en la pestaña "Listas"</div></div>';
     } else {
-      cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">' + total + ' productos en ' + listas.length + ' lista' + (listas.length !== 1 ? 's' : '') + '</div><div class="empty-sub">Escribí para comparar precios entre proveedores</div></div>';
+      cont.innerHTML = '<div class="empty"><div class="empty-emoji">' + Icon.search() + '</div><div class="empty-title">' + total + ' productos en ' + listas.length + ' lista' + (listas.length !== 1 ? 's' : '') + '</div><div class="empty-sub">Escribí para comparar precios entre proveedores</div></div>';
     }
     return;
   }
@@ -5550,7 +5550,7 @@ function renderBuscarProducto(expansionesExtras) {
 
   if (!resultados.length) {
     var sinResHtml = '<div class="expand-chips-wrap" id="expand-chips"></div>' +
-      '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin resultados para "' + escapeHtml(q) + '"</div>';
+      '<div class="empty"><div class="empty-emoji">' + Icon.search() + '</div><div class="empty-title">Sin resultados para "' + escapeHtml(q) + '"</div>';
     if (terminosActivos.length === 0 && q.length <= 6) {
       sinResHtml += '<div class="empty-sub" style="font-size:11px;opacity:0.7;">Buscando interpretaciones...</div>';
     }
@@ -5692,7 +5692,7 @@ function renderVerPedido() {
   var ids = Object.keys(ped.items || {}).filter(function(k) { return ped.items[k].qty > 0; });
 
   if (!ids.length) {
-    cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Pedido vacío</div><div class="empty-sub">Buscá productos en "Armar pedido" y agregarlos</div></div>';
+    cont.innerHTML = '<div class="empty"><div class="empty-emoji">' + Icon.cart() + '</div><div class="empty-title">Pedido vacío</div><div class="empty-sub">Buscá productos en "Armar pedido" y agregarlos</div></div>';
     if (footer) footer.style.display = 'none';
     return;
   }
@@ -5792,7 +5792,7 @@ function renderResumen() {
 
   var keys = Object.keys(porProv);
   if (!keys.length) {
-    cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Pedido vacío</div></div>';
+    cont.innerHTML = '<div class="empty"><div class="empty-emoji">' + Icon.cart() + '</div><div class="empty-title">Pedido vacío</div></div>';
     if (footer) footer.style.display = 'none';
     return;
   }
@@ -5960,7 +5960,7 @@ function renderHistorialRecepcion() {
   if (!cont) return;
   var hist = histGet().filter(function(h) { return !h.recepcionado; });
   if (!hist.length) {
-    cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin pedidos pendientes</div><div class="empty-sub">Los pedidos confirmados aparecen acá hasta que los recepcionés</div></div>';
+    cont.innerHTML = '<div class="empty"><div class="empty-emoji">' + Icon.inbox() + '</div><div class="empty-title">Sin pedidos pendientes</div><div class="empty-sub">Los pedidos confirmados aparecen acá hasta que los recepcionés</div></div>';
     return;
   }
   var html = '';
@@ -6015,7 +6015,7 @@ function renderHistorialProveedores() {
   if (!cont) return;
   var hist = histGet().filter(function(h) { return h.recepcionado; });
   if (!hist.length) {
-    cont.innerHTML = '<div class="empty"><div class="empty-emoji"></div><div class="empty-title">Sin pedidos en historial</div><div class="empty-sub">Los pedidos recepcionados aparecen acá</div></div>';
+    cont.innerHTML = '<div class="empty"><div class="empty-emoji">' + Icon.list() + '</div><div class="empty-title">Sin pedidos en historial</div><div class="empty-sub">Los pedidos recepcionados aparecen acá</div></div>';
     return;
   }
 

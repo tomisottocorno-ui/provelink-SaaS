@@ -2129,3 +2129,110 @@ h3 { font-size: 18px; }
 @media (max-width: 560px) {
   .home-cards { grid-template-columns: 1fr; }
 }
+
+/* ============================================================
+ * ANIMACIONES DE MÉTRICAS / DASHBOARD
+ * ============================================================ */
+
+@keyframes metric-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes metric-spark-draw {
+  from { stroke-dashoffset: var(--spark-len, 200); }
+  to   { stroke-dashoffset: 0; }
+}
+
+@keyframes metric-bar-grow {
+  from {
+    transform: scaleY(0);
+    transform-origin: bottom;
+  }
+  to {
+    transform: scaleY(1);
+    transform-origin: bottom;
+  }
+}
+
+@keyframes metric-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Cards de KPI con stagger */
+.metric-card {
+  opacity: 0;
+  animation: metric-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -12px rgba(96, 165, 250, 0.25);
+}
+.metric-card.delay-0 { animation-delay: 0s; }
+.metric-card.delay-1 { animation-delay: 0.08s; }
+.metric-card.delay-2 { animation-delay: 0.16s; }
+.metric-card.delay-3 { animation-delay: 0.24s; }
+
+/* Chart containers con fade up */
+.metric-chart-box {
+  opacity: 0;
+  animation: metric-fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.metric-chart-box.delay-3 { animation-delay: 0.3s; }
+.metric-chart-box.delay-4 { animation-delay: 0.42s; }
+.metric-chart-box.delay-5 { animation-delay: 0.54s; }
+
+/* Filas del top 20 con stagger más rápido */
+.metric-top-row {
+  opacity: 0;
+  animation: metric-fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.metric-top-row:hover {
+  background: var(--bg-elev3, rgba(255, 255, 255, 0.04)) !important;
+  transform: translateX(2px);
+}
+
+/* Sparklines: el polyline se "dibuja" en entrada */
+.metric-spark-line {
+  stroke-dasharray: var(--spark-len, 200);
+  stroke-dashoffset: var(--spark-len, 200);
+  animation: metric-spark-draw 1.4s cubic-bezier(0.65, 0, 0.35, 1) 0.2s forwards;
+}
+
+/* Barras del bar chart crecen desde abajo */
+.metric-bar {
+  animation: metric-bar-grow 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transform: scaleY(0);
+  transform-origin: bottom;
+}
+
+/* Texto de KPI: shimmer sutil durante el count-up */
+.metric-number {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Botones de período */
+#metricas-periodo-mes, #metricas-periodo-anio {
+  transition: all 0.2s ease;
+}
+
+/* Respeta usuarios con prefer-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  .metric-card, .metric-chart-box, .metric-top-row,
+  .metric-spark-line, .metric-bar {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+}

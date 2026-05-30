@@ -1218,6 +1218,7 @@ function topProductosPedidos(n) {
 }
 
 // Sparkline SVG mínima. data = [num, num, ...] o [{x:ts, y:precio}, ...]
+// opts.animate=true → la línea se dibuja con animación (CSS metric-spark-draw)
 function sparkline(data, opts) {
   opts = opts || {};
   var w = opts.w || 80;
@@ -1235,16 +1236,22 @@ function sparkline(data, opts) {
     return px.toFixed(1) + ',' + py.toFixed(1);
   }).join(' ');
   var color = opts.color || '#60a5fa';
+  // Estimación del largo del path para el stroke-dashoffset (aproximación
+  // suficiente: diagonal del bounding box × cantidad de segmentos / 2).
+  var pathLen = Math.round(Math.sqrt(w * w + h * h) * Math.max(1, ys.length * 0.4));
   // Área tenue debajo
   var areaPts = pts + ' ' + (pad + (ys.length - 1) * stepX).toFixed(1) + ',' + (h - pad).toFixed(1) +
                 ' ' + pad + ',' + (h - pad).toFixed(1);
+  var animClass = opts.animate ? 'metric-spark-line' : '';
+  var animStyle = opts.animate ? ' style="--spark-len:' + pathLen + ';"' : '';
   return '<svg width="' + w + '" height="' + h + '" style="display:block;">' +
     '<polygon points="' + areaPts + '" fill="' + color + '" opacity="0.12"/>' +
-    '<polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>' +
+    '<polyline class="' + animClass + '"' + animStyle + ' points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>' +
     '</svg>';
 }
 
 // Bar chart SVG mínimo. data = [{label, value}, ...]
+// opts.animate=true → cada barra crece desde abajo con stagger (CSS metric-bar)
 function barChart(data, opts) {
   opts = opts || {};
   var w = opts.w || 600;
@@ -1256,18 +1263,28 @@ function barChart(data, opts) {
   var slot = (w - padL - padR) / data.length;
   var barW = Math.max(8, slot * 0.6);
   var color = opts.color || '#60a5fa';
+  var animate = !!opts.animate;
   var bars = data.map(function(d, i) {
     var bh = (d.value / max) * innerH;
     var x = padL + i * slot + (slot - barW) / 2;
     var y = padTop + innerH - bh;
     var labelY = h - padBot + 14;
     var labelX = padL + i * slot + slot / 2;
-    return '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) +
+    // Para que la animación scaleY se vea bien, el transform-origin tiene
+    // que ser el baseline (parte de abajo de la barra). Lo seteamos inline.
+    var barOriginY = y + bh;
+    var barAttrs = animate
+      ? ' class="metric-bar" style="transform-origin:' + (x + barW / 2).toFixed(1) + 'px ' + barOriginY.toFixed(1) + 'px; animation-delay:' + (i * 60) + 'ms;"'
+      : '';
+    var labelAttrs = animate
+      ? ' style="opacity:0; animation:metric-fade-up 0.4s ease ' + (300 + i * 60) + 'ms forwards;"'
+      : '';
+    return '<rect' + barAttrs + ' x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) +
            '" height="' + bh.toFixed(1) + '" rx="3" fill="' + color + '"/>' +
-           '<text x="' + labelX.toFixed(1) + '" y="' + labelY +
+           '<text' + labelAttrs + ' x="' + labelX.toFixed(1) + '" y="' + labelY +
            '" text-anchor="middle" font-size="10" fill="var(--text-muted)" font-family="inherit">' +
            d.label + '</text>' +
-           (d.value > 0 ? '<text x="' + labelX.toFixed(1) + '" y="' + (y - 4).toFixed(1) +
+           (d.value > 0 ? '<text' + labelAttrs + ' x="' + labelX.toFixed(1) + '" y="' + (y - 4).toFixed(1) +
            '" text-anchor="middle" font-size="10" fill="var(--text)" font-family="inherit">$' +
            fmt$(d.value) + '</text>' : '');
   }).join('');
@@ -1316,49 +1333,57 @@ function renderMetricas() {
   if (btnMes)  btnMes.className  = metricasPeriodo === 'mes'  ? 'btn primary' : 'btn';
   if (btnAnio) btnAnio.className = metricasPeriodo === 'anio' ? 'btn primary' : 'btn';
 
+  var totalHist = hist.reduce(function(s, h) { return s + (h.total || 0); }, 0);
+  // Sparklines con animate=true para que la línea se dibuje
+  var sparkMesAnim = sparkline(binsSem.map(function(b) { return b.total; }), { w: 90, h: 30, color: '#60a5fa', animate: true });
+  var sparkSemAnim = sparkline(binsMes.map(function(b) { return b.total; }), { w: 90, h: 30, color: '#a78bfa', animate: true });
+
   var html = '';
 
   // ===== KPI CARDS =====
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px;">';
-  html += _kpiCard('Gasto últimos 30 días', fmt$full(gastoMes), deltaMes, nPedidosMes + ' pedidos', sparkMes);
-  html += _kpiCard('Gasto últimos 7 días',  fmt$full(gastoSem), deltaSem, nPedidosSem + ' pedidos', sparkSem);
-  html += _kpiCard('Total histórico', fmt$full(hist.reduce(function(s, h) { return s + (h.total || 0); }, 0)), null, hist.length + ' pedidos', '');
+  html += _kpiCard('Gasto últimos 30 días', fmt$full(gastoMes), deltaMes, nPedidosMes + ' pedidos', sparkMesAnim, { delay: 0, rawValue: gastoMes });
+  html += _kpiCard('Gasto últimos 7 días',  fmt$full(gastoSem), deltaSem, nPedidosSem + ' pedidos', sparkSemAnim, { delay: 1, rawValue: gastoSem });
+  html += _kpiCard('Total histórico', fmt$full(totalHist), null, hist.length + ' pedidos', '', { delay: 2, rawValue: totalHist });
   html += '</div>';
 
   // ===== CHART GASTOS POR SEMANA =====
-  html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:16px;">';
+  html += '<div class="metric-chart-box delay-3" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:16px;">';
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">';
   html += '<h3 style="font-size:14px;margin:0;font-weight:600;">Gastos por semana</h3>';
   html += '<span style="font-size:11px;color:var(--text-muted);">Últimas 8</span>';
   html += '</div>';
-  html += barChart(binsSem.map(function(b) { return { label: b.label, value: b.total }; }), { h: 180, color: '#60a5fa' });
+  html += barChart(binsSem.map(function(b) { return { label: b.label, value: b.total }; }), { h: 180, color: '#60a5fa', animate: true });
   html += '</div>';
 
   // ===== CHART GASTOS POR MES =====
-  html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:24px;">';
+  html += '<div class="metric-chart-box delay-4" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:24px;">';
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">';
   html += '<h3 style="font-size:14px;margin:0;font-weight:600;">Gastos por mes</h3>';
   html += '<span style="font-size:11px;color:var(--text-muted);">Últimos ' + (metricasPeriodo === 'anio' ? 12 : 6) + '</span>';
   html += '</div>';
-  html += barChart(binsMes.map(function(b) { return { label: b.label, value: b.total }; }), { h: 180, color: '#a78bfa' });
+  html += barChart(binsMes.map(function(b) { return { label: b.label, value: b.total }; }), { h: 180, color: '#a78bfa', animate: true });
   html += '</div>';
 
   // ===== TOP 20 PRODUCTOS CON AUMENTO =====
   var tops = topProductosPedidos(20);
   if (tops.length > 0) {
-    html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:18px;">';
+    html += '<div class="metric-chart-box delay-5" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:18px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px;">';
     html += '<div><h3 style="font-size:14px;margin:0 0 2px;font-weight:600;">Aumentos en los más pedidos</h3>';
     html += '<p style="margin:0;font-size:11px;color:var(--text-muted);">Top ' + tops.length + ' productos · Δ% entre primer y último pedido</p></div>';
     html += '</div>';
     html += '<div style="display:flex;flex-direction:column;gap:8px;">';
     tops.forEach(function(p, idx) {
+      // Cada sparkline del top con animación; le agregamos delay según índice
       var spark = sparkline(p.precios.map(function(x) { return x.precio; }), { w: 70, h: 22,
-        color: p.delta > 5 ? '#f87171' : p.delta < -5 ? '#4ade80' : '#94a3b8' });
+        color: p.delta > 5 ? '#f87171' : p.delta < -5 ? '#4ade80' : '#94a3b8', animate: true });
       var deltaCol = p.delta > 5 ? '#f87171' : p.delta < -5 ? '#4ade80' : 'var(--text-muted)';
       var deltaTxt = (p.delta >= 0 ? '+' : '') + p.delta.toFixed(1) + '%';
       var deltaIcon = p.delta > 5 ? '↑' : p.delta < -5 ? '↓' : '→';
-      html += '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;background:var(--bg-elev2);">';
+      // Stagger personalizado para cada fila: 600ms base + 30ms por fila
+      var delay = (600 + idx * 30);
+      html += '<div class="metric-top-row" style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;background:var(--bg-elev2);animation-delay:' + delay + 'ms;">';
       html += '<span style="font-size:11px;color:var(--text-muted);font-family:var(--f-mono);min-width:22px;">' + String(idx + 1).padStart(2, '0') + '</span>';
       html += '<div style="flex:1;min-width:0;">';
       html += '<div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(p.nombre) + '</div>';
@@ -1375,27 +1400,74 @@ function renderMetricas() {
   }
 
   cont.innerHTML = html;
+
+  // Activar count-up de los números KPI
+  _activarCountUpEnTodo(cont);
 }
 
-function _kpiCard(label, value, delta, sub, spark) {
+function _kpiCard(label, value, delta, sub, spark, opts) {
+  opts = opts || {};
   var deltaHtml = '';
   if (delta != null && !isNaN(delta)) {
     var col = delta > 0 ? '#f87171' : delta < 0 ? '#4ade80' : 'var(--text-muted)';
     var sign = delta > 0 ? '+' : '';
     var icon = delta > 0 ? '↑' : delta < 0 ? '↓' : '→';
-    deltaHtml = '<span style="font-size:11px;font-weight:600;color:' + col + ';">' + icon + ' ' + sign + delta.toFixed(1) + '%</span>';
+    deltaHtml = '<span style="font-size:11px;font-weight:600;color:' + col + ';opacity:0;animation:metric-fade-up 0.4s ease ' + (400 + (opts.delay || 0) * 80) + 'ms forwards;">' + icon + ' ' + sign + delta.toFixed(1) + '%</span>';
   }
-  return '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;">' +
+  // Count-up: si nos pasaron un valor numérico raw, lo usamos para animar
+  // desde 0 hasta el valor final. El display arranca en "$0" y JS lo actualiza.
+  var rawValue = opts.rawValue;
+  var startDisplay = (rawValue != null) ? '$0' : value;
+  var dataAttr = (rawValue != null) ? ' data-countup-to="' + rawValue + '" data-countup-delay="' + ((opts.delay || 0) * 80 + 200) + '"' : '';
+  var delayClass = 'delay-' + (opts.delay || 0);
+  return '<div class="metric-card ' + delayClass + '" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;">' +
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">' +
       '<div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.04em;">' + escapeHtml(label) + '</div>' +
       (spark ? '<div style="flex-shrink:0;">' + spark + '</div>' : '') +
     '</div>' +
-    '<div style="font-size:24px;font-weight:700;margin-top:6px;letter-spacing:-0.02em;">' + value + '</div>' +
+    '<div class="metric-number" style="font-size:24px;font-weight:700;margin-top:6px;letter-spacing:-0.02em;"' + dataAttr + '>' + startDisplay + '</div>' +
     '<div style="display:flex;align-items:center;gap:8px;margin-top:4px;">' +
       deltaHtml +
-      '<span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(sub) + '</span>' +
+      '<span style="font-size:11px;color:var(--text-muted);opacity:0;animation:metric-fade-up 0.4s ease ' + (400 + (opts.delay || 0) * 80) + 'ms forwards;">' + escapeHtml(sub) + '</span>' +
     '</div>' +
     '</div>';
+}
+
+// Anima un número desde 0 hasta el valor target, dentro de un elemento.
+// El elemento debe tener data-countup-to (valor numérico).
+function _animateCountUp(el, opts) {
+  if (!el) return;
+  opts = opts || {};
+  var to = parseFloat(el.getAttribute('data-countup-to'));
+  if (isNaN(to)) return;
+  var duration = opts.duration || 1200;
+  var delay = parseInt(el.getAttribute('data-countup-delay') || '0', 10);
+  var prefix = opts.prefix || '$';
+  // Respeta usuario con prefer-reduced-motion: setea directo
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.textContent = prefix + Number(to).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+    return;
+  }
+  setTimeout(function() {
+    var start = null;
+    function step(ts) {
+      if (start === null) start = ts;
+      var p = Math.min(1, (ts - start) / duration);
+      // ease-out cubic
+      var eased = 1 - Math.pow(1 - p, 3);
+      var val = Math.round(to * eased);
+      el.textContent = prefix + Number(val).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }, delay);
+}
+
+// Aplica count-up a todos los elementos con data-countup-to dentro de root.
+function _activarCountUpEnTodo(root) {
+  (root || document).querySelectorAll('[data-countup-to]').forEach(function(el) {
+    _animateCountUp(el);
+  });
 }
 
 // Preview compacta para mostrar abajo del Inicio.
@@ -1420,25 +1492,25 @@ function renderMetricasPreview() {
   });
 
   var binsSem = gastosPorPeriodo('semana', 8);
-  var sparkSem = sparkline(binsSem.map(function(b) { return b.total; }), { w: 110, h: 32, color: '#60a5fa' });
+  var sparkSem = sparkline(binsSem.map(function(b) { return b.total; }), { w: 110, h: 32, color: '#60a5fa', animate: true });
 
   // Mini top 3
   var tops = topProductosPedidos(3);
   var topsHtml = '';
-  tops.forEach(function(p) {
+  tops.forEach(function(p, i) {
     var deltaCol = p.delta > 5 ? '#f87171' : p.delta < -5 ? '#4ade80' : 'var(--text-muted)';
     var deltaTxt = (p.delta >= 0 ? '+' : '') + p.delta.toFixed(0) + '%';
-    topsHtml += '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:11px;">' +
+    topsHtml += '<div class="metric-top-row" style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:11px;animation-delay:' + (300 + i * 80) + 'ms;">' +
       '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">' + escapeHtml(p.nombre) + '</span>' +
       '<span style="color:' + deltaCol + ';font-weight:600;margin-left:8px;">' + deltaTxt + '</span>' +
       '</div>';
   });
 
-  var html = '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;">' +
+  var html = '<div class="metric-card delay-0" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;">' +
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">' +
       '<div>' +
         '<div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Tus métricas</div>' +
-        '<div style="font-size:22px;font-weight:700;letter-spacing:-0.02em;">' + fmt$full(gastoMes) + '</div>' +
+        '<div class="metric-number" style="font-size:22px;font-weight:700;letter-spacing:-0.02em;" data-countup-to="' + gastoMes + '" data-countup-delay="200">$0</div>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">últimos 30 días · ' + nPedidosMes + ' pedidos</div>' +
       '</div>' +
       '<div style="flex-shrink:0;">' + sparkSem + '</div>' +
@@ -1446,10 +1518,13 @@ function renderMetricasPreview() {
     (topsHtml ? '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px;">' +
       '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">Aumentos top 3</div>' +
       topsHtml + '</div>' : '') +
-    '<button onclick="cambiarTab(\'metricas\')" style="width:100%;background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:9px 14px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Ir a métricas →</button>' +
+    '<button onclick="cambiarTab(\'metricas\')" style="width:100%;background:transparent;border:1px solid var(--border-hi);color:var(--text);padding:9px 14px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 0.2s ease;">Ir a métricas →</button>' +
   '</div>';
 
   cont.innerHTML = html;
+
+  // Activar count-up del número
+  _activarCountUpEnTodo(cont);
 }
 
 // ============================================================

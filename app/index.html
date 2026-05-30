@@ -1607,6 +1607,7 @@ function guardarRecepcion(definitivo) {
   hist[idx].faltantes       = faltantes;
   hist[idx].cambios         = cambios;
   histSet(hist);
+  syncPedidoRemoto(hist[idx]).catch(function() {});
 
   cerrarModalRecepcionar();
   renderHistorial();
@@ -5191,6 +5192,127 @@ function histGet() {
 }
 function histSet(v) { localStorage.setItem(getHistKey(), JSON.stringify(v)); }
 
+// ============================================================
+// SINCRONIZACIÓN DE HISTORIAL CON SUPABASE
+// ============================================================
+// El historial vive en localStorage (rápido) PERO se sincroniza con la tabla
+// `historial_pedidos` de Supabase para que entre dispositivos funcione.
+// Al login → cargarHistorialRemoto() trae todo y sobreescribe local.
+// En cada cambio → syncPedidoRemoto() / syncBorrarPedidoRemoto() actualizan
+// el server en background (no awaiteamos; si falla, queda solo local).
+
+function _uuid() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  // Fallback: pseudo-uuid v4 manual
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+// Convierte un pedido del historial local al formato de la tabla.
+function _pedidoARow(p, userId) {
+  return {
+    id: p.id,
+    user_id: userId,
+    fecha: new Date(p.timestamp || Date.now()).toISOString(),
+    fecha_str: p.fecha || '',
+    timestamp_ms: p.timestamp || Date.now(),
+    total: p.total || 0,
+    items: p.items || [],
+    ediciones: p.editCount || 0,
+    edit_count: p.editCount || 0,
+    ultima_edicion: p.ultimaEdicion ? new Date(p.ultimaEdicion).toISOString() : null,
+    recepcionado: !!p.recepcionado,
+    fecha_recepcion: p.fechaRecepcion ? new Date(p.fechaRecepcion).toISOString() : null,
+    faltantes: p.faltantes || [],
+    cambios: p.cambios || [],
+    creado_por: p.creado_por_uid || null,
+    editado_por: p.editado_por_uid || null
+  };
+}
+
+// Convierte una row de Supabase a la shape local
+function _rowAPedido(r) {
+  return {
+    id: r.id,
+    fecha: r.fecha_str || (r.fecha ? new Date(r.fecha).toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : ''),
+    timestamp: r.timestamp_ms || (r.fecha ? new Date(r.fecha).getTime() : Date.now()),
+    items: r.items || [],
+    total: r.total || 0,
+    editCount: r.edit_count || r.ediciones || 0,
+    ultimaEdicion: r.ultima_edicion ? new Date(r.ultima_edicion).getTime() : null,
+    recepcionado: !!r.recepcionado,
+    fechaRecepcion: r.fecha_recepcion ? new Date(r.fecha_recepcion).getTime() : null,
+    faltantes: r.faltantes || [],
+    cambios: r.cambios || [],
+    creado_por_uid: r.creado_por || null,
+    editado_por_uid: r.editado_por || null
+  };
+}
+
+// Sube un pedido individual (UPSERT por id). No awaitar en el caller, mejor
+// con .catch para no romper el flujo si Supabase falla.
+async function syncPedidoRemoto(pedido) {
+  var uid = effectiveUserId();
+  if (!uid || !pedido || !pedido.id) return;
+  try {
+    var row = _pedidoARow(pedido, uid);
+    var r = await supabase.from('historial_pedidos').upsert(row, { onConflict: 'id' });
+    if (r.error) console.warn('[Historial] upsert error:', r.error.message);
+  } catch(e) { console.warn('[Historial] excepción upsert:', e); }
+}
+
+// Borra un pedido remoto por id.
+async function syncBorrarPedidoRemoto(id) {
+  if (!id) return;
+  try {
+    var r = await supabase.from('historial_pedidos').delete().eq('id', id);
+    if (r.error) console.warn('[Historial] delete error:', r.error.message);
+  } catch(e) { console.warn('[Historial] excepción delete:', e); }
+}
+
+// Carga el historial completo desde Supabase y lo mergea con local.
+// Estrategia: el servidor es la fuente de verdad. Si hay pedidos solo en
+// local (recién creados, no llegaron a sincronizar), los conservamos y
+// los empujamos al servidor.
+async function cargarHistorialRemoto() {
+  var uid = effectiveUserId();
+  if (!uid) return;
+  try {
+    var r = await supabase
+      .from('historial_pedidos')
+      .select('*')
+      .eq('user_id', uid)
+      .order('timestamp_ms', { ascending: false })
+      .limit(200);
+    if (r.error) {
+      // Si la tabla no tiene las columnas nuevas, el query falla → no rompemos
+      console.warn('[Historial] No se pudo cargar de Supabase:', r.error.message);
+      return;
+    }
+    var remotos = (r.data || []).map(_rowAPedido);
+    var idsRemotos = {};
+    remotos.forEach(function(p) { idsRemotos[p.id] = true; });
+    // Conservar pedidos locales que NO están en el server (recién creados,
+    // sin sync exitosa). Los empujamos en background.
+    var locales = histGet();
+    var localesHuerfanos = locales.filter(function(p) { return p.id && !idsRemotos[p.id]; });
+    var merged = remotos.concat(localesHuerfanos);
+    // Ordenar por timestamp desc por las dudas
+    merged.sort(function(a, b) { return (b.timestamp || 0) - (a.timestamp || 0); });
+    // Sobreescribir local con la verdad mergeada
+    histSet(merged);
+    // Re-empujar huérfanos al server
+    localesHuerfanos.forEach(function(p) {
+      syncPedidoRemoto(p).catch(function() {});
+    });
+    console.log('[Historial] cargados', remotos.length, 'pedidos remotos · ' + localesHuerfanos.length + ' locales pendientes');
+  } catch(e) {
+    console.warn('[Historial] excepción cargando:', e);
+  }
+}
+
 function formatPrecio(n) {
   if (n == null || isNaN(n)) return '0,00';
   return Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -5913,15 +6035,22 @@ function confirmarPedido() {
     if (idx >= 0) {
       var prev = hist[idx];
       var nuevoEditCount = (prev.editCount || 0) + 1;
-      hist[idx] = {
+      var pedidoEditado = {
         id: prev.id, fecha: prev.fecha, timestamp: prev.timestamp,
         items: items, total: items.reduce(function(s, it) { return s + it.subtotal; }, 0),
         editCount: nuevoEditCount, ultimaEdicion: Date.now(),
         recepcionado: prev.recepcionado !== undefined ? prev.recepcionado : false,
+        faltantes: prev.faltantes || [],
+        cambios: prev.cambios || [],
+        fechaRecepcion: prev.fechaRecepcion || null,
         creado_por: prev.creado_por || quienSoy(),  // preservamos quien lo creó originalmente
-        editado_por: quienSoy()
+        editado_por: quienSoy(),
+        creado_por_uid: prev.creado_por_uid || (sesion && sesion.user && sesion.user.id) || null,
+        editado_por_uid: (sesion && sesion.user && sesion.user.id) || null
       };
+      hist[idx] = pedidoEditado;
       histSet(hist);
+      syncPedidoRemoto(pedidoEditado).catch(function() {});
       pedidoSet({ items: {} });
       actualizarBadgePedido();
       renderHistorial();
@@ -5931,17 +6060,22 @@ function confirmarPedido() {
     }
   }
 
-  hist.unshift({
-    id: Date.now().toString() + Math.random().toString(36).slice(2, 5),
+  var pedidoNuevo = {
+    id: _uuid(),
     fecha: new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
     timestamp: Date.now(),
     items: items,
     total: items.reduce(function(s, it) { return s + it.subtotal; }, 0),
     recepcionado: false,
-    creado_por: quienSoy()
-  });
+    faltantes: [],
+    cambios: [],
+    creado_por: quienSoy(),
+    creado_por_uid: (sesion && sesion.user && sesion.user.id) || null
+  };
+  hist.unshift(pedidoNuevo);
   if (hist.length > 100) hist = hist.slice(0, 100);
   histSet(hist);
+  syncPedidoRemoto(pedidoNuevo).catch(function() {});
   pedidoSet({ items: {} });
   actualizarBadgePedido();
   renderHistorial();
@@ -6187,6 +6321,7 @@ function borrarPedidoHist(histId) {
   if (!confirm('¿Eliminar este pedido del historial?')) return;
   var hist = histGet().filter(function(x) { return x.id !== histId; });
   histSet(hist);
+  syncBorrarPedidoRemoto(histId).catch(function() {});
   renderHistorial();
   showToast('Pedido eliminado');
 }
@@ -6225,6 +6360,12 @@ function escapeHtml(s) {
     aplicarPermisosUI(); // esconder tabs/menu según rol y permisos
     await cargarProveedores();
     await cargarListas();
+    // Sincronizar historial desde Supabase (multi-device).
+    // No bloquea el render: si falla, lo local sigue funcionando.
+    cargarHistorialRemoto().then(function() {
+      renderHistorial();
+      renderIngreso();
+    }).catch(function() {});
     renderHistorial();
     actualizarBadgePedido();
     renderIngreso();

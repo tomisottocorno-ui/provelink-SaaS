@@ -47,6 +47,10 @@
         <span class="icon-slot" data-icon="file"></span>
         <span>Pedidos</span>
       </button>
+      <button class="sidebar-link" data-tab="calendario" onclick="cambiarTab('calendario')" id="side-link-calendario">
+        <span class="icon-slot" data-icon="calendar"></span>
+        <span>Calendario</span>
+      </button>
       <button class="sidebar-link" data-tab="metricas" onclick="cambiarTab('metricas')" id="side-link-metricas">
         <span class="icon-slot" data-icon="chart"></span>
         <span>Métricas</span>
@@ -93,6 +97,7 @@
       <button class="tab-btn" data-tab="listas" onclick="cambiarTab('listas')">Listas</button>
       <button class="tab-btn" data-tab="pedido" onclick="cambiarTab('pedido')">Pedido</button>
       <button class="tab-btn" data-tab="historial" onclick="cambiarTab('historial')">Pedidos</button>
+      <button class="tab-btn" data-tab="calendario" onclick="cambiarTab('calendario')">Calendario</button>
       <button class="tab-btn" data-tab="metricas" onclick="cambiarTab('metricas')">Métricas</button>
     </div>
 
@@ -134,6 +139,21 @@
       </div>
       <div id="ingreso-pendientes" style="margin-top:24px;"></div>
       <div id="ingreso-metricas-preview" style="margin-top:24px;"></div>
+    </div>
+
+    <!-- ============ TAB: CALENDARIO ============ -->
+    <div class="tab-section" id="tab-calendario">
+      <div class="seccion-titulo">
+        <h2>Calendario de pedidos</h2>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button class="btn" onclick="cambiarMesCalendario(-1)" title="Mes anterior" style="font-size:14px;padding:6px 10px;">‹</button>
+          <span id="cal-mes-titulo" style="font-size:14px;font-weight:600;min-width:130px;text-align:center;">—</span>
+          <button class="btn" onclick="cambiarMesCalendario(1)" title="Mes siguiente" style="font-size:14px;padding:6px 10px;">›</button>
+          <button class="btn" onclick="irMesActual()" title="Hoy" style="font-size:12px;padding:6px 12px;margin-left:6px;">Hoy</button>
+        </div>
+      </div>
+      <div id="cal-resumen" style="margin-bottom:16px;"></div>
+      <div id="cal-grid"></div>
     </div>
 
     <!-- ============ TAB: MÉTRICAS ============ -->
@@ -520,6 +540,46 @@
       <button class="btn" onclick="cerrarModalRecepcionar()">Cancelar</button>
       <button class="btn" onclick="guardarRecepcion(false)" style="border-color:var(--emerald);color:var(--emerald);"><span class="icon-slot" data-icon="save"></span> Guardar</button>
       <button class="btn primary" onclick="guardarRecepcion(true)"><span class="icon-slot" data-icon="checkCircle"></span> Guardar definitivamente</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal gestión de un día del calendario -->
+<div class="modal-overlay modal-lg" id="modal-cal-dia" style="display:none;">
+  <div class="modal">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px;">
+      <div>
+        <h3 id="modal-cal-titulo" style="margin:0;">—</h3>
+        <div id="modal-cal-subtitulo" style="font-size:12px;color:var(--text-muted);margin-top:2px;"></div>
+      </div>
+      <button onclick="cerrarModalDia()" style="background:transparent;border:none;color:var(--text-muted);cursor:pointer;padding:4px;line-height:1;"><span class="icon-slot" data-icon="x"></span></button>
+    </div>
+
+    <!-- Productos ya planificados para este día -->
+    <div id="modal-cal-items" style="margin-bottom:14px;"></div>
+
+    <!-- Buscador para agregar más productos -->
+    <div class="buscador-wrap" style="margin-bottom:10px;">
+      <span class="icon-slot" data-icon="search"></span>
+      <input type="text" class="buscador" id="modal-cal-buscar" placeholder="Buscar producto para agregar..." oninput="renderBuscarModalCal()">
+    </div>
+    <div id="modal-cal-resultados" style="max-height:32vh;overflow-y:auto;margin-bottom:14px;"></div>
+
+    <!-- Repetición -->
+    <div id="modal-cal-repetir" style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:12px;display:none;">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">Repetir este plan</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn" onclick="aplicarRepeticion(1)" style="font-size:12px;padding:7px 12px;"><span class="icon-slot" data-icon="repeat"></span> Cada semana</button>
+        <button class="btn" onclick="aplicarRepeticion(2)" style="font-size:12px;padding:7px 12px;"><span class="icon-slot" data-icon="repeat"></span> Cada 2 semanas</button>
+        <button class="btn" onclick="aplicarRepeticion(4)" style="font-size:12px;padding:7px 12px;"><span class="icon-slot" data-icon="repeat"></span> Cada 4 semanas</button>
+      </div>
+      <div style="font-size:10.5px;color:var(--text-muted);margin-top:8px;">Se aplica a los próximos 3 meses. Podés editar o cancelar la serie desde cualquier día.</div>
+    </div>
+
+    <div class="modal-actions" style="flex-wrap:wrap;gap:8px;">
+      <button class="btn" onclick="cerrarModalDia()">Cerrar</button>
+      <button class="btn" id="btn-cal-borrar-dia" onclick="borrarDiaCalendario()" style="border-color:var(--danger-border);color:var(--danger);display:none;"><span class="icon-slot" data-icon="trash"></span> Borrar día</button>
+      <button class="btn primary" id="btn-cal-ejecutar" onclick="convertirDiaEnPedido()" style="display:none;"><span class="icon-slot" data-icon="cart"></span> Hacer pedido</button>
     </div>
   </div>
 </div>
@@ -1470,6 +1530,531 @@ function _activarCountUpEnTodo(root) {
   });
 }
 
+// ============================================================
+// CALENDARIO DE PEDIDOS PROGRAMADOS
+// ============================================================
+// El usuario arma un plan mensual: en cada día puede agregar productos
+// que va a pedir. Si se repite, marca "cada N semanas" y se replica.
+// Solo plan Max. Sync con tabla `pedidos_programados` de Supabase.
+//
+// Estado:
+//   _calFecha → primer día del mes visible (Date a las 00:00 del día 1)
+//   _calMap   → cache local { 'YYYY-MM-DD': { id, items, total, ... } }
+//   _calDiaEditando → fecha ISO del día que se está editando en el modal
+
+var _calFecha = new Date();
+_calFecha.setDate(1); _calFecha.setHours(0, 0, 0, 0);
+var _calMap = {};
+var _calDiaEditando = null;
+
+function _isoDate(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function _parseIsoDate(iso) {
+  var p = iso.split('-');
+  return new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+}
+function _nombreMesLargo(d) {
+  var meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+               'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+  return meses[d.getMonth()] + ' ' + d.getFullYear();
+}
+function _nombreDiaCorto(d) {
+  var dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+  return dias[d.getDay()];
+}
+
+function calendarioPermitido() {
+  var planActual = (profile && profile.plan) || 'free';
+  return !!(LIMITES[planActual] && LIMITES[planActual].metricas);  // mismo gating que métricas (Max)
+}
+
+// Mapper local <-> Supabase
+function _calPedidoARow(d, userId) {
+  return {
+    id: d.id,
+    user_id: userId,
+    fecha: d.fecha,
+    items: d.items || [],
+    total: d.total || 0,
+    notas: d.notas || null,
+    serie_id: d.serie_id || null,
+    cada_n_semanas: d.cada_n_semanas || null,
+    serie_hasta: d.serie_hasta || null,
+    ejecutado: !!d.ejecutado,
+    ejecutado_en: d.ejecutado_en ? new Date(d.ejecutado_en).toISOString() : null,
+    creado_por: d.creado_por || ((sesion && sesion.user && sesion.user.id) || null),
+    editado_por: (sesion && sesion.user && sesion.user.id) || null,
+    actualizado: new Date().toISOString()
+  };
+}
+function _calRowAPedido(r) {
+  return {
+    id: r.id,
+    fecha: r.fecha,
+    items: r.items || [],
+    total: r.total || 0,
+    notas: r.notas || null,
+    serie_id: r.serie_id || null,
+    cada_n_semanas: r.cada_n_semanas || null,
+    serie_hasta: r.serie_hasta || null,
+    ejecutado: !!r.ejecutado,
+    ejecutado_en: r.ejecutado_en ? new Date(r.ejecutado_en).getTime() : null,
+    creado_por: r.creado_por || null
+  };
+}
+
+async function syncCalDiaRemoto(dia) {
+  var uid = effectiveUserId();
+  if (!uid || !dia || !dia.id) return;
+  try {
+    var row = _calPedidoARow(dia, uid);
+    var r = await supabase.from('pedidos_programados').upsert(row, { onConflict: 'id' });
+    if (r.error) console.warn('[Calendario] upsert error:', r.error.message);
+  } catch(e) { console.warn('[Calendario] excepción upsert:', e); }
+}
+async function syncBorrarCalDiaRemoto(id) {
+  if (!id) return;
+  try {
+    var r = await supabase.from('pedidos_programados').delete().eq('id', id);
+    if (r.error) console.warn('[Calendario] delete error:', r.error.message);
+  } catch(e) { console.warn('[Calendario] excepción delete:', e); }
+}
+
+// Carga el calendario del mes visible (+ buffer de 1 mes a cada lado por
+// si una serie se extiende). Sobreescribe el cache local.
+async function cargarCalendarioRemoto() {
+  if (!calendarioPermitido()) return;
+  var uid = effectiveUserId();
+  if (!uid) return;
+  // Ventana: mes anterior, actual y los 4 siguientes (cubre repeticiones)
+  var inicio = new Date(_calFecha); inicio.setMonth(inicio.getMonth() - 1);
+  var fin    = new Date(_calFecha); fin.setMonth(fin.getMonth() + 4);
+  try {
+    var r = await supabase
+      .from('pedidos_programados')
+      .select('*')
+      .eq('user_id', uid)
+      .gte('fecha', _isoDate(inicio))
+      .lte('fecha', _isoDate(fin))
+      .order('fecha', { ascending: true });
+    if (r.error) {
+      console.warn('[Calendario] No se pudo cargar:', r.error.message);
+      return;
+    }
+    _calMap = {};
+    (r.data || []).forEach(function(row) {
+      var d = _calRowAPedido(row);
+      _calMap[d.fecha] = d;
+    });
+    console.log('[Calendario] cargados', Object.keys(_calMap).length, 'días');
+  } catch(e) { console.warn('[Calendario] excepción:', e); }
+}
+
+function cambiarMesCalendario(delta) {
+  _calFecha.setMonth(_calFecha.getMonth() + delta);
+  cargarCalendarioRemoto().then(function() { renderCalendario(); });
+}
+function irMesActual() {
+  _calFecha = new Date(); _calFecha.setDate(1); _calFecha.setHours(0, 0, 0, 0);
+  cargarCalendarioRemoto().then(function() { renderCalendario(); });
+}
+
+function renderCalendario() {
+  if (!calendarioPermitido()) {
+    var cont0 = $('cal-grid');
+    if (cont0) cont0.innerHTML = '<div class="empty"><div class="empty-emoji">' + Icon.lock() + '</div><div class="empty-title">Disponible en plan Max</div><div class="empty-sub">El calendario de pedidos programados es parte del plan Max.</div></div>';
+    var res0 = $('cal-resumen'); if (res0) res0.innerHTML = '';
+    var tit0 = $('cal-mes-titulo'); if (tit0) tit0.textContent = '—';
+    return;
+  }
+
+  var tit = $('cal-mes-titulo');
+  if (tit) tit.textContent = _nombreMesLargo(_calFecha);
+
+  var grid = $('cal-grid');
+  if (!grid) return;
+
+  var year = _calFecha.getFullYear();
+  var month = _calFecha.getMonth();
+  var primerDia = new Date(year, month, 1);
+  var diaSemana = primerDia.getDay(); // 0=dom, 1=lun, ..., 6=sab
+  // Queremos empezar el grid en LUNES → ajustar: offset = (diaSemana + 6) % 7
+  var offsetInicial = (diaSemana + 6) % 7;
+  var diasEnMes = new Date(year, month + 1, 0).getDate();
+  var hoyIso = _isoDate(new Date());
+
+  var html = '<div class="cal-grid">';
+  ['L', 'M', 'X', 'J', 'V', 'S', 'D'].forEach(function(d) {
+    html += '<div class="cal-head">' + d + '</div>';
+  });
+
+  // Celdas vacías al inicio
+  for (var i = 0; i < offsetInicial; i++) {
+    html += '<div class="cal-day empty"></div>';
+  }
+
+  var totalMes = 0;
+  var diasConPlan = 0;
+
+  for (var dnum = 1; dnum <= diasEnMes; dnum++) {
+    var d = new Date(year, month, dnum);
+    var iso = _isoDate(d);
+    var plan = _calMap[iso];
+    var esHoy = (iso === hoyIso);
+    var clases = 'cal-day';
+    if (esHoy) clases += ' today';
+    if (plan && plan.items && plan.items.length > 0) {
+      clases += ' has-plan';
+      if (plan.serie_id) clases += ' serie';
+    }
+    var resumen = '';
+    var totalDia = '';
+    if (plan && plan.items && plan.items.length > 0) {
+      totalMes += plan.total || 0;
+      diasConPlan++;
+      // Mostrar primer item + "y N más"
+      var primerItem = plan.items[0].productoLista || '';
+      resumen = escapeHtml(primerItem.length > 18 ? primerItem.slice(0, 18) + '…' : primerItem);
+      if (plan.items.length > 1) {
+        resumen += ' <span style="opacity:0.7;">+' + (plan.items.length - 1) + '</span>';
+      }
+      totalDia = '$' + Number(plan.total || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+    }
+    var serieIcon = (plan && plan.serie_id)
+      ? '<span class="day-serie-icon" title="Parte de una serie recurrente">' + Icon.repeat({ size: 11 }) + '</span>'
+      : '';
+    html += '<div class="' + clases + '" onclick="abrirModalDiaCalendario(\'' + iso + '\')">' +
+      serieIcon +
+      '<div class="day-num">' + dnum + '</div>' +
+      '<div class="day-items">' + resumen + '</div>' +
+      '<div class="day-total ' + (totalDia ? '' : 'muted') + '">' + (totalDia || '+') + '</div>' +
+    '</div>';
+  }
+
+  // Celdas vacías al final para completar la última fila
+  var totalCeldas = offsetInicial + diasEnMes;
+  var sobrante = (7 - (totalCeldas % 7)) % 7;
+  for (var j = 0; j < sobrante; j++) {
+    html += '<div class="cal-day empty"></div>';
+  }
+  html += '</div>';
+  grid.innerHTML = html;
+
+  // Resumen del mes
+  var resHtml = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;padding:14px 18px;">';
+  resHtml += '<div>';
+  resHtml += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">Total programado del mes</div>';
+  resHtml += '<div style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin-top:2px;">$' + Number(totalMes).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</div>';
+  resHtml += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + diasConPlan + ' día' + (diasConPlan !== 1 ? 's' : '') + ' con plan</div>';
+  resHtml += '</div>';
+  resHtml += '<div style="font-size:11px;color:var(--text-muted);text-align:right;max-width:240px;">Tocá cualquier día para programar un pedido. Si pedís lo mismo todas las semanas, marcá <strong>Repetir</strong>.</div>';
+  resHtml += '</div>';
+  $('cal-resumen').innerHTML = resHtml;
+}
+
+// ============================================================
+// MODAL DEL DÍA — agregar/quitar productos, repetir, ejecutar
+// ============================================================
+
+function abrirModalDiaCalendario(iso) {
+  if (!calendarioPermitido()) return;
+  _calDiaEditando = iso;
+  var d = _parseIsoDate(iso);
+  var fechaTxt = d.getDate() + ' de ' + _nombreMesLargo(d).split(' ')[0].toLowerCase() + ' de ' + d.getFullYear();
+  $('modal-cal-titulo').textContent = _nombreDiaCorto(d) + ', ' + fechaTxt;
+  var plan = _calMap[iso];
+  var subt = '';
+  if (plan && plan.serie_id) {
+    subt = 'Parte de una serie · cada ' + plan.cada_n_semanas + ' semana' + (plan.cada_n_semanas !== 1 ? 's' : '');
+  } else if (plan && plan.items && plan.items.length > 0) {
+    subt = 'Plan único · sin repetición';
+  } else {
+    subt = 'Sin plan todavía';
+  }
+  $('modal-cal-subtitulo').textContent = subt;
+  $('modal-cal-buscar').value = '';
+  _renderItemsDelDia(iso);
+  _renderResultadosModalCal('');
+  document.getElementById('modal-cal-dia').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  pintarIconosEstaticos(document.getElementById('modal-cal-dia'));
+}
+
+function cerrarModalDia() {
+  document.getElementById('modal-cal-dia').style.display = 'none';
+  document.body.style.overflow = '';
+  _calDiaEditando = null;
+}
+
+function _renderItemsDelDia(iso) {
+  var cont = $('modal-cal-items');
+  var plan = _calMap[iso];
+  var items = (plan && plan.items) || [];
+  var btnBorrar = $('btn-cal-borrar-dia');
+  var btnEjec = $('btn-cal-ejecutar');
+  var repetirBox = $('modal-cal-repetir');
+  if (items.length === 0) {
+    cont.innerHTML = '<div style="background:var(--bg-elev2);border:1px dashed var(--border-hi);border-radius:10px;padding:12px 14px;font-size:12px;color:var(--text-muted);text-align:center;">Sin productos. Buscá y agregá los que vas a pedir este día.</div>';
+    if (btnBorrar) btnBorrar.style.display = 'none';
+    if (btnEjec) btnEjec.style.display = 'none';
+    if (repetirBox) repetirBox.style.display = 'none';
+    return;
+  }
+  var total = 0;
+  var html = '<div style="background:var(--bg-elev2);border:1px solid var(--border);border-radius:10px;padding:6px 0;">';
+  items.forEach(function(it, idx) {
+    total += it.subtotal || (it.precio * it.qty) || 0;
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);">';
+    html += '<div style="flex:1;min-width:0;font-size:12px;">';
+    html += '<div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(it.productoLista || '') + '</div>';
+    html += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:1px;">' + (it.qty || 1) + ' × $' + Number(it.precio || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + ' · ' + escapeHtml(it.proveedor || '') + '</div>';
+    html += '</div>';
+    html += '<div style="font-size:12px;font-weight:600;white-space:nowrap;">$' + Number((it.subtotal || it.precio * it.qty || 0)).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</div>';
+    html += '<button onclick="quitarItemDiaCal(' + idx + ')" style="background:transparent;border:none;color:var(--danger);cursor:pointer;padding:4px;line-height:1;">' + Icon.trash({ size: 14 }) + '</button>';
+    html += '</div>';
+  });
+  html += '<div style="display:flex;justify-content:space-between;padding:9px 12px;font-size:13px;font-weight:600;background:var(--bg-elev);"><span>Total del día</span><span>$' + Number(total).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</span></div>';
+  html += '</div>';
+  cont.innerHTML = html;
+  if (btnBorrar) btnBorrar.style.display = '';
+  if (btnEjec) btnEjec.style.display = '';
+  if (repetirBox) repetirBox.style.display = '';
+}
+
+function renderBuscarModalCal() {
+  var q = ($('modal-cal-buscar').value || '').trim();
+  _renderResultadosModalCal(q);
+}
+
+function _renderResultadosModalCal(q) {
+  var cont = $('modal-cal-resultados');
+  if (!q) {
+    cont.innerHTML = '<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:14px 0;">Escribí para buscar entre tus listas.</div>';
+    return;
+  }
+  var resultados = buscarEnListas(q, expandirQueryLocal(q));
+  if (!resultados.length) {
+    cont.innerHTML = '<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:14px 0;">Sin resultados para "' + escapeHtml(q) + '".</div>';
+    return;
+  }
+  // Limitar a 12 resultados
+  resultados = resultados.slice(0, 12);
+  var html = '';
+  resultados.forEach(function(it, idx) {
+    var precio = Number(it.precio || 0);
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-elev2);margin-bottom:5px;">';
+    html += '<div style="flex:1;min-width:0;font-size:12px;">';
+    html += '<div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(it.productoLista) + '</div>';
+    html += '<div style="font-size:10.5px;color:var(--text-muted);">' + escapeHtml(it.proveedor) + ' · $' + Number(precio).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</div>';
+    html += '</div>';
+    html += '<input type="number" min="1" value="1" id="cal-qty-' + idx + '" style="width:50px;padding:5px 7px;border:1px solid var(--border-hi);border-radius:6px;background:var(--bg-elev);color:var(--text);font-size:12px;text-align:right;">';
+    html += '<button onclick="agregarItemAlDiaCal(\'' + escapeHtmlAttr(it.itemId) + '\', ' + idx + ')" class="btn primary" style="font-size:11px;padding:5px 10px;">+ Agregar</button>';
+    html += '</div>';
+  });
+  cont.innerHTML = html;
+}
+
+function agregarItemAlDiaCal(itemId, idx) {
+  if (!_calDiaEditando) return;
+  var qty = parseInt(($('cal-qty-' + idx) || {}).value || '1', 10);
+  if (!qty || qty < 1) qty = 1;
+  // Buscar el item en las listas activas
+  var info = todosLosItems().find(function(t) { return t.itemId === itemId; });
+  if (!info) { showToast('Producto no encontrado', 'error'); return; }
+  var iso = _calDiaEditando;
+  var plan = _calMap[iso];
+  if (!plan) {
+    plan = {
+      id: _uuid(),
+      fecha: iso,
+      items: [],
+      total: 0,
+      ejecutado: false,
+      creado_por: (sesion && sesion.user && sesion.user.id) || null
+    };
+    _calMap[iso] = plan;
+  }
+  // Si el mismo item ya está, suma la cantidad
+  var existente = plan.items.find(function(x) { return x.itemId === itemId; });
+  if (existente) {
+    existente.qty += qty;
+    existente.subtotal = existente.precio * existente.qty;
+  } else {
+    plan.items.push({
+      itemId: itemId,
+      productoLista: info.productoLista,
+      qty: qty,
+      precio: info.precio,
+      proveedor: info.proveedor,
+      proveedorId: info.proveedorId,
+      unidad: info.unidad || '',
+      subtotal: info.precio * qty
+    });
+  }
+  plan.total = plan.items.reduce(function(s, x) { return s + (x.subtotal || 0); }, 0);
+  syncCalDiaRemoto(plan).catch(function() {});
+  _renderItemsDelDia(iso);
+  // Si es parte de una serie, sugerir editar la serie
+  if (plan.serie_id) {
+    showToast('Item agregado a este día. Para propagar a la serie, usá los botones de repetición.', 'info');
+  }
+  renderCalendario();
+}
+
+function quitarItemDiaCal(idx) {
+  if (!_calDiaEditando) return;
+  var iso = _calDiaEditando;
+  var plan = _calMap[iso];
+  if (!plan || !plan.items) return;
+  plan.items.splice(idx, 1);
+  plan.total = plan.items.reduce(function(s, x) { return s + (x.subtotal || 0); }, 0);
+  if (plan.items.length === 0) {
+    // Borrar el día entero si quedó vacío
+    syncBorrarCalDiaRemoto(plan.id).catch(function() {});
+    delete _calMap[iso];
+  } else {
+    syncCalDiaRemoto(plan).catch(function() {});
+  }
+  _renderItemsDelDia(iso);
+  renderCalendario();
+}
+
+// Replica el plan del día actual cada N semanas durante los próximos 3 meses
+async function aplicarRepeticion(cadaNSemanas) {
+  if (!_calDiaEditando) return;
+  var iso = _calDiaEditando;
+  var plan = _calMap[iso];
+  if (!plan || !plan.items || plan.items.length === 0) {
+    showToast('Agregá productos antes de programar la repetición', 'error');
+    return;
+  }
+  if (!confirm('Replicar este plan cada ' + cadaNSemanas + ' semana' + (cadaNSemanas !== 1 ? 's' : '') + ' por 3 meses?')) return;
+
+  var serieId = plan.serie_id || _uuid();
+  var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  var hasta = new Date(hoy); hasta.setMonth(hasta.getMonth() + 3);
+  var hastaIso = _isoDate(hasta);
+
+  // Marcar el plan original como parte de la serie
+  plan.serie_id = serieId;
+  plan.cada_n_semanas = cadaNSemanas;
+  plan.serie_hasta = hastaIso;
+  syncCalDiaRemoto(plan).catch(function() {});
+
+  // Generar copias
+  var origen = _parseIsoDate(iso);
+  var generados = 0;
+  var fecha = new Date(origen);
+  fecha.setDate(fecha.getDate() + 7 * cadaNSemanas);
+  while (fecha <= hasta) {
+    var isoCopia = _isoDate(fecha);
+    var existente = _calMap[isoCopia];
+    if (!existente) {
+      // Crear copia nueva
+      var copia = {
+        id: _uuid(),
+        fecha: isoCopia,
+        items: plan.items.map(function(it) {
+          return Object.assign({}, it);
+        }),
+        total: plan.total,
+        serie_id: serieId,
+        cada_n_semanas: cadaNSemanas,
+        serie_hasta: hastaIso,
+        ejecutado: false,
+        creado_por: (sesion && sesion.user && sesion.user.id) || null
+      };
+      _calMap[isoCopia] = copia;
+      await syncCalDiaRemoto(copia).catch(function() {});
+      generados++;
+    }
+    fecha.setDate(fecha.getDate() + 7 * cadaNSemanas);
+  }
+
+  showToast('Serie creada · ' + generados + ' días replicados', 'ok');
+  // Actualizar el subtítulo del modal
+  $('modal-cal-subtitulo').textContent = 'Parte de una serie · cada ' + cadaNSemanas + ' semana' + (cadaNSemanas !== 1 ? 's' : '');
+  renderCalendario();
+}
+
+function borrarDiaCalendario() {
+  if (!_calDiaEditando) return;
+  var iso = _calDiaEditando;
+  var plan = _calMap[iso];
+  if (!plan) return;
+
+  // Si es parte de una serie, preguntar
+  if (plan.serie_id) {
+    var rta = prompt('Este día es parte de una serie recurrente.\n\nEscribí:\n  "solo" → para borrar solo este día\n  "serie" → para cancelar toda la serie (todos los días futuros)\n  cualquier otra cosa → cancelar', 'solo');
+    if (rta === 'solo') {
+      syncBorrarCalDiaRemoto(plan.id).catch(function() {});
+      delete _calMap[iso];
+      showToast('Día borrado', 'ok');
+    } else if (rta === 'serie') {
+      // Borrar todos los días con el mismo serie_id desde HOY hacia adelante
+      var hoyIso = _isoDate(new Date());
+      var borrados = 0;
+      Object.keys(_calMap).forEach(function(k) {
+        var p = _calMap[k];
+        if (p.serie_id === plan.serie_id && k >= hoyIso) {
+          syncBorrarCalDiaRemoto(p.id).catch(function() {});
+          delete _calMap[k];
+          borrados++;
+        }
+      });
+      showToast('Serie cancelada · ' + borrados + ' días borrados', 'ok');
+    } else {
+      return;
+    }
+  } else {
+    if (!confirm('Borrar el plan de este día?')) return;
+    syncBorrarCalDiaRemoto(plan.id).catch(function() {});
+    delete _calMap[iso];
+    showToast('Día borrado', 'ok');
+  }
+  cerrarModalDia();
+  renderCalendario();
+}
+
+// Pre-carga el plan del día en "Armar pedido" para que el usuario confirme
+function convertirDiaEnPedido() {
+  if (!_calDiaEditando) return;
+  var plan = _calMap[_calDiaEditando];
+  if (!plan || !plan.items || plan.items.length === 0) return;
+
+  var ped = pedidoGet();
+  if (ped.items && Object.keys(ped.items).filter(function(k) { return ped.items[k].qty; }).length) {
+    if (!confirm('Ya hay un pedido en curso. ¿Reemplazarlo con el plan del día?')) return;
+  }
+  // Validar que los productos sigan existiendo en las listas actuales
+  var actuales = todosLosItems();
+  var byId = {};
+  actuales.forEach(function(t) { byId[t.itemId] = t; });
+  var nuevoItems = {};
+  var perdidos = [];
+  plan.items.forEach(function(it) {
+    if (byId[it.itemId]) {
+      nuevoItems[it.itemId] = { qty: it.qty };
+    } else {
+      perdidos.push(it.productoLista);
+    }
+  });
+  pedidoSet({ items: nuevoItems });
+  actualizarBadgePedido();
+  // Marcar el día como ejecutado
+  plan.ejecutado = true;
+  plan.ejecutado_en = Date.now();
+  syncCalDiaRemoto(plan).catch(function() {});
+  cerrarModalDia();
+  cambiarTab('pedido');
+  if (perdidos.length > 0) {
+    showToast(perdidos.length + ' producto(s) ya no están disponibles: ' + perdidos.slice(0, 2).join(', ') + (perdidos.length > 2 ? '…' : ''), 'warn');
+  } else {
+    showToast('Plan cargado. Revisá y confirmá el pedido.', 'ok');
+  }
+}
+
 // Preview compacta para mostrar abajo del Inicio.
 // Solo se renderiza si el plan tiene acceso a Métricas (Max).
 function renderMetricasPreview() {
@@ -1796,13 +2381,14 @@ var TAB_PERM_MAP = {
   'resumen':    'pedido',
   'historial':  'historial',
   'verif-hist': 'verificar',
-  'metricas':   'historial'
+  'metricas':   'historial',
+  'calendario': 'historial'
 };
 
 function tabPermitida(tab) {
   // Gating por PLAN (independiente del rol):
-  // - Métricas: solo plan Max (business)
-  if (tab === 'metricas') {
+  // - Métricas y Calendario: solo plan Max (business)
+  if (tab === 'metricas' || tab === 'calendario') {
     var planActual = (profile && profile.plan) || 'free';
     if (!LIMITES[planActual] || !LIMITES[planActual].metricas) return false;
   }
@@ -1831,6 +2417,11 @@ function cambiarTab(tab) {
   if (tab === 'resumen') renderResumen();
   if (tab === 'historial') renderHistorial();
   if (tab === 'metricas') renderMetricas();
+  if (tab === 'calendario') {
+    // Cargar siempre al entrar para tener data fresca entre devices
+    cargarCalendarioRemoto().then(function() { renderCalendario(); });
+    renderCalendario();
+  }
   window.scrollTo(0, 0);
 }
 
@@ -1843,6 +2434,7 @@ function aplicarPermisosUI() {
     { tab: 'listas',      side: 'side-link-listas' },
     { tab: 'pedido',      side: 'side-link-pedido' },
     { tab: 'historial',   side: 'side-link-historial' },
+    { tab: 'calendario',  side: 'side-link-calendario' },
     { tab: 'metricas',    side: 'side-link-metricas' }
   ];
   tabs.forEach(function(t) {

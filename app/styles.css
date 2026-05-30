@@ -2236,3 +2236,98 @@ h3 { font-size: 18px; }
     stroke-dashoffset: 0 !important;
   }
 }
+
+/* ============================================================
+ * CALENDARIO DE PEDIDOS
+ * ============================================================ */
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.cal-head {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 8px 0 4px;
+}
+.cal-day {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-height: 92px;
+  padding: 8px 9px 9px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  position: relative;
+  overflow: hidden;
+}
+.cal-day:hover {
+  border-color: var(--border-hi);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.35);
+}
+.cal-day.empty {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--border);
+  cursor: default;
+}
+.cal-day.today {
+  border-color: #60a5fa;
+  background: rgba(96, 165, 250, 0.06);
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.25);
+}
+.cal-day.has-plan {
+  border-color: rgba(96, 165, 250, 0.35);
+}
+.cal-day.serie {
+  background: linear-gradient(135deg, var(--bg-elev) 0%, rgba(167, 139, 250, 0.06) 100%);
+  border-color: rgba(167, 139, 250, 0.35);
+}
+.cal-day .day-num {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.cal-day.today .day-num { color: #60a5fa; }
+.cal-day .day-items {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  line-height: 1.35;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cal-day .day-total {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: auto;
+}
+.cal-day .day-total.muted { color: var(--text-muted); font-weight: 400; }
+.cal-day .day-serie-icon {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 9.5px;
+  color: rgba(167, 139, 250, 0.9);
+  display: inline-flex;
+  align-items: center;
+}
+.cal-day .day-serie-icon svg { width: 11px; height: 11px; }
+
+@media (max-width: 640px) {
+  .cal-day { min-height: 70px; padding: 6px 7px; }
+  .cal-day .day-num { font-size: 12px; }
+  .cal-day .day-items { font-size: 10px; }
+  .cal-day .day-total { font-size: 10.5px; }
+  .cal-head { font-size: 9.5px; padding: 6px 0 3px; }
+}

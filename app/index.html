@@ -232,8 +232,26 @@
         <button class="btn" onclick="cambiarTab('ver-pedido')"><span class="icon-slot" data-icon="arrowLeft"></span> Editar pedido</button>
       </div>
       <div id="resumen-content"></div>
+
+      <!-- Selector opcional de día del calendario -->
+      <div id="resumen-cal-selector" style="display:none;margin-top:20px;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;padding:14px 16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="icon-slot" data-icon="calendar"></span>
+            <div>
+              <div style="font-size:13px;font-weight:600;">¿Cuándo lo pedís?</div>
+              <div style="font-size:11px;color:var(--text-muted);">Si elegís una fecha, se guarda como plan en el calendario. Si la dejás vacía, va al historial como pedido confirmado.</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="date" id="resumen-fecha-cal" style="background:var(--bg-elev2);border:1px solid var(--border-hi);color:var(--text);padding:8px 10px;border-radius:8px;font-size:13px;font-family:inherit;">
+            <button class="btn" onclick="limpiarFechaCalendario()" id="btn-limpiar-fecha-cal" style="font-size:11px;padding:6px 10px;display:none;"><span class="icon-slot" data-icon="x"></span> Quitar fecha</button>
+          </div>
+        </div>
+      </div>
+
       <div style="margin-top:20px;text-align:center;" id="resumen-footer" style="display:none;">
-        <button class="btn primary" onclick="confirmarPedido()" style="padding:14px 32px;font-size:15px;"><span class="icon-slot" data-icon="check"></span> Confirmar y guardar pedido</button>
+        <button class="btn primary" id="btn-confirmar-pedido" onclick="confirmarPedido()" style="padding:14px 32px;font-size:15px;"><span class="icon-slot" data-icon="check"></span> Confirmar y guardar pedido</button>
       </div>
     </div>
 
@@ -555,17 +573,10 @@
       <button onclick="cerrarModalDia()" style="background:transparent;border:none;color:var(--text-muted);cursor:pointer;padding:4px;line-height:1;"><span class="icon-slot" data-icon="x"></span></button>
     </div>
 
-    <!-- Productos ya planificados para este día -->
+    <!-- Productos planificados para este día (solo lectura) -->
     <div id="modal-cal-items" style="margin-bottom:14px;"></div>
 
-    <!-- Buscador para agregar más productos -->
-    <div class="buscador-wrap" style="margin-bottom:10px;">
-      <span class="icon-slot" data-icon="search"></span>
-      <input type="text" class="buscador" id="modal-cal-buscar" placeholder="Buscar producto para agregar..." oninput="renderBuscarModalCal()">
-    </div>
-    <div id="modal-cal-resultados" style="max-height:32vh;overflow-y:auto;margin-bottom:14px;"></div>
-
-    <!-- Repetición -->
+    <!-- Repetición (solo si ya hay plan) -->
     <div id="modal-cal-repetir" style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:12px;display:none;">
       <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">Repetir este plan</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -573,13 +584,15 @@
         <button class="btn" onclick="aplicarRepeticion(2)" style="font-size:12px;padding:7px 12px;"><span class="icon-slot" data-icon="repeat"></span> Cada 2 semanas</button>
         <button class="btn" onclick="aplicarRepeticion(4)" style="font-size:12px;padding:7px 12px;"><span class="icon-slot" data-icon="repeat"></span> Cada 4 semanas</button>
       </div>
-      <div style="font-size:10.5px;color:var(--text-muted);margin-top:8px;">Se aplica a los próximos 3 meses. Podés editar o cancelar la serie desde cualquier día.</div>
+      <div style="font-size:10.5px;color:var(--text-muted);margin-top:8px;">Se aplica a los próximos 3 meses. Podés cancelar la serie desde cualquier día.</div>
     </div>
 
     <div class="modal-actions" style="flex-wrap:wrap;gap:8px;">
       <button class="btn" onclick="cerrarModalDia()">Cerrar</button>
       <button class="btn" id="btn-cal-borrar-dia" onclick="borrarDiaCalendario()" style="border-color:var(--danger-border);color:var(--danger);display:none;"><span class="icon-slot" data-icon="trash"></span> Borrar día</button>
-      <button class="btn primary" id="btn-cal-ejecutar" onclick="convertirDiaEnPedido()" style="display:none;"><span class="icon-slot" data-icon="cart"></span> Hacer pedido</button>
+      <button class="btn" id="btn-cal-editar-plan" onclick="editarPlanDelDia()" style="display:none;"><span class="icon-slot" data-icon="pencil"></span> Editar</button>
+      <button class="btn primary" id="btn-cal-crear-plan" onclick="crearPlanParaEsteDia()" style="display:none;"><span class="icon-slot" data-icon="plus"></span> Crear plan para este día</button>
+      <button class="btn primary" id="btn-cal-ejecutar" onclick="convertirDiaEnPedido()" style="display:none;"><span class="icon-slot" data-icon="cart"></span> Hacer pedido ahora</button>
     </div>
   </div>
 </div>
@@ -1547,6 +1560,19 @@ _calFecha.setDate(1); _calFecha.setHours(0, 0, 0, 0);
 var _calMap = {};
 var _calDiaEditando = null;
 
+// Cache local persistente (sobrevive recargas) por usuario efectivo.
+// Lo usa renderCalendario antes de que el sync remoto termine.
+function _calCacheKey() {
+  var uid = effectiveUserId();
+  return 'pl_calendario_' + (uid || 'anon');
+}
+function _calCacheGet() {
+  try { var v = localStorage.getItem(_calCacheKey()); return v ? JSON.parse(v) : {}; } catch(e) { return {}; }
+}
+function _calCacheSet(map) {
+  try { localStorage.setItem(_calCacheKey(), JSON.stringify(map)); } catch(e) {}
+}
+
 function _isoDate(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
@@ -1605,15 +1631,24 @@ function _calRowAPedido(r) {
 }
 
 async function syncCalDiaRemoto(dia) {
+  // Persistir SIEMPRE en localStorage primero (para que sobreviva recargas
+  // aunque el sync remoto falle por migración no corrida o falta de red).
+  _calCacheSet(_calMap);
   var uid = effectiveUserId();
   if (!uid || !dia || !dia.id) return;
   try {
     var row = _calPedidoARow(dia, uid);
     var r = await supabase.from('pedidos_programados').upsert(row, { onConflict: 'id' });
-    if (r.error) console.warn('[Calendario] upsert error:', r.error.message);
+    if (r.error) {
+      console.warn('[Calendario] upsert error:', r.error.message);
+      if (/relation .* does not exist|column .* does not exist/i.test(r.error.message)) {
+        showToast('Necesitás correr sql/MIGRACION_CALENDARIO.sql en Supabase para sincronizar entre devices', 'warn');
+      }
+    }
   } catch(e) { console.warn('[Calendario] excepción upsert:', e); }
 }
 async function syncBorrarCalDiaRemoto(id) {
+  _calCacheSet(_calMap);  // persistir local primero
   if (!id) return;
   try {
     var r = await supabase.from('pedidos_programados').delete().eq('id', id);
@@ -1624,6 +1659,11 @@ async function syncBorrarCalDiaRemoto(id) {
 // Carga el calendario del mes visible (+ buffer de 1 mes a cada lado por
 // si una serie se extiende). Sobreescribe el cache local.
 async function cargarCalendarioRemoto() {
+  // Cargar cache local SIEMPRE primero (para que el calendario muestre algo
+  // incluso si el sync remoto falla).
+  var local = _calCacheGet();
+  if (local && typeof local === 'object') _calMap = local;
+
   if (!calendarioPermitido()) return;
   var uid = effectiveUserId();
   if (!uid) return;
@@ -1640,13 +1680,30 @@ async function cargarCalendarioRemoto() {
       .order('fecha', { ascending: true });
     if (r.error) {
       console.warn('[Calendario] No se pudo cargar:', r.error.message);
+      // Si la tabla no existe, seguimos con el cache local.
       return;
     }
-    _calMap = {};
+    // Merge: el server es fuente de verdad para días que el server tiene.
+    // Los días que solo están en local (recién creados, no sincronizaron aún)
+    // se conservan y se re-empujan.
+    var idsRemotos = {};
+    var nuevoMap = {};
     (r.data || []).forEach(function(row) {
       var d = _calRowAPedido(row);
-      _calMap[d.fecha] = d;
+      nuevoMap[d.fecha] = d;
+      idsRemotos[d.id] = true;
     });
+    // Conservar días locales que no están en remoto (huérfanos por error de sync)
+    Object.keys(_calMap).forEach(function(iso) {
+      var p = _calMap[iso];
+      if (!nuevoMap[iso] && p && p.id && !idsRemotos[p.id]) {
+        nuevoMap[iso] = p;
+        // Re-empujar en background
+        syncCalDiaRemoto(p).catch(function() {});
+      }
+    });
+    _calMap = nuevoMap;
+    _calCacheSet(_calMap);
     console.log('[Calendario] cargados', Object.keys(_calMap).length, 'días');
   } catch(e) { console.warn('[Calendario] excepción:', e); }
 }
@@ -1773,12 +1830,43 @@ function abrirModalDiaCalendario(iso) {
     subt = 'Sin plan todavía';
   }
   $('modal-cal-subtitulo').textContent = subt;
-  $('modal-cal-buscar').value = '';
   _renderItemsDelDia(iso);
-  _renderResultadosModalCal('');
   document.getElementById('modal-cal-dia').style.display = 'flex';
   document.body.style.overflow = 'hidden';
   pintarIconosEstaticos(document.getElementById('modal-cal-dia'));
+}
+
+// Crea un plan vacío para este día → manda al flujo de Armar Pedido con la
+// fecha pre-seleccionada. Al confirmar el pedido, se guarda en este día.
+function crearPlanParaEsteDia() {
+  if (!_calDiaEditando) return;
+  var iso = _calDiaEditando;
+  cerrarModalDia();
+  // Setear la fecha objetivo en pedidoActual (la lee confirmarPedido)
+  var ped = pedidoGet();
+  // Si ya había items, los conservamos (el usuario podría querer arrancar el plan
+  // con lo que tenía); si no, deja vacío
+  pedidoSet(Object.assign({}, ped, { fechaCalendario: iso, items: ped.items || {} }));
+  cambiarTab('pedido');
+  showToast('Armá el pedido. Al confirmar se guardará en el calendario para ese día.', 'info');
+}
+
+// Edita un plan existente: precarga los productos en Armar Pedido con la fecha
+// del calendario pre-seleccionada. Al guardar, sobreescribe el plan del día.
+function editarPlanDelDia() {
+  if (!_calDiaEditando) return;
+  var iso = _calDiaEditando;
+  var plan = _calMap[iso];
+  if (!plan || !plan.items || plan.items.length === 0) return;
+  var nuevoItems = {};
+  plan.items.forEach(function(it) {
+    if (it.itemId) nuevoItems[it.itemId] = { qty: it.qty };
+  });
+  pedidoSet({ items: nuevoItems, fechaCalendario: iso, editandoPlanCalId: plan.id });
+  actualizarBadgePedido();
+  cerrarModalDia();
+  cambiarTab('pedido');
+  showToast('Editando plan del calendario. Modificá y confirmá para guardar.', 'info');
 }
 
 function cerrarModalDia() {
@@ -1793,131 +1881,53 @@ function _renderItemsDelDia(iso) {
   var items = (plan && plan.items) || [];
   var btnBorrar = $('btn-cal-borrar-dia');
   var btnEjec = $('btn-cal-ejecutar');
+  var btnEditar = $('btn-cal-editar-plan');
+  var btnCrear = $('btn-cal-crear-plan');
   var repetirBox = $('modal-cal-repetir');
+
   if (items.length === 0) {
-    cont.innerHTML = '<div style="background:var(--bg-elev2);border:1px dashed var(--border-hi);border-radius:10px;padding:12px 14px;font-size:12px;color:var(--text-muted);text-align:center;">Sin productos. Buscá y agregá los que vas a pedir este día.</div>';
+    cont.innerHTML = '<div style="background:var(--bg-elev2);border:1px dashed var(--border-hi);border-radius:10px;padding:18px;font-size:12px;color:var(--text-muted);text-align:center;">Este día no tiene plan todavía.<br><span style="font-size:11px;opacity:0.8;">Tocá "Crear plan" para armar el pedido en el flujo de Armar Pedido y asignárselo a esta fecha.</span></div>';
     if (btnBorrar) btnBorrar.style.display = 'none';
     if (btnEjec) btnEjec.style.display = 'none';
+    if (btnEditar) btnEditar.style.display = 'none';
+    if (btnCrear) btnCrear.style.display = '';
     if (repetirBox) repetirBox.style.display = 'none';
     return;
   }
   var total = 0;
-  var html = '<div style="background:var(--bg-elev2);border:1px solid var(--border);border-radius:10px;padding:6px 0;">';
-  items.forEach(function(it, idx) {
-    total += it.subtotal || (it.precio * it.qty) || 0;
-    html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);">';
-    html += '<div style="flex:1;min-width:0;font-size:12px;">';
-    html += '<div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(it.productoLista || '') + '</div>';
-    html += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:1px;">' + (it.qty || 1) + ' × $' + Number(it.precio || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + ' · ' + escapeHtml(it.proveedor || '') + '</div>';
-    html += '</div>';
-    html += '<div style="font-size:12px;font-weight:600;white-space:nowrap;">$' + Number((it.subtotal || it.precio * it.qty || 0)).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</div>';
-    html += '<button onclick="quitarItemDiaCal(' + idx + ')" style="background:transparent;border:none;color:var(--danger);cursor:pointer;padding:4px;line-height:1;">' + Icon.trash({ size: 14 }) + '</button>';
-    html += '</div>';
+  // Agrupar por proveedor para visualización clara
+  var porProv = {};
+  items.forEach(function(it) {
+    var key = it.proveedor || 'Sin proveedor';
+    if (!porProv[key]) porProv[key] = [];
+    porProv[key].push(it);
   });
-  html += '<div style="display:flex;justify-content:space-between;padding:9px 12px;font-size:13px;font-weight:600;background:var(--bg-elev);"><span>Total del día</span><span>$' + Number(total).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</span></div>';
+  var html = '<div style="background:var(--bg-elev2);border:1px solid var(--border);border-radius:10px;overflow:hidden;">';
+  Object.keys(porProv).forEach(function(provName) {
+    html += '<div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);padding:8px 12px 4px;background:var(--bg-elev);">' + escapeHtml(provName) + '</div>';
+    porProv[provName].forEach(function(it) {
+      total += it.subtotal || (it.precio * it.qty) || 0;
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);">';
+      html += '<div style="flex:1;min-width:0;font-size:12px;">';
+      html += '<div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(it.productoLista || '') + '</div>';
+      html += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:1px;">' + (it.qty || 1) + ' × $' + Number(it.precio || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</div>';
+      html += '</div>';
+      html += '<div style="font-size:12px;font-weight:600;white-space:nowrap;">$' + Number((it.subtotal || it.precio * it.qty || 0)).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</div>';
+      html += '</div>';
+    });
+  });
+  html += '<div style="display:flex;justify-content:space-between;padding:10px 12px;font-size:13px;font-weight:600;background:var(--bg-elev);"><span>Total del día</span><span>$' + Number(total).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</span></div>';
   html += '</div>';
+  // Si ya fue ejecutado, mostrar badge
+  if (plan && plan.ejecutado) {
+    html = '<div style="background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.3);color:var(--emerald-bright);font-size:11px;padding:7px 12px;border-radius:8px;margin-bottom:8px;display:inline-flex;align-items:center;gap:6px;">' + Icon.checkCircle({ size: 13 }) + ' Plan ya ejecutado el ' + new Date(plan.ejecutado_en || Date.now()).toLocaleDateString('es-AR') + '</div>' + html;
+  }
   cont.innerHTML = html;
   if (btnBorrar) btnBorrar.style.display = '';
   if (btnEjec) btnEjec.style.display = '';
+  if (btnEditar) btnEditar.style.display = '';
+  if (btnCrear) btnCrear.style.display = 'none';
   if (repetirBox) repetirBox.style.display = '';
-}
-
-function renderBuscarModalCal() {
-  var q = ($('modal-cal-buscar').value || '').trim();
-  _renderResultadosModalCal(q);
-}
-
-function _renderResultadosModalCal(q) {
-  var cont = $('modal-cal-resultados');
-  if (!q) {
-    cont.innerHTML = '<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:14px 0;">Escribí para buscar entre tus listas.</div>';
-    return;
-  }
-  var resultados = buscarEnListas(q, expandirQueryLocal(q));
-  if (!resultados.length) {
-    cont.innerHTML = '<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:14px 0;">Sin resultados para "' + escapeHtml(q) + '".</div>';
-    return;
-  }
-  // Limitar a 12 resultados
-  resultados = resultados.slice(0, 12);
-  var html = '';
-  resultados.forEach(function(it, idx) {
-    var precio = Number(it.precio || 0);
-    html += '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-elev2);margin-bottom:5px;">';
-    html += '<div style="flex:1;min-width:0;font-size:12px;">';
-    html += '<div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(it.productoLista) + '</div>';
-    html += '<div style="font-size:10.5px;color:var(--text-muted);">' + escapeHtml(it.proveedor) + ' · $' + Number(precio).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</div>';
-    html += '</div>';
-    html += '<input type="number" min="1" value="1" id="cal-qty-' + idx + '" style="width:50px;padding:5px 7px;border:1px solid var(--border-hi);border-radius:6px;background:var(--bg-elev);color:var(--text);font-size:12px;text-align:right;">';
-    html += '<button onclick="agregarItemAlDiaCal(\'' + escapeHtmlAttr(it.itemId) + '\', ' + idx + ')" class="btn primary" style="font-size:11px;padding:5px 10px;">+ Agregar</button>';
-    html += '</div>';
-  });
-  cont.innerHTML = html;
-}
-
-function agregarItemAlDiaCal(itemId, idx) {
-  if (!_calDiaEditando) return;
-  var qty = parseInt(($('cal-qty-' + idx) || {}).value || '1', 10);
-  if (!qty || qty < 1) qty = 1;
-  // Buscar el item en las listas activas
-  var info = todosLosItems().find(function(t) { return t.itemId === itemId; });
-  if (!info) { showToast('Producto no encontrado', 'error'); return; }
-  var iso = _calDiaEditando;
-  var plan = _calMap[iso];
-  if (!plan) {
-    plan = {
-      id: _uuid(),
-      fecha: iso,
-      items: [],
-      total: 0,
-      ejecutado: false,
-      creado_por: (sesion && sesion.user && sesion.user.id) || null
-    };
-    _calMap[iso] = plan;
-  }
-  // Si el mismo item ya está, suma la cantidad
-  var existente = plan.items.find(function(x) { return x.itemId === itemId; });
-  if (existente) {
-    existente.qty += qty;
-    existente.subtotal = existente.precio * existente.qty;
-  } else {
-    plan.items.push({
-      itemId: itemId,
-      productoLista: info.productoLista,
-      qty: qty,
-      precio: info.precio,
-      proveedor: info.proveedor,
-      proveedorId: info.proveedorId,
-      unidad: info.unidad || '',
-      subtotal: info.precio * qty
-    });
-  }
-  plan.total = plan.items.reduce(function(s, x) { return s + (x.subtotal || 0); }, 0);
-  syncCalDiaRemoto(plan).catch(function() {});
-  _renderItemsDelDia(iso);
-  // Si es parte de una serie, sugerir editar la serie
-  if (plan.serie_id) {
-    showToast('Item agregado a este día. Para propagar a la serie, usá los botones de repetición.', 'info');
-  }
-  renderCalendario();
-}
-
-function quitarItemDiaCal(idx) {
-  if (!_calDiaEditando) return;
-  var iso = _calDiaEditando;
-  var plan = _calMap[iso];
-  if (!plan || !plan.items) return;
-  plan.items.splice(idx, 1);
-  plan.total = plan.items.reduce(function(s, x) { return s + (x.subtotal || 0); }, 0);
-  if (plan.items.length === 0) {
-    // Borrar el día entero si quedó vacío
-    syncBorrarCalDiaRemoto(plan.id).catch(function() {});
-    delete _calMap[iso];
-  } else {
-    syncCalDiaRemoto(plan).catch(function() {});
-  }
-  _renderItemsDelDia(iso);
-  renderCalendario();
 }
 
 // Replica el plan del día actual cada N semanas durante los próximos 3 meses
@@ -6614,9 +6624,41 @@ function renderResumen() {
   if (!keys.length) {
     cont.innerHTML = '<div class="empty"><div class="empty-emoji">' + Icon.cart() + '</div><div class="empty-title">Pedido vacío</div></div>';
     if (footer) footer.style.display = 'none';
+    var selBox0 = $('resumen-cal-selector');
+    if (selBox0) selBox0.style.display = 'none';
     return;
   }
   if (footer) footer.style.display = '';
+
+  // Selector de día del calendario: solo plan Max (mismo gating que tab Calendario)
+  var selBox = $('resumen-cal-selector');
+  if (selBox) {
+    if (calendarioPermitido()) {
+      selBox.style.display = '';
+      var inp = $('resumen-fecha-cal');
+      if (inp && !inp.value && ped.fechaCalendario) inp.value = ped.fechaCalendario;
+      var btnBorrarFecha = $('btn-limpiar-fecha-cal');
+      if (btnBorrarFecha) btnBorrarFecha.style.display = (inp && inp.value) ? '' : 'none';
+      // Listener una sola vez
+      if (inp && !inp._listenerAttached) {
+        inp.addEventListener('change', function() {
+          var v = inp.value;
+          var p = pedidoGet();
+          pedidoSet(Object.assign({}, p, { fechaCalendario: v || null }));
+          var btn = $('btn-limpiar-fecha-cal');
+          if (btn) btn.style.display = v ? '' : 'none';
+          actualizarBotonConfirmar();
+        });
+        inp._listenerAttached = true;
+      }
+      // Min: hoy (no permite fechas pasadas)
+      if (inp) inp.min = _isoDate(new Date());
+    } else {
+      selBox.style.display = 'none';
+    }
+    actualizarBotonConfirmar();
+    pintarIconosEstaticos(selBox);
+  }
 
   // Precalcular datos por proveedor
   var provData = {};
@@ -6686,12 +6728,55 @@ function renderResumen() {
   });
 }
 
+function limpiarFechaCalendario() {
+  var inp = $('resumen-fecha-cal');
+  if (inp) inp.value = '';
+  var p = pedidoGet();
+  pedidoSet(Object.assign({}, p, { fechaCalendario: null }));
+  var btn = $('btn-limpiar-fecha-cal');
+  if (btn) btn.style.display = 'none';
+  actualizarBotonConfirmar();
+}
+
+function actualizarBotonConfirmar() {
+  var btn = $('btn-confirmar-pedido');
+  if (!btn) return;
+  var inp = $('resumen-fecha-cal');
+  var fecha = inp && inp.value;
+  if (fecha) {
+    var d = _parseIsoDate(fecha);
+    var hoyIso = _isoDate(new Date());
+    if (fecha === hoyIso) {
+      btn.innerHTML = '<span class="icon-slot" data-icon="check"></span> Confirmar pedido para HOY';
+    } else {
+      btn.innerHTML = '<span class="icon-slot" data-icon="calendar"></span> Programar para ' + d.getDate() + ' ' + _nombreMesLargo(d).split(' ')[0].toLowerCase();
+    }
+  } else {
+    btn.innerHTML = '<span class="icon-slot" data-icon="check"></span> Confirmar y guardar pedido';
+  }
+  pintarIconosEstaticos(btn);
+}
+
 function confirmarPedido() {
   var ped = pedidoGet();
   var ids = Object.keys(ped.items || {}).filter(function(k) { return ped.items[k].qty > 0; });
   if (!ids.length) { showToast('El pedido está vacío'); return; }
   var editando = ped.editandoHistId || null;
-  var msgConfirm = editando ? '¿Guardar los cambios al pedido?' : '¿Confirmar el pedido? Se guardará en el historial.';
+  var editandoPlanCal = ped.editandoPlanCalId || null;
+  var fechaCal = ped.fechaCalendario || null;  // si está, va a pedidos_programados
+  var hoyIso = _isoDate(new Date());
+  var esParaHoy = !fechaCal || fechaCal === hoyIso;
+  var msgConfirm;
+  if (editandoPlanCal) {
+    msgConfirm = '¿Guardar cambios al plan del calendario?';
+  } else if (fechaCal && !esParaHoy) {
+    var dCal = _parseIsoDate(fechaCal);
+    msgConfirm = '¿Programar este pedido para el ' + dCal.getDate() + ' de ' + _nombreMesLargo(dCal).split(' ')[0].toLowerCase() + '? Se guardará en el calendario, no en el historial.';
+  } else if (editando) {
+    msgConfirm = '¿Guardar los cambios al pedido?';
+  } else {
+    msgConfirm = '¿Confirmar el pedido? Se guardará en el historial.';
+  }
   if (!confirm(msgConfirm)) return;
 
   var todos = todosLosItems();
@@ -6704,6 +6789,34 @@ function confirmarPedido() {
     if (!info) return;
     items.push({ itemId: itemId, productoLista: info.productoLista, qty: ped.items[itemId].qty, unidad: info.unidad || '', proveedorId: info.proveedorId, proveedor: info.proveedor, precio: info.precio, subtotal: info.precio * ped.items[itemId].qty });
   });
+
+  // === GUARDAR EN CALENDARIO (no en historial) si se eligió fecha futura ===
+  if (fechaCal && !esParaHoy) {
+    var planExistente = _calMap[fechaCal];
+    var planAGuardar = {
+      id: (planExistente && planExistente.id) || editandoPlanCal || _uuid(),
+      fecha: fechaCal,
+      items: items,
+      total: items.reduce(function(s, it) { return s + it.subtotal; }, 0),
+      serie_id: planExistente ? planExistente.serie_id : null,
+      cada_n_semanas: planExistente ? planExistente.cada_n_semanas : null,
+      serie_hasta: planExistente ? planExistente.serie_hasta : null,
+      ejecutado: false,
+      creado_por: (planExistente && planExistente.creado_por) || ((sesion && sesion.user && sesion.user.id) || null)
+    };
+    _calMap[fechaCal] = planAGuardar;
+    syncCalDiaRemoto(planAGuardar).catch(function() {});
+    pedidoSet({ items: {} });
+    actualizarBadgePedido();
+    cambiarTab('calendario');
+    showToast(planExistente ? 'Plan actualizado' : 'Plan guardado en el calendario', 'ok');
+    return;
+  }
+
+  // === SI ESTABA EDITANDO UN PLAN DEL CALENDARIO pero ahora sin fecha → sobreescribir solo ese día (mismo día) ===
+  if (editandoPlanCal && !fechaCal) {
+    // El usuario eligió quitar la fecha → tratamos como pedido normal (historial)
+  }
 
   var hist = histGet();
 
@@ -7045,6 +7158,9 @@ function escapeHtml(s) {
       renderHistorial();
       renderIngreso();
     }).catch(function() {});
+    // Cargar el calendario en background (solo si el plan lo permite).
+    // Carga el cache local de inmediato + dispara el sync remoto.
+    cargarCalendarioRemoto().catch(function() {});
     renderHistorial();
     actualizarBadgePedido();
     renderIngreso();

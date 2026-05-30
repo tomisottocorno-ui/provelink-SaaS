@@ -5285,7 +5285,7 @@ async function cargarHistorialRemoto() {
       .select('*')
       .eq('user_id', uid)
       .order('timestamp_ms', { ascending: false })
-      .limit(200);
+      .limit(1000);  // hasta 1000 pedidos. Nunca borramos historial.
     if (r.error) {
       // Si la tabla no tiene las columnas nuevas, el query falla → no rompemos
       console.warn('[Historial] No se pudo cargar de Supabase:', r.error.message);
@@ -5735,7 +5735,17 @@ function renderBuscarProducto(expansionesExtras) {
     html += '<div style="display:flex;flex-direction:column;gap:6px;">';
     prov.items.forEach(function(it) {
       var enPed = enPedido[it.itemId] || 0;
-      var bg = enPed > 0 ? 'background:rgba(96,165,250,0.08);border-color:#60a5fa;' : '';
+      var esUlt = _esUltimaCompra(it);
+      // Prioridades visuales:
+      // 1. En pedido actual → azul
+      // 2. Última compra (no en pedido aún) → naranja/gold tenue en TODA la fila
+      // 3. Default → border normal
+      var bg = '';
+      if (enPed > 0) {
+        bg = 'background:rgba(96,165,250,0.08);border-color:#60a5fa;';
+      } else if (esUlt) {
+        bg = 'background:rgba(251,191,36,0.10);border-color:rgba(251,191,36,0.5);';
+      }
       html += '<div style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);' + bg + 'display:flex;align-items:center;justify-content:space-between;gap:8px;">';
       // Mostrar el precio crudo siempre. Para "$/unidad":
       // - Si el item tiene modo + precio_unitario guardados del pipeline → usar esos
@@ -5760,8 +5770,8 @@ function renderBuscarProducto(expansionesExtras) {
         }
       }
       var pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
-      var ultimaBadge = _esUltimaCompra(it)
-        ? '<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:rgba(251,191,36,0.15);color:var(--gold-bright);border:1px solid rgba(251,191,36,0.3);margin-left:4px;vertical-align:middle;white-space:nowrap;">Última compra</span>'
+      var ultimaBadge = esUlt
+        ? '<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:rgba(251,191,36,0.2);color:var(--gold-bright);border:1px solid rgba(251,191,36,0.45);margin-left:4px;vertical-align:middle;white-space:nowrap;">Última compra</span>'
         : '';
       html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + ultimaBadge + pbHtml + '</div>';
       html += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">';
@@ -6073,7 +6083,9 @@ function confirmarPedido() {
     creado_por_uid: (sesion && sesion.user && sesion.user.id) || null
   };
   hist.unshift(pedidoNuevo);
-  if (hist.length > 100) hist = hist.slice(0, 100);
+  // No truncar el historial: cada pedido es data del usuario y NO se borra
+  // jamás. localStorage soporta miles de pedidos sin problema y Supabase
+  // tiene la copia de seguridad. (Antes había un slice(0,100) — eliminado).
   histSet(hist);
   syncPedidoRemoto(pedidoNuevo).catch(function() {});
   pedidoSet({ items: {} });

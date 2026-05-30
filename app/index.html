@@ -145,11 +145,12 @@
     <div class="tab-section" id="tab-calendario">
       <div class="seccion-titulo">
         <h2>Calendario de pedidos</h2>
-        <div style="display:flex;gap:6px;align-items:center;">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <button class="btn primary" onclick="arrancarProgramarPedido()" style="font-size:12px;padding:7px 14px;"><span class="icon-slot" data-icon="plus"></span> Programar pedido</button>
           <button class="btn" onclick="cambiarMesCalendario(-1)" title="Mes anterior" style="font-size:14px;padding:6px 10px;">‹</button>
           <span id="cal-mes-titulo" style="font-size:14px;font-weight:600;min-width:130px;text-align:center;">—</span>
           <button class="btn" onclick="cambiarMesCalendario(1)" title="Mes siguiente" style="font-size:14px;padding:6px 10px;">›</button>
-          <button class="btn" onclick="irMesActual()" title="Hoy" style="font-size:12px;padding:6px 12px;margin-left:6px;">Hoy</button>
+          <button class="btn" onclick="irMesActual()" title="Hoy" style="font-size:12px;padding:6px 12px;">Hoy</button>
         </div>
       </div>
       <div id="cal-resumen" style="margin-bottom:16px;"></div>
@@ -194,21 +195,50 @@
 
     <!-- ============ TAB: ARMAR PEDIDO ============ -->
     <div class="tab-section" id="tab-pedido">
-      <div class="seccion-titulo">
-        <h2>Armar pedido</h2>
-        <button class="btn primary" id="btn-ver-pedido" onclick="verPedidoActual()" style="display:none;"><span class="icon-slot" data-icon="check"></span> Ver pedido</button>
+      <!-- LANDING: 2 opciones grandes (visible solo si no hay items y no se eligió modo) -->
+      <div id="pedido-landing" style="display:none;">
+        <div class="seccion-titulo">
+          <h2>Armar pedido</h2>
+        </div>
+        <p style="color:var(--text-muted);font-size:13px;margin:0 0 22px;">¿Cómo querés armar este pedido?</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <button onclick="arrancarRealizarPedido()" class="pedido-modo-btn" style="display:flex;flex-direction:column;align-items:flex-start;gap:10px;background:linear-gradient(135deg, rgba(16,185,129,0.10), rgba(16,185,129,0.04));border:1px solid rgba(16,185,129,0.35);border-radius:16px;padding:22px 20px;cursor:pointer;font-family:inherit;text-align:left;transition:transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;">
+            <span style="width:40px;height:40px;border-radius:12px;background:rgba(16,185,129,0.15);color:var(--emerald-bright);display:inline-flex;align-items:center;justify-content:center;">
+              <span class="icon-slot" data-icon="cart"></span>
+            </span>
+            <span style="font-size:15px;font-weight:700;color:var(--text);letter-spacing:-0.01em;">Realizar pedido</span>
+            <span style="font-size:12px;color:var(--text-muted);line-height:1.45;">Lo pedís ahora. Se guarda en el historial para recepcionar y queda registrado en el calendario con la fecha de hoy.</span>
+          </button>
+          <button onclick="arrancarProgramarPedido()" class="pedido-modo-btn" style="display:flex;flex-direction:column;align-items:flex-start;gap:10px;background:linear-gradient(135deg, rgba(96,165,250,0.10), rgba(96,165,250,0.04));border:1px solid rgba(96,165,250,0.35);border-radius:16px;padding:22px 20px;cursor:pointer;font-family:inherit;text-align:left;transition:transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;">
+            <span style="width:40px;height:40px;border-radius:12px;background:rgba(96,165,250,0.15);color:#60a5fa;display:inline-flex;align-items:center;justify-content:center;">
+              <span class="icon-slot" data-icon="calendar"></span>
+            </span>
+            <span style="font-size:15px;font-weight:700;color:var(--text);letter-spacing:-0.01em;">Programar pedido</span>
+            <span style="font-size:12px;color:var(--text-muted);line-height:1.45;">Lo dejás listo para una fecha futura. Va al calendario. Cuando llegue el día, lo realizás desde ahí.</span>
+          </button>
+        </div>
       </div>
-      <div class="buscador-wrap" style="margin-bottom:8px;">
-        <span class="icon-slot" data-icon="search"></span>
-        <input type="text" class="buscador" id="buscar-producto" placeholder="Buscar producto... (ej: leche, aceite, harina)" oninput="renderBuscarProducto()">
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
-        <button class="btn" id="btn-busqueda-especifica" onclick="toggleBusquedaEspecifica()" style="font-size:12px;padding:5px 12px;"><span class="icon-slot" data-icon="target"></span> Búsqueda específica</button>
-        <span id="busqueda-especifica-hint" style="font-size:11px;color:var(--text-muted);">Trae todo lo que contenga la palabra</span>
-      </div>
-      <div id="pedido-faltantes-sugerencia" style="margin-bottom:12px;"></div>
-      <div id="buscar-content">
-        <div class="empty"><div class="empty-emoji"><span class="icon-slot" data-icon="search"></span></div><div class="empty-title">Escribí para buscar</div></div>
+
+      <!-- FLUJO DE BUSCADOR (visible cuando ya se eligió modo o hay items) -->
+      <div id="pedido-flujo" style="display:none;">
+        <div class="seccion-titulo">
+          <h2 id="pedido-flujo-titulo">Armar pedido</h2>
+          <button class="btn primary" id="btn-ver-pedido" onclick="verPedidoActual()" style="display:none;"><span class="icon-slot" data-icon="check"></span> Ver pedido</button>
+        </div>
+        <div id="pedido-modo-banner" style="display:none;margin-bottom:12px;"></div>
+        <div class="buscador-wrap" style="margin-bottom:8px;">
+          <span class="icon-slot" data-icon="search"></span>
+          <input type="text" class="buscador" id="buscar-producto" placeholder="Buscar producto... (ej: leche, aceite, harina)" oninput="renderBuscarProducto()">
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+          <button class="btn" id="btn-busqueda-especifica" onclick="toggleBusquedaEspecifica()" style="font-size:12px;padding:5px 12px;"><span class="icon-slot" data-icon="target"></span> Búsqueda específica</button>
+          <span id="busqueda-especifica-hint" style="font-size:11px;color:var(--text-muted);">Trae todo lo que contenga la palabra</span>
+          <button class="btn" onclick="volverALandingPedido()" style="font-size:11px;padding:5px 10px;margin-left:auto;color:var(--text-muted);"><span class="icon-slot" data-icon="x"></span> Cambiar modo</button>
+        </div>
+        <div id="pedido-faltantes-sugerencia" style="margin-bottom:12px;"></div>
+        <div id="buscar-content">
+          <div class="empty"><div class="empty-emoji"><span class="icon-slot" data-icon="search"></span></div><div class="empty-title">Escribí para buscar</div></div>
+        </div>
       </div>
     </div>
 
@@ -1717,6 +1747,44 @@ function irMesActual() {
   cargarCalendarioRemoto().then(function() { renderCalendario(); });
 }
 
+// Construye un mapa combinado: _calMap (planes propios del calendario)
+// + pedidos ejecutados del historial proyectados como entradas virtuales.
+// Las virtuales NO se persisten en _calMap; solo aparecen en el render.
+function _calMapCombinado() {
+  var out = {};
+  // 1) Copia de _calMap (fuente principal)
+  Object.keys(_calMap).forEach(function(k) { out[k] = _calMap[k]; });
+  // 2) Proyectar pedidos del historial que NO tengan ya un entry en el calendario
+  histGet().forEach(function(h) {
+    if (!h.timestamp) return;
+    var d = new Date(h.timestamp);
+    var iso = _isoDate(d);
+    if (out[iso]) {
+      // Si ya hay entry, marcar como ejecutado si no lo estaba
+      if (!out[iso].ejecutado) {
+        out[iso] = Object.assign({}, out[iso], {
+          ejecutado: true,
+          ejecutado_en: h.timestamp,
+          _hist_id: h.id
+        });
+      }
+    } else {
+      // Entrada virtual del historial
+      out[iso] = {
+        id: '__hist__' + h.id,
+        fecha: iso,
+        items: h.items || [],
+        total: h.total || 0,
+        ejecutado: true,
+        ejecutado_en: h.timestamp,
+        _virtual: true,
+        _hist_id: h.id
+      };
+    }
+  });
+  return out;
+}
+
 function renderCalendario() {
   if (!calendarioPermitido()) {
     var cont0 = $('cal-grid');
@@ -1753,20 +1821,26 @@ function renderCalendario() {
 
   var totalMes = 0;
   var diasConPlan = 0;
+  var combinado = _calMapCombinado();
 
   for (var dnum = 1; dnum <= diasEnMes; dnum++) {
     var d = new Date(year, month, dnum);
     var iso = _isoDate(d);
-    var plan = _calMap[iso];
+    var plan = combinado[iso];
     var esHoy = (iso === hoyIso);
     var clases = 'cal-day';
     if (esHoy) clases += ' today';
     if (plan && plan.items && plan.items.length > 0) {
-      clases += ' has-plan';
+      if (plan.ejecutado) {
+        clases += ' done';
+      } else {
+        clases += ' has-plan';
+      }
       if (plan.serie_id) clases += ' serie';
     }
     var resumen = '';
     var totalDia = '';
+    var doneMark = '';
     if (plan && plan.items && plan.items.length > 0) {
       totalMes += plan.total || 0;
       diasConPlan++;
@@ -1777,12 +1851,15 @@ function renderCalendario() {
         resumen += ' <span style="opacity:0.7;">+' + (plan.items.length - 1) + '</span>';
       }
       totalDia = '$' + Number(plan.total || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+      if (plan.ejecutado) {
+        doneMark = '<span class="day-done-mark" title="Pedido realizado">' + Icon.checkCircle({ size: 11 }) + '</span>';
+      }
     }
     var serieIcon = (plan && plan.serie_id)
       ? '<span class="day-serie-icon" title="Parte de una serie recurrente">' + Icon.repeat({ size: 11 }) + '</span>'
       : '';
     html += '<div class="' + clases + '" onclick="abrirModalDiaCalendario(\'' + iso + '\')">' +
-      serieIcon +
+      serieIcon + doneMark +
       '<div class="day-num">' + dnum + '</div>' +
       '<div class="day-items">' + resumen + '</div>' +
       '<div class="day-total ' + (totalDia ? '' : 'muted') + '">' + (totalDia || '+') + '</div>' +
@@ -1820,9 +1897,15 @@ function abrirModalDiaCalendario(iso) {
   var d = _parseIsoDate(iso);
   var fechaTxt = d.getDate() + ' de ' + _nombreMesLargo(d).split(' ')[0].toLowerCase() + ' de ' + d.getFullYear();
   $('modal-cal-titulo').textContent = _nombreDiaCorto(d) + ', ' + fechaTxt;
-  var plan = _calMap[iso];
+  // Buscar primero en _calMap, sino en el combinado (puede ser virtual del historial)
+  var combinado = _calMapCombinado();
+  var plan = combinado[iso];
   var subt = '';
-  if (plan && plan.serie_id) {
+  if (plan && plan._virtual && plan.ejecutado) {
+    subt = 'Pedido realizado · proyectado desde el historial';
+  } else if (plan && plan.ejecutado) {
+    subt = 'Pedido realizado el ' + new Date(plan.ejecutado_en || Date.now()).toLocaleDateString('es-AR');
+  } else if (plan && plan.serie_id) {
     subt = 'Parte de una serie · cada ' + plan.cada_n_semanas + ' semana' + (plan.cada_n_semanas !== 1 ? 's' : '');
   } else if (plan && plan.items && plan.items.length > 0) {
     subt = 'Plan único · sin repetición';
@@ -1836,23 +1919,29 @@ function abrirModalDiaCalendario(iso) {
   pintarIconosEstaticos(document.getElementById('modal-cal-dia'));
 }
 
-// Crea un plan vacío para este día → manda al flujo de Armar Pedido con la
-// fecha pre-seleccionada. Al confirmar el pedido, se guarda en este día.
+// Crea un plan vacío para este día → manda al flujo de Armar Pedido en modo
+// 'programar' con la fecha pre-seleccionada. Al confirmar el pedido se guarda
+// como plan en el calendario (no en el historial).
 function crearPlanParaEsteDia() {
   if (!_calDiaEditando) return;
   var iso = _calDiaEditando;
+  var hoyIso = _isoDate(new Date());
   cerrarModalDia();
-  // Setear la fecha objetivo en pedidoActual (la lee confirmarPedido)
-  var ped = pedidoGet();
-  // Si ya había items, los conservamos (el usuario podría querer arrancar el plan
-  // con lo que tenía); si no, deja vacío
-  pedidoSet(Object.assign({}, ped, { fechaCalendario: iso, items: ped.items || {} }));
+  // Si el día es HOY: mejor proponer realizar
+  if (iso === hoyIso) {
+    if (confirm('Estás en el día de hoy. ¿Realizar el pedido ahora? (Si elegís cancelar, lo programa igual para hoy en el calendario)')) {
+      pedidoSet({ items: {}, modo: 'realizar', fechaCalendario: null });
+      cambiarTab('pedido');
+      return;
+    }
+  }
+  pedidoSet({ items: {}, modo: 'programar', fechaCalendario: iso });
   cambiarTab('pedido');
-  showToast('Armá el pedido. Al confirmar se guardará en el calendario para ese día.', 'info');
+  showToast('Armá el pedido. Al confirmar se guarda en el calendario.', 'info');
 }
 
 // Edita un plan existente: precarga los productos en Armar Pedido con la fecha
-// del calendario pre-seleccionada. Al guardar, sobreescribe el plan del día.
+// del calendario pre-seleccionada en modo 'programar'.
 function editarPlanDelDia() {
   if (!_calDiaEditando) return;
   var iso = _calDiaEditando;
@@ -1862,11 +1951,16 @@ function editarPlanDelDia() {
   plan.items.forEach(function(it) {
     if (it.itemId) nuevoItems[it.itemId] = { qty: it.qty };
   });
-  pedidoSet({ items: nuevoItems, fechaCalendario: iso, editandoPlanCalId: plan.id });
+  pedidoSet({
+    items: nuevoItems,
+    modo: 'programar',
+    fechaCalendario: iso,
+    editandoPlanCalId: plan.id
+  });
   actualizarBadgePedido();
   cerrarModalDia();
   cambiarTab('pedido');
-  showToast('Editando plan del calendario. Modificá y confirmá para guardar.', 'info');
+  showToast('Editando plan. Modificá y confirmá para guardar.', 'info');
 }
 
 function cerrarModalDia() {
@@ -1877,8 +1971,11 @@ function cerrarModalDia() {
 
 function _renderItemsDelDia(iso) {
   var cont = $('modal-cal-items');
-  var plan = _calMap[iso];
+  var combinado = _calMapCombinado();
+  var plan = combinado[iso];
   var items = (plan && plan.items) || [];
+  var esVirtual = !!(plan && plan._virtual);  // viene proyectado del historial
+  var yaEjecutado = !!(plan && plan.ejecutado);
   var btnBorrar = $('btn-cal-borrar-dia');
   var btnEjec = $('btn-cal-ejecutar');
   var btnEditar = $('btn-cal-editar-plan');
@@ -1920,14 +2017,33 @@ function _renderItemsDelDia(iso) {
   html += '</div>';
   // Si ya fue ejecutado, mostrar badge
   if (plan && plan.ejecutado) {
-    html = '<div style="background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.3);color:var(--emerald-bright);font-size:11px;padding:7px 12px;border-radius:8px;margin-bottom:8px;display:inline-flex;align-items:center;gap:6px;">' + Icon.checkCircle({ size: 13 }) + ' Plan ya ejecutado el ' + new Date(plan.ejecutado_en || Date.now()).toLocaleDateString('es-AR') + '</div>' + html;
+    var fechaEjec = new Date(plan.ejecutado_en || Date.now()).toLocaleDateString('es-AR');
+    html = '<div style="background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.3);color:var(--emerald-bright);font-size:11px;padding:7px 12px;border-radius:8px;margin-bottom:8px;display:inline-flex;align-items:center;gap:6px;">' + Icon.checkCircle({ size: 13 }) + (esVirtual ? ' Pedido realizado el ' + fechaEjec + ' (registrado en el historial)' : ' Plan ya ejecutado el ' + fechaEjec) + '</div>' + html;
   }
   cont.innerHTML = html;
-  if (btnBorrar) btnBorrar.style.display = '';
-  if (btnEjec) btnEjec.style.display = '';
-  if (btnEditar) btnEditar.style.display = '';
-  if (btnCrear) btnCrear.style.display = 'none';
-  if (repetirBox) repetirBox.style.display = '';
+  // Botones según estado:
+  // - Virtual (del historial): solo cerrar, no se puede borrar ni editar desde acá
+  // - Plan ejecutado: ver detalle + repetir (la serie sigue activa hacia futuro)
+  // - Plan no ejecutado: editar + ejecutar + borrar + repetir
+  if (esVirtual) {
+    if (btnBorrar) btnBorrar.style.display = 'none';
+    if (btnEjec) btnEjec.style.display = 'none';
+    if (btnEditar) btnEditar.style.display = 'none';
+    if (btnCrear) btnCrear.style.display = 'none';
+    if (repetirBox) repetirBox.style.display = 'none';
+  } else if (yaEjecutado) {
+    if (btnBorrar) btnBorrar.style.display = '';
+    if (btnEjec) btnEjec.style.display = 'none';   // ya se ejecutó, no se vuelve a ejecutar
+    if (btnEditar) btnEditar.style.display = 'none';  // un pedido ya hecho no se edita desde acá
+    if (btnCrear) btnCrear.style.display = 'none';
+    if (repetirBox) repetirBox.style.display = '';  // sí se puede programar repetición a futuro
+  } else {
+    if (btnBorrar) btnBorrar.style.display = '';
+    if (btnEjec) btnEjec.style.display = '';
+    if (btnEditar) btnEditar.style.display = '';
+    if (btnCrear) btnCrear.style.display = 'none';
+    if (repetirBox) repetirBox.style.display = '';
+  }
 }
 
 // Replica el plan del día actual cada N semanas durante los próximos 3 meses
@@ -2050,18 +2166,20 @@ function convertirDiaEnPedido() {
       perdidos.push(it.productoLista);
     }
   });
-  pedidoSet({ items: nuevoItems });
+  // Marcar el pedido como "ejecutar plan": modo realizar + recordar de qué plan vino
+  pedidoSet({
+    items: nuevoItems,
+    modo: 'realizar',
+    fechaCalendario: null,
+    ejecutandoPlanCalId: plan.id
+  });
   actualizarBadgePedido();
-  // Marcar el día como ejecutado
-  plan.ejecutado = true;
-  plan.ejecutado_en = Date.now();
-  syncCalDiaRemoto(plan).catch(function() {});
   cerrarModalDia();
   cambiarTab('pedido');
   if (perdidos.length > 0) {
     showToast(perdidos.length + ' producto(s) ya no están disponibles: ' + perdidos.slice(0, 2).join(', ') + (perdidos.length > 2 ? '…' : ''), 'warn');
   } else {
-    showToast('Plan cargado. Revisá y confirmá el pedido.', 'ok');
+    showToast('Plan cargado. Confirmá para realizar el pedido.', 'ok');
   }
 }
 
@@ -2422,7 +2540,7 @@ function cambiarTab(tab) {
   });
   if (tab === 'ingreso') renderIngreso();
   if (tab === 'listas') cargarListas();
-  if (tab === 'pedido') { renderFaltantesSugerencia(); renderBuscarProducto(); actualizarBadgePedido(); }
+  if (tab === 'pedido') { _entrarTabPedido(); }
   if (tab === 'ver-pedido') renderVerPedido();
   if (tab === 'resumen') renderResumen();
   if (tab === 'historial') renderHistorial();
@@ -6293,6 +6411,128 @@ function toggleBusquedaEspecifica() {
   renderBuscarProducto();
 }
 
+// ============================================================
+// LANDING DE ARMAR PEDIDO (dos modos: realizar / programar)
+// ============================================================
+
+// Llamado al entrar al tab 'pedido'. Decide entre landing y flujo.
+function _entrarTabPedido() {
+  var ped = pedidoGet();
+  var tieneItems = Object.keys(ped.items || {}).filter(function(k) { return ped.items[k].qty > 0; }).length > 0;
+  var modo = ped.modo;
+  var landing = $('pedido-landing');
+  var flujo = $('pedido-flujo');
+  if (!landing || !flujo) return;
+  if (!modo && !tieneItems) {
+    landing.style.display = '';
+    flujo.style.display = 'none';
+    pintarIconosEstaticos(landing);
+  } else {
+    landing.style.display = 'none';
+    flujo.style.display = '';
+    _renderBannerModoPedido();
+    renderFaltantesSugerencia();
+    renderBuscarProducto();
+    actualizarBadgePedido();
+    pintarIconosEstaticos(flujo);
+  }
+}
+
+function _renderBannerModoPedido() {
+  var banner = $('pedido-modo-banner');
+  var titulo = $('pedido-flujo-titulo');
+  if (!banner) return;
+  var ped = pedidoGet();
+  var modo = ped.modo;
+  if (modo === 'programar' && ped.fechaCalendario) {
+    var d = _parseIsoDate(ped.fechaCalendario);
+    var fechaTxt = d.getDate() + ' de ' + _nombreMesLargo(d).split(' ')[0].toLowerCase() + ' de ' + d.getFullYear();
+    banner.style.display = '';
+    banner.innerHTML = '<div style="background:rgba(96,165,250,0.10);border:1px solid rgba(96,165,250,0.35);border-radius:10px;padding:9px 13px;font-size:12px;color:#60a5fa;display:flex;align-items:center;gap:8px;">' +
+      Icon.calendar({ size: 14 }) +
+      '<strong>Programando pedido para ' + fechaTxt + '</strong>' +
+      '<span style="opacity:0.75;">— al confirmar se guarda en el calendario</span>' +
+      '</div>';
+    if (titulo) titulo.textContent = 'Programar pedido';
+  } else if (modo === 'realizar') {
+    banner.style.display = '';
+    banner.innerHTML = '<div style="background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.35);border-radius:10px;padding:9px 13px;font-size:12px;color:var(--emerald-bright);display:flex;align-items:center;gap:8px;">' +
+      Icon.cart({ size: 14 }) +
+      '<strong>Realizando pedido para hoy</strong>' +
+      '<span style="opacity:0.75;">— al confirmar va al historial</span>' +
+      '</div>';
+    if (titulo) titulo.textContent = 'Realizar pedido';
+  } else {
+    banner.style.display = 'none';
+    if (titulo) titulo.textContent = 'Armar pedido';
+  }
+}
+
+function arrancarRealizarPedido() {
+  var p = pedidoGet();
+  pedidoSet(Object.assign({}, p, { modo: 'realizar', fechaCalendario: null }));
+  _entrarTabPedido();
+  setTimeout(function() {
+    var inp = $('buscar-producto');
+    if (inp) inp.focus();
+  }, 80);
+}
+
+function arrancarProgramarPedido() {
+  // Si no tiene plan Max, redirigir al modo realizar
+  if (!calendarioPermitido()) {
+    showToast('Programar pedidos es parte del plan Max', 'warn');
+    arrancarRealizarPedido();
+    return;
+  }
+  // Pedir fecha con un date picker dentro de un dialog
+  var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  var sugerida = new Date(hoy); sugerida.setDate(sugerida.getDate() + 7);
+  var fechaIso = prompt('¿Para qué día querés programarlo?\n\nFormato: AAAA-MM-DD (ej: ' + _isoDate(sugerida) + ')', _isoDate(sugerida));
+  if (!fechaIso) return;
+  fechaIso = fechaIso.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaIso)) {
+    showToast('Formato de fecha inválido', 'error');
+    return;
+  }
+  var d = _parseIsoDate(fechaIso);
+  if (isNaN(d.getTime())) {
+    showToast('Fecha inválida', 'error');
+    return;
+  }
+  if (d < hoy) {
+    showToast('No podés programar para fechas pasadas', 'error');
+    return;
+  }
+  // Si la fecha es HOY, mejor preguntamos si quiere realizar en vez de programar
+  if (_isoDate(d) === _isoDate(hoy)) {
+    if (confirm('Elegiste hoy. ¿Querés realizar el pedido ahora en lugar de programarlo?')) {
+      arrancarRealizarPedido();
+      return;
+    }
+  }
+  var p = pedidoGet();
+  pedidoSet(Object.assign({}, p, { modo: 'programar', fechaCalendario: fechaIso }));
+  cambiarTab('pedido');
+  setTimeout(function() {
+    var inp = $('buscar-producto');
+    if (inp) inp.focus();
+  }, 80);
+}
+
+function volverALandingPedido() {
+  var p = pedidoGet();
+  var tieneItems = Object.keys(p.items || {}).filter(function(k) { return p.items[k].qty > 0; }).length > 0;
+  if (tieneItems) {
+    if (!confirm('Tenés productos cargados. ¿Cambiar de modo va a borrar lo cargado. Seguir?')) return;
+    pedidoSet({ items: {} });
+  } else {
+    pedidoSet({ items: {} });
+  }
+  actualizarBadgePedido();
+  _entrarTabPedido();
+}
+
 function renderBuscarProducto(expansionesExtras) {
   var cont = $('buscar-content');
   if (!cont) return;
@@ -6763,19 +7003,24 @@ function confirmarPedido() {
   if (!ids.length) { showToast('El pedido está vacío'); return; }
   var editando = ped.editandoHistId || null;
   var editandoPlanCal = ped.editandoPlanCalId || null;
-  var fechaCal = ped.fechaCalendario || null;  // si está, va a pedidos_programados
+  var modo = ped.modo;
+  var fechaCal = ped.fechaCalendario || null;  // si está, programa para esa fecha
   var hoyIso = _isoDate(new Date());
-  var esParaHoy = !fechaCal || fechaCal === hoyIso;
+  // Decide si es PROGRAMACIÓN (solo calendario, sin historial) o EJECUCIÓN
+  // (va al historial Y se refleja en el calendario como ejecutado).
+  // Programación = modo 'programar' Y fecha futura (≠ hoy).
+  var esProgramacion = (modo === 'programar' && fechaCal && fechaCal !== hoyIso) ||
+                       (!modo && fechaCal && fechaCal !== hoyIso);  // compat: fecha del selector resumen
   var msgConfirm;
-  if (editandoPlanCal) {
+  if (editandoPlanCal && esProgramacion) {
     msgConfirm = '¿Guardar cambios al plan del calendario?';
-  } else if (fechaCal && !esParaHoy) {
+  } else if (esProgramacion) {
     var dCal = _parseIsoDate(fechaCal);
     msgConfirm = '¿Programar este pedido para el ' + dCal.getDate() + ' de ' + _nombreMesLargo(dCal).split(' ')[0].toLowerCase() + '? Se guardará en el calendario, no en el historial.';
   } else if (editando) {
     msgConfirm = '¿Guardar los cambios al pedido?';
   } else {
-    msgConfirm = '¿Confirmar el pedido? Se guardará en el historial.';
+    msgConfirm = '¿Confirmar el pedido? Se guarda en el historial' + (calendarioPermitido() ? ' y queda registrado en el calendario.' : '.');
   }
   if (!confirm(msgConfirm)) return;
 
@@ -6790,8 +7035,8 @@ function confirmarPedido() {
     items.push({ itemId: itemId, productoLista: info.productoLista, qty: ped.items[itemId].qty, unidad: info.unidad || '', proveedorId: info.proveedorId, proveedor: info.proveedor, precio: info.precio, subtotal: info.precio * ped.items[itemId].qty });
   });
 
-  // === GUARDAR EN CALENDARIO (no en historial) si se eligió fecha futura ===
-  if (fechaCal && !esParaHoy) {
+  // === RAMA A: PROGRAMACIÓN (solo calendario, no historial) ===
+  if (esProgramacion) {
     var planExistente = _calMap[fechaCal];
     var planAGuardar = {
       id: (planExistente && planExistente.id) || editandoPlanCal || _uuid(),
@@ -6802,6 +7047,7 @@ function confirmarPedido() {
       cada_n_semanas: planExistente ? planExistente.cada_n_semanas : null,
       serie_hasta: planExistente ? planExistente.serie_hasta : null,
       ejecutado: false,
+      ejecutado_en: null,
       creado_por: (planExistente && planExistente.creado_por) || ((sesion && sesion.user && sesion.user.id) || null)
     };
     _calMap[fechaCal] = planAGuardar;
@@ -6809,15 +7055,11 @@ function confirmarPedido() {
     pedidoSet({ items: {} });
     actualizarBadgePedido();
     cambiarTab('calendario');
-    showToast(planExistente ? 'Plan actualizado' : 'Plan guardado en el calendario', 'ok');
+    showToast(planExistente ? 'Plan actualizado en el calendario' : 'Plan guardado en el calendario', 'ok');
     return;
   }
 
-  // === SI ESTABA EDITANDO UN PLAN DEL CALENDARIO pero ahora sin fecha → sobreescribir solo ese día (mismo día) ===
-  if (editandoPlanCal && !fechaCal) {
-    // El usuario eligió quitar la fecha → tratamos como pedido normal (historial)
-  }
-
+  // === RAMA B: REALIZAR (historial + reflejo en calendario) ===
   var hist = histGet();
 
   if (editando) {
@@ -6860,7 +7102,8 @@ function confirmarPedido() {
     faltantes: [],
     cambios: [],
     creado_por: quienSoy(),
-    creado_por_uid: (sesion && sesion.user && sesion.user.id) || null
+    creado_por_uid: (sesion && sesion.user && sesion.user.id) || null,
+    desde_plan_cal_id: ped.ejecutandoPlanCalId || null
   };
   hist.unshift(pedidoNuevo);
   // No truncar el historial: cada pedido es data del usuario y NO se borra
@@ -6868,11 +7111,35 @@ function confirmarPedido() {
   // tiene la copia de seguridad. (Antes había un slice(0,100) — eliminado).
   histSet(hist);
   syncPedidoRemoto(pedidoNuevo).catch(function() {});
+
+  // === Reflejar en el calendario el día que se hizo (HOY) ===
+  // Si veníamos ejecutando un plan del calendario, marcarlo como ejecutado.
+  // Si no, crear una entrada nueva para HOY como pedido ejecutado.
+  if (calendarioPermitido()) {
+    var planExistenteHoy = ped.ejecutandoPlanCalId
+      ? Object.keys(_calMap).map(function(k) { return _calMap[k]; }).find(function(p) { return p.id === ped.ejecutandoPlanCalId; })
+      : _calMap[hoyIso];
+    var planRegistro = {
+      id: (planExistenteHoy && planExistenteHoy.id) || _uuid(),
+      fecha: (planExistenteHoy && planExistenteHoy.fecha) || hoyIso,
+      items: items,
+      total: pedidoNuevo.total,
+      serie_id: planExistenteHoy ? planExistenteHoy.serie_id : null,
+      cada_n_semanas: planExistenteHoy ? planExistenteHoy.cada_n_semanas : null,
+      serie_hasta: planExistenteHoy ? planExistenteHoy.serie_hasta : null,
+      ejecutado: true,
+      ejecutado_en: Date.now(),
+      creado_por: (planExistenteHoy && planExistenteHoy.creado_por) || ((sesion && sesion.user && sesion.user.id) || null)
+    };
+    _calMap[planRegistro.fecha] = planRegistro;
+    syncCalDiaRemoto(planRegistro).catch(function() {});
+  }
+
   pedidoSet({ items: {} });
   actualizarBadgePedido();
   renderHistorial();
   cambiarTab('historial');
-  showToast('Pedido guardado en historial');
+  showToast('Pedido guardado en historial' + (calendarioPermitido() ? ' y en el calendario' : ''));
 }
 
 var historialTabActual = 'recepcion';

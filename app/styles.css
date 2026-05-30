@@ -2331,3 +2331,26 @@ h3 { font-size: 18px; }
   .cal-day .day-total { font-size: 10.5px; }
   .cal-head { font-size: 9.5px; padding: 6px 0 3px; }
 }
+
+/* Modo done = pedido ejecutado (vino del historial o se confirmó desde un plan) */
+.cal-day.done {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(16, 185, 129, 0.03));
+  border-color: rgba(16, 185, 129, 0.35);
+}
+.cal-day.done .day-total { color: var(--emerald-bright); }
+.cal-day.done .day-done-mark {
+  position: absolute;
+  bottom: 6px;
+  right: 8px;
+  font-size: 9.5px;
+  color: var(--emerald-bright);
+}
+
+/* Botones de modo en landing de Armar Pedido */
+.pedido-modo-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px -16px rgba(0, 0, 0, 0.4);
+}
+@media (max-width: 540px) {
+  #pedido-landing > div[style*="grid"] { grid-template-columns: 1fr !important; }
+}

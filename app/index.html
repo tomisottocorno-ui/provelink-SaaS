@@ -269,13 +269,12 @@
           <div style="display:flex;align-items:center;gap:10px;">
             <span class="icon-slot" data-icon="calendar"></span>
             <div>
-              <div style="font-size:13px;font-weight:600;">¿Cuándo lo pedís?</div>
-              <div style="font-size:11px;color:var(--text-muted);">Si elegís una fecha, se guarda como plan en el calendario. Si la dejás vacía, va al historial como pedido confirmado.</div>
+              <div style="font-size:13px;font-weight:600;">¿Para qué día lo programás?</div>
+              <div style="font-size:11px;color:var(--text-muted);">Se guarda en el calendario. El precio se actualiza con la lista hasta que lo realices.</div>
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <input type="date" id="resumen-fecha-cal" style="background:var(--bg-elev2);border:1px solid var(--border-hi);color:var(--text);padding:8px 10px;border-radius:8px;font-size:13px;font-family:inherit;">
-            <button class="btn" onclick="limpiarFechaCalendario()" id="btn-limpiar-fecha-cal" style="font-size:11px;padding:6px 10px;display:none;"><span class="icon-slot" data-icon="x"></span> Quitar fecha</button>
           </div>
         </div>
       </div>
@@ -1734,6 +1733,9 @@ async function cargarCalendarioRemoto() {
     });
     _calMap = nuevoMap;
     _calCacheSet(_calMap);
+    // Recalcular precios de planes no ejecutados contra la lista vigente
+    // (solo si ya hay listas cargadas; si no, se hace al entrar al tab).
+    if (listas && listas.length) _recalcularPlanesProgramados();
     console.log('[Calendario] cargados', Object.keys(_calMap).length, 'días');
   } catch(e) { console.warn('[Calendario] excepción:', e); }
 }
@@ -1745,6 +1747,152 @@ function cambiarMesCalendario(delta) {
 function irMesActual() {
   _calFecha = new Date(); _calFecha.setDate(1); _calFecha.setHours(0, 0, 0, 0);
   cargarCalendarioRemoto().then(function() { renderCalendario(); });
+}
+
+// ============================================================
+// PRECIOS DINÁMICOS DE PLANES PROGRAMADOS
+// ============================================================
+// Regla de negocio:
+//   - Plan NO realizado (ejecutado:false) → el precio se actualiza con la
+//     lista vigente. Si el proveedor sube precios, el plan refleja el nuevo.
+//   - Plan realizado (ejecutado:true) → el precio queda CONGELADO en lo que
+//     se pagó. No se vuelve a tocar nunca.
+
+// Índice de los items actuales por id y por nombre+proveedor (para rematch
+// cuando el itemId cambió porque se re-subió la lista).
+function _buildIndiceActual() {
+  var byId = {}, byKey = {};
+  todosLosItems().forEach(function(t) {
+    byId[t.itemId] = t;
+    byKey[_normNombreHist(t.productoLista) + '|' + t.proveedorId] = t;
+  });
+  return { byId: byId, byKey: byKey };
+}
+
+// Devuelve una COPIA del plan con precios actualizados a la lista vigente.
+// Si el plan está ejecutado, lo devuelve tal cual (congelado).
+// idx opcional (de _buildIndiceActual) para no recomputar en loops.
+function _planConPreciosActuales(plan, idx) {
+  if (!plan || plan.ejecutado) return plan;  // congelado o nulo
+  if (!plan.items || !plan.items.length) return plan;
+  idx = idx || _buildIndiceActual();
+  var cambio = false;
+  var hayNoDisponible = false;
+  var items = plan.items.map(function(it) {
+    var actual = idx.byId[it.itemId];
+    if (!actual) {
+      // Rematch por nombre + proveedor (el itemId cambió al re-subir lista)
+      actual = idx.byKey[_normNombreHist(it.productoLista) + '|' + it.proveedorId];
+    }
+    if (actual) {
+      if (actual.precio !== it.precio || actual.itemId !== it.itemId) cambio = true;
+      return Object.assign({}, it, {
+        itemId: actual.itemId,
+        precio: actual.precio,
+        subtotal: actual.precio * it.qty,
+        _noDisponible: false
+      });
+    }
+    // No se encontró en listas vigentes: mantener último precio, marcar
+    hayNoDisponible = true;
+    return Object.assign({}, it, { _noDisponible: true });
+  });
+  var total = items.reduce(function(s, x) { return s + (x.subtotal || x.precio * x.qty || 0); }, 0);
+  var copia = Object.assign({}, plan, { items: items, total: total });
+  copia._huboCambioPrecio = cambio;
+  copia._hayNoDisponible = hayNoDisponible;
+  return copia;
+}
+
+// Recalcula TODOS los planes no ejecutados del _calMap contra la lista vigente
+// y persiste los que cambiaron (memoria + localStorage + remoto). Se llama al
+// cargar el calendario y al cargar listas nuevas.
+function _recalcularPlanesProgramados() {
+  if (!calendarioPermitido()) return;
+  var idx = _buildIndiceActual();
+  var algunCambio = false;
+  Object.keys(_calMap).forEach(function(iso) {
+    var plan = _calMap[iso];
+    if (!plan || plan.ejecutado) return;
+    var recalc = _planConPreciosActuales(plan, idx);
+    if (recalc._huboCambioPrecio) {
+      _calMap[iso] = recalc;
+      algunCambio = true;
+      syncCalDiaRemoto(recalc).catch(function() {});
+    }
+  });
+  if (algunCambio) _calCacheSet(_calMap);
+}
+
+// Pregunta al usuario si quiere repetir y cada cuánto. Devuelve:
+//   null  → canceló
+//   0     → no repetir
+//   1/2/4 → cada N semanas (4 = mensual aprox)
+function _promptRepeticion(introMsg) {
+  var msg = (introMsg ? introMsg + '\n\n' : '') +
+    '¿Querés que este pedido se repita?\n\n' +
+    'Escribí cada cuántas semanas:\n' +
+    '  1 = cada semana\n' +
+    '  2 = cada 2 semanas\n' +
+    '  4 = una vez por mes\n' +
+    '  (dejá vacío y Aceptá si NO querés repetir)';
+  var r = prompt(msg, '');
+  if (r === null) return null;        // canceló
+  r = r.trim();
+  if (!r) return 0;                   // no repetir
+  var n = parseInt(r, 10);
+  if (n === 1 || n === 2 || n === 4) return n;
+  showToast('Solo se admite 1, 2 o 4 semanas. No se programó repetición.', 'warn');
+  return 0;
+}
+
+// Genera una serie de planes programados (ejecutado:false) a partir de un día
+// base, cada N semanas, por 3 meses. Reutilizable desde cualquier flujo.
+// planBase: objeto con .items (se copian) — sus precios se recalcularán al
+// renderizar porque las copias quedan ejecutado:false.
+async function _generarSerieDesde(isoBase, cadaNSemanas, planBase, serieIdExistente) {
+  var serieId = serieIdExistente || planBase.serie_id || _uuid();
+  var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  var hasta = new Date(hoy); hasta.setMonth(hasta.getMonth() + 3);
+  var hastaIso = _isoDate(hasta);
+
+  // El plan base queda marcado como parte de la serie (si existe en _calMap)
+  if (_calMap[isoBase]) {
+    _calMap[isoBase].serie_id = serieId;
+    _calMap[isoBase].cada_n_semanas = cadaNSemanas;
+    _calMap[isoBase].serie_hasta = hastaIso;
+    syncCalDiaRemoto(_calMap[isoBase]).catch(function() {});
+  }
+
+  var origen = _parseIsoDate(isoBase);
+  var generados = 0;
+  var fecha = new Date(origen);
+  fecha.setDate(fecha.getDate() + 7 * cadaNSemanas);
+  while (fecha <= hasta) {
+    var isoCopia = _isoDate(fecha);
+    if (!_calMap[isoCopia]) {
+      var copia = {
+        id: _uuid(),
+        fecha: isoCopia,
+        // Copiamos items SIN congelar — al ser ejecutado:false, el precio se
+        // recalcula con la lista vigente cada vez que se muestra.
+        items: planBase.items.map(function(it) { return Object.assign({}, it, { _noDisponible: false }); }),
+        total: planBase.total,
+        serie_id: serieId,
+        cada_n_semanas: cadaNSemanas,
+        serie_hasta: hastaIso,
+        ejecutado: false,
+        ejecutado_en: null,
+        creado_por: (sesion && sesion.user && sesion.user.id) || null
+      };
+      _calMap[isoCopia] = copia;
+      await syncCalDiaRemoto(copia).catch(function() {});
+      generados++;
+    }
+    fecha.setDate(fecha.getDate() + 7 * cadaNSemanas);
+  }
+  _calCacheSet(_calMap);
+  return generados;
 }
 
 // Construye un mapa combinado: _calMap (planes propios del calendario)
@@ -1822,11 +1970,13 @@ function renderCalendario() {
   var totalMes = 0;
   var diasConPlan = 0;
   var combinado = _calMapCombinado();
+  var idxActual = _buildIndiceActual();  // para recalcular precios de planes no ejecutados
 
   for (var dnum = 1; dnum <= diasEnMes; dnum++) {
     var d = new Date(year, month, dnum);
     var iso = _isoDate(d);
     var plan = combinado[iso];
+    if (plan && !plan.ejecutado) plan = _planConPreciosActuales(plan, idxActual);
     var esHoy = (iso === hoyIso);
     var clases = 'cal-day';
     if (esHoy) clases += ' today';
@@ -1973,6 +2123,8 @@ function _renderItemsDelDia(iso) {
   var cont = $('modal-cal-items');
   var combinado = _calMapCombinado();
   var plan = combinado[iso];
+  // Recalcular precios contra la lista vigente si NO está ejecutado
+  if (plan && !plan.ejecutado) plan = _planConPreciosActuales(plan);
   var items = (plan && plan.items) || [];
   var esVirtual = !!(plan && plan._virtual);  // viene proyectado del historial
   var yaEjecutado = !!(plan && plan.ejecutado);
@@ -2015,10 +2167,16 @@ function _renderItemsDelDia(iso) {
   });
   html += '<div style="display:flex;justify-content:space-between;padding:10px 12px;font-size:13px;font-weight:600;background:var(--bg-elev);"><span>Total del día</span><span>$' + Number(total).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</span></div>';
   html += '</div>';
-  // Si ya fue ejecutado, mostrar badge
+  // Cabecera según estado
   if (plan && plan.ejecutado) {
     var fechaEjec = new Date(plan.ejecutado_en || Date.now()).toLocaleDateString('es-AR');
-    html = '<div style="background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.3);color:var(--emerald-bright);font-size:11px;padding:7px 12px;border-radius:8px;margin-bottom:8px;display:inline-flex;align-items:center;gap:6px;">' + Icon.checkCircle({ size: 13 }) + (esVirtual ? ' Pedido realizado el ' + fechaEjec + ' (registrado en el historial)' : ' Plan ya ejecutado el ' + fechaEjec) + '</div>' + html;
+    html = '<div style="background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.3);color:var(--emerald-bright);font-size:11px;padding:7px 12px;border-radius:8px;margin-bottom:8px;display:inline-flex;align-items:center;gap:6px;">' + Icon.checkCircle({ size: 13 }) + (esVirtual ? ' Pedido realizado el ' + fechaEjec + ' · precio congelado' : ' Realizado el ' + fechaEjec + ' · precio congelado') + '</div>' + html;
+  } else {
+    // Plan programado: precio dinámico
+    var avisoNoDisp = (plan && plan._hayNoDisponible)
+      ? '<div style="background:rgba(248,113,113,0.10);border:1px solid var(--danger-border);color:var(--danger);font-size:11px;padding:7px 12px;border-radius:8px;margin-bottom:8px;">⚠️ Algún producto ya no está en las listas. Se muestra el último precio conocido.</div>'
+      : '';
+    html = '<div style="background:rgba(96,165,250,0.08);border:1px solid rgba(96,165,250,0.3);color:#60a5fa;font-size:11px;padding:7px 12px;border-radius:8px;margin-bottom:8px;display:inline-flex;align-items:center;gap:6px;">' + Icon.refreshCw({ size: 12 }) + ' Precio estimado con la lista vigente. Se congela cuando lo realices.</div>' + avisoNoDisp + html;
   }
   cont.innerHTML = html;
   // Botones según estado:
@@ -2046,60 +2204,25 @@ function _renderItemsDelDia(iso) {
   }
 }
 
-// Replica el plan del día actual cada N semanas durante los próximos 3 meses
+// Replica el plan del día (abierto en el modal) cada N semanas por 3 meses.
+// Funciona tanto para planes programados como para pedidos ya realizados:
+// en ambos casos genera copias FUTURAS no ejecutadas (precio dinámico).
 async function aplicarRepeticion(cadaNSemanas) {
   if (!_calDiaEditando) return;
   var iso = _calDiaEditando;
-  var plan = _calMap[iso];
-  if (!plan || !plan.items || plan.items.length === 0) {
-    showToast('Agregá productos antes de programar la repetición', 'error');
+  // Usar el plan combinado (puede ser virtual del historial)
+  var planComb = _calMapCombinado()[iso];
+  if (!planComb || !planComb.items || planComb.items.length === 0) {
+    showToast('No hay productos para repetir', 'error');
     return;
   }
-  if (!confirm('Replicar este plan cada ' + cadaNSemanas + ' semana' + (cadaNSemanas !== 1 ? 's' : '') + ' por 3 meses?')) return;
+  if (!confirm('Repetir este pedido cada ' + cadaNSemanas + ' semana' + (cadaNSemanas !== 1 ? 's' : '') + ' durante los próximos 3 meses?')) return;
 
-  var serieId = plan.serie_id || _uuid();
-  var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-  var hasta = new Date(hoy); hasta.setMonth(hasta.getMonth() + 3);
-  var hastaIso = _isoDate(hasta);
+  // Si el plan es virtual (viene del historial), no existe en _calMap como
+  // editable; usamos sus items como base pero la serie arranca desde HOY/iso.
+  var generados = await _generarSerieDesde(iso, cadaNSemanas, planComb, planComb.serie_id || null);
 
-  // Marcar el plan original como parte de la serie
-  plan.serie_id = serieId;
-  plan.cada_n_semanas = cadaNSemanas;
-  plan.serie_hasta = hastaIso;
-  syncCalDiaRemoto(plan).catch(function() {});
-
-  // Generar copias
-  var origen = _parseIsoDate(iso);
-  var generados = 0;
-  var fecha = new Date(origen);
-  fecha.setDate(fecha.getDate() + 7 * cadaNSemanas);
-  while (fecha <= hasta) {
-    var isoCopia = _isoDate(fecha);
-    var existente = _calMap[isoCopia];
-    if (!existente) {
-      // Crear copia nueva
-      var copia = {
-        id: _uuid(),
-        fecha: isoCopia,
-        items: plan.items.map(function(it) {
-          return Object.assign({}, it);
-        }),
-        total: plan.total,
-        serie_id: serieId,
-        cada_n_semanas: cadaNSemanas,
-        serie_hasta: hastaIso,
-        ejecutado: false,
-        creado_por: (sesion && sesion.user && sesion.user.id) || null
-      };
-      _calMap[isoCopia] = copia;
-      await syncCalDiaRemoto(copia).catch(function() {});
-      generados++;
-    }
-    fecha.setDate(fecha.getDate() + 7 * cadaNSemanas);
-  }
-
-  showToast('Serie creada · ' + generados + ' días replicados', 'ok');
-  // Actualizar el subtítulo del modal
+  showToast('Serie creada · ' + generados + ' día' + (generados !== 1 ? 's' : '') + ' programado' + (generados !== 1 ? 's' : ''), 'ok');
   $('modal-cal-subtitulo').textContent = 'Parte de una serie · cada ' + cadaNSemanas + ' semana' + (cadaNSemanas !== 1 ? 's' : '');
   renderCalendario();
 }
@@ -2146,21 +2269,19 @@ function borrarDiaCalendario() {
 // Pre-carga el plan del día en "Armar pedido" para que el usuario confirme
 function convertirDiaEnPedido() {
   if (!_calDiaEditando) return;
-  var plan = _calMap[_calDiaEditando];
-  if (!plan || !plan.items || plan.items.length === 0) return;
+  var planRaw = _calMap[_calDiaEditando];
+  if (!planRaw || !planRaw.items || planRaw.items.length === 0) return;
+  // Refrescar itemIds y precios contra la lista vigente antes de cargar
+  var plan = _planConPreciosActuales(planRaw);
 
   var ped = pedidoGet();
   if (ped.items && Object.keys(ped.items).filter(function(k) { return ped.items[k].qty; }).length) {
     if (!confirm('Ya hay un pedido en curso. ¿Reemplazarlo con el plan del día?')) return;
   }
-  // Validar que los productos sigan existiendo en las listas actuales
-  var actuales = todosLosItems();
-  var byId = {};
-  actuales.forEach(function(t) { byId[t.itemId] = t; });
   var nuevoItems = {};
   var perdidos = [];
   plan.items.forEach(function(it) {
-    if (byId[it.itemId]) {
+    if (!it._noDisponible && it.itemId) {
       nuevoItems[it.itemId] = { qty: it.qty };
     } else {
       perdidos.push(it.productoLista);
@@ -2618,6 +2739,9 @@ async function cargarListas() {
     if (error) throw error;
     listas = data || [];
     renderListas();
+    // Las listas cambiaron → recalcular precios de planes programados no
+    // ejecutados (se actualizan al precio vigente). Los ejecutados no se tocan.
+    _recalcularPlanesProgramados();
   } catch(e) {
     console.error('cargarListas', e);
     showToast('Error al cargar listas', 'error');
@@ -6870,28 +6994,25 @@ function renderResumen() {
   }
   if (footer) footer.style.display = '';
 
-  // Selector de día del calendario: solo plan Max (mismo gating que tab Calendario)
+  // Selector de día del calendario: SOLO en modo 'programar' (para poder
+  // ajustar la fecha objetivo). En modo 'realizar' no se muestra (va a hoy).
   var selBox = $('resumen-cal-selector');
   if (selBox) {
-    if (calendarioPermitido()) {
+    if (calendarioPermitido() && ped.modo === 'programar') {
       selBox.style.display = '';
       var inp = $('resumen-fecha-cal');
-      if (inp && !inp.value && ped.fechaCalendario) inp.value = ped.fechaCalendario;
+      if (inp && ped.fechaCalendario) inp.value = ped.fechaCalendario;
       var btnBorrarFecha = $('btn-limpiar-fecha-cal');
-      if (btnBorrarFecha) btnBorrarFecha.style.display = (inp && inp.value) ? '' : 'none';
-      // Listener una sola vez
+      if (btnBorrarFecha) btnBorrarFecha.style.display = 'none';  // en modo programar la fecha es obligatoria
       if (inp && !inp._listenerAttached) {
         inp.addEventListener('change', function() {
           var v = inp.value;
           var p = pedidoGet();
           pedidoSet(Object.assign({}, p, { fechaCalendario: v || null }));
-          var btn = $('btn-limpiar-fecha-cal');
-          if (btn) btn.style.display = v ? '' : 'none';
           actualizarBotonConfirmar();
         });
         inp._listenerAttached = true;
       }
-      // Min: hoy (no permite fechas pasadas)
       if (inp) inp.min = _isoDate(new Date());
     } else {
       selBox.style.display = 'none';
@@ -7054,6 +7175,18 @@ function confirmarPedido() {
     syncCalDiaRemoto(planAGuardar).catch(function() {});
     pedidoSet({ items: {} });
     actualizarBadgePedido();
+
+    // Ofrecer repetición (solo si NO es ya parte de una serie)
+    if (!planAGuardar.serie_id) {
+      var nRep = _promptRepeticion('Programaste el pedido. ');
+      if (nRep && nRep > 0) {
+        _generarSerieDesde(fechaCal, nRep, planAGuardar, null).then(function(gen) {
+          showToast('Programado + serie de ' + gen + ' repeticiones', 'ok');
+          cambiarTab('calendario');
+        });
+        return;
+      }
+    }
     cambiarTab('calendario');
     showToast(planExistente ? 'Plan actualizado en el calendario' : 'Plan guardado en el calendario', 'ok');
     return;
@@ -7112,17 +7245,19 @@ function confirmarPedido() {
   histSet(hist);
   syncPedidoRemoto(pedidoNuevo).catch(function() {});
 
-  // === Reflejar en el calendario el día que se hizo (HOY) ===
-  // Si veníamos ejecutando un plan del calendario, marcarlo como ejecutado.
-  // Si no, crear una entrada nueva para HOY como pedido ejecutado.
+  // === Reflejar en el calendario el día que se hizo ===
+  // Si veníamos ejecutando un plan del calendario, marcarlo como ejecutado
+  // EN SU FECHA (congela el precio pagado). Si no, crear una entrada para HOY.
+  var veniaDeSerie = false;
   if (calendarioPermitido()) {
     var planExistenteHoy = ped.ejecutandoPlanCalId
       ? Object.keys(_calMap).map(function(k) { return _calMap[k]; }).find(function(p) { return p.id === ped.ejecutandoPlanCalId; })
       : _calMap[hoyIso];
+    if (planExistenteHoy && planExistenteHoy.serie_id) veniaDeSerie = true;
     var planRegistro = {
       id: (planExistenteHoy && planExistenteHoy.id) || _uuid(),
       fecha: (planExistenteHoy && planExistenteHoy.fecha) || hoyIso,
-      items: items,
+      items: items,                         // precio CONGELADO al confirmar
       total: pedidoNuevo.total,
       serie_id: planExistenteHoy ? planExistenteHoy.serie_id : null,
       cada_n_semanas: planExistenteHoy ? planExistenteHoy.cada_n_semanas : null,
@@ -7140,6 +7275,21 @@ function confirmarPedido() {
   renderHistorial();
   cambiarTab('historial');
   showToast('Pedido guardado en historial' + (calendarioPermitido() ? ' y en el calendario' : ''));
+
+  // Ofrecer repetición a futuro SOLO si el plan no venía ya de una serie.
+  // Las copias futuras quedan como planes programados (no ejecutados) con
+  // precio dinámico. _generarSerieDesde marca el día base (hoy) como serie.
+  if (calendarioPermitido() && !veniaDeSerie) {
+    setTimeout(function() {
+      var nRep = _promptRepeticion('Pedido realizado. ');
+      if (nRep && nRep > 0) {
+        var base = { items: items, total: pedidoNuevo.total };
+        _generarSerieDesde(hoyIso, nRep, base, null).then(function(gen) {
+          showToast('Se programaron ' + gen + ' repeticiones a futuro', 'ok');
+        });
+      }
+    }, 400);
+  }
 }
 
 var historialTabActual = 'recepcion';

@@ -1864,13 +1864,16 @@ async function _generarSerieDesde(isoBase, cadaNSemanas, planBase, serieIdExiste
     syncCalDiaRemoto(_calMap[isoBase]).catch(function() {});
   }
 
+  var hoyIso = _isoDate(hoy);
   var origen = _parseIsoDate(isoBase);
   var generados = 0;
   var fecha = new Date(origen);
   fecha.setDate(fecha.getDate() + 7 * cadaNSemanas);
   while (fecha <= hasta) {
     var isoCopia = _isoDate(fecha);
-    if (!_calMap[isoCopia]) {
+    // Solo generar copias FUTURAS (>= hoy). Esto importa cuando se repite un
+    // pedido viejo: las ocurrencias entre la fecha vieja y hoy se saltean.
+    if (isoCopia >= hoyIso && !_calMap[isoCopia]) {
       var copia = {
         id: _uuid(),
         fecha: isoCopia,
@@ -2180,15 +2183,16 @@ function _renderItemsDelDia(iso) {
   }
   cont.innerHTML = html;
   // Botones según estado:
-  // - Virtual (del historial): solo cerrar, no se puede borrar ni editar desde acá
-  // - Plan ejecutado: ver detalle + repetir (la serie sigue activa hacia futuro)
-  // - Plan no ejecutado: editar + ejecutar + borrar + repetir
+  // - Virtual (pedido viejo del historial): NO se borra/edita desde acá
+  //   (eso se hace en el Historial), PERO SÍ se puede repetir a futuro.
+  // - Plan ejecutado (no virtual): ver detalle + repetir.
+  // - Plan no ejecutado (programado): editar + ejecutar + borrar + repetir.
   if (esVirtual) {
     if (btnBorrar) btnBorrar.style.display = 'none';
     if (btnEjec) btnEjec.style.display = 'none';
     if (btnEditar) btnEditar.style.display = 'none';
     if (btnCrear) btnCrear.style.display = 'none';
-    if (repetirBox) repetirBox.style.display = 'none';
+    if (repetirBox) repetirBox.style.display = '';   // ← repetir pedidos viejos
   } else if (yaEjecutado) {
     if (btnBorrar) btnBorrar.style.display = '';
     if (btnEjec) btnEjec.style.display = 'none';   // ya se ejecutó, no se vuelve a ejecutar

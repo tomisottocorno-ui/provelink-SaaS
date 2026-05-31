@@ -7800,25 +7800,45 @@ function construirContextoIA() {
   ctx += '  6. Al final indicá cuál es el más barato y cuál el más caro por unidad\n';
   ctx += 'NUNCA compares precios absolutos de distintas presentaciones sin normalizar primero.\n';
 
-  // === CAPACIDAD DE EJECUTAR PEDIDOS ===
+  // === CAPACIDAD DE EJECUTAR PEDIDOS (vía tool use) ===
   var hoyIso = _isoDate(new Date());
-  ctx += '\n=== HACER Y PROGRAMAR PEDIDOS (MUY IMPORTANTE) ===\n';
-  ctx += 'Podés ARMAR pedidos por el usuario, no solo darle texto. Cuando el usuario te pide hacer/realizar/programar un pedido (ej: "pedime 3 harinas y 2 aceites", "programá para el viernes 2 cajas de leche", "todas las semanas pedí 5 docenas de huevo"), respondé con una frase corta confirmando lo que entendiste Y AGREGÁ al final un bloque de acción EXACTO con este formato:\n';
-  ctx += '@@PEDIDO@@\n';
-  ctx += '{"modo":"realizar"|"programar","fecha":"YYYY-MM-DD" o null,"repetir":0|1|2|4,"items":[{"buscar":"nombre del producto","qty":numero}]}\n';
-  ctx += '@@FIN@@\n';
-  ctx += 'Reglas del bloque:\n';
-  ctx += '- "modo":"realizar" = lo pide HOY (va al historial). "modo":"programar" = lo deja agendado para una fecha futura.\n';
-  ctx += '- "fecha": solo si programa. Formato YYYY-MM-DD. HOY es ' + hoyIso + '. NUNCA uses fechas pasadas. Si el usuario dice "el viernes", "la semana que viene", calculá la fecha real futura.\n';
-  ctx += '- "repetir": 0 = no repetir, 1 = cada semana, 2 = cada 2 semanas, 4 = cada mes. Solo si el usuario lo pide explícitamente.\n';
-  ctx += '- "buscar": el nombre del producto tal cual para buscarlo en las listas (ej "harina 000", "aceite girasol", "leche entera"). El sistema elige el más barato disponible.\n';
-  ctx += '- "qty": cantidad de envases/unidades. Si el usuario no aclara, asumí 1.\n';
-  ctx += '- Si el usuario solo pregunta precios o compara, NO agregues bloque. El bloque es SOLO cuando quiere armar/programar un pedido.\n';
-  ctx += '- Si falta info clave (qué productos), preguntá primero, no inventes el bloque.\n';
-  ctx += 'Ejemplo: usuario dice "pedime 3 harina 000 y 2 aceite girasol para hoy". Respondés:\n';
-  ctx += '"Dale, te armo el pedido con 3 harina 000 y 2 aceite girasol al precio más bajo. Revisá y confirmá 👇\n@@PEDIDO@@\n{"modo":"realizar","fecha":null,"repetir":0,"items":[{"buscar":"harina 000","qty":3},{"buscar":"aceite girasol","qty":2}]}\n@@FIN@@"\n';
+  ctx += '\n=== HACER Y PROGRAMAR PEDIDOS ===\n';
+  ctx += 'Tenés una herramienta "armar_pedido". USALA cuando el usuario te pida hacer, realizar, comprar o programar un pedido (ej: "pedime 3 harinas y 2 aceites", "programá 2 cajas de leche para el viernes", "todas las semanas pedí 5 docenas de huevo").\n';
+  ctx += '- modo "realizar" = lo pide HOY (va al historial). modo "programar" = agendado para una fecha futura.\n';
+  ctx += '- HOY es ' + hoyIso + '. Si programás, calculá la fecha futura real (YYYY-MM-DD). NUNCA uses fechas pasadas.\n';
+  ctx += '- repetir: 0 (no repite), 1 (semanal), 2 (cada 2 sem), 4 (mensual). Solo si lo pide.\n';
+  ctx += '- En cada item, "buscar" es el nombre para encontrar el producto (ej "harina 000"); el sistema elige el más barato. "qty" = cantidad (default 1).\n';
+  ctx += '- Si solo pregunta precios o compara, NO uses la herramienta. Si falta info (qué productos), preguntá primero.\n';
+  ctx += '- Al usar la herramienta, podés acompañar con una frase corta confirmando lo que entendiste.\n';
   return ctx;
 }
+
+// Definición del tool para armar pedidos (Anthropic tool use).
+var TOOL_ARMAR_PEDIDO = {
+  name: 'armar_pedido',
+  description: 'Arma un pedido de compra por el usuario a partir de productos de sus listas de precios. Usar cuando el usuario quiere realizar (hoy) o programar (fecha futura) un pedido, opcionalmente repetido.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      modo: { type: 'string', enum: ['realizar', 'programar'], description: 'realizar = hoy (al historial); programar = fecha futura (al calendario)' },
+      fecha: { type: 'string', description: 'Fecha YYYY-MM-DD solo si modo=programar. Debe ser futura.' },
+      repetir: { type: 'integer', enum: [0, 1, 2, 4], description: 'Cada cuántas semanas se repite. 0=no repite, 4=mensual.' },
+      items: {
+        type: 'array',
+        description: 'Productos a pedir',
+        items: {
+          type: 'object',
+          properties: {
+            buscar: { type: 'string', description: 'Nombre del producto para buscarlo en las listas' },
+            qty: { type: 'integer', description: 'Cantidad de envases/unidades' }
+          },
+          required: ['buscar', 'qty']
+        }
+      }
+    },
+    required: ['modo', 'items']
+  }
+};
 
 // ============================================================
 // ASISTENTE — EJECUCIÓN DE PEDIDOS
@@ -8041,7 +8061,8 @@ async function enviarMensajeAI() {
         tipo: 'chat',
         max_tokens: 1500,
         system: construirContextoIA(),
-        messages: aiHistorial.slice(-6)
+        messages: aiHistorial.slice(-6),
+        tools: [TOOL_ARMAR_PEDIDO]
       })
     });
     quitarEscribiendo();
@@ -8054,14 +8075,24 @@ async function enviarMensajeAI() {
       aiHistorial.pop();
       return;
     }
-    var contenido = (data.content && data.content[0] && data.content[0].text) || '(sin respuesta)';
-    aiHistorial.push({ role: 'assistant', content: contenido });
-    // Detectar bloque de acción @@PEDIDO@@...@@FIN@@
-    var accion = _aiExtraerAccion(contenido);
-    var textoVisible = contenido.replace(/@@PEDIDO@@[\s\S]*?@@FIN@@/g, '').trim();
+    // La respuesta puede traer bloques de texto y/o un bloque tool_use.
+    var bloques = data.content || [];
+    var textos = bloques.filter(function(b) { return b.type === 'text'; })
+                        .map(function(b) { return b.text; }).join('\n').trim();
+    var toolUse = bloques.find(function(b) { return b.type === 'tool_use' && b.name === 'armar_pedido'; });
+    // Fallback: si por algún motivo vino el bloque @@PEDIDO@@ en texto plano
+    var accion = toolUse ? toolUse.input : _aiExtraerAccion(textos);
+    var textoVisible = textos.replace(/@@PEDIDO@@[\s\S]*?@@FIN@@/g, '').trim();
+
+    // Guardar en historial SOLO texto (no el tool_use crudo, que rompería el
+    // próximo request al no tener su tool_result).
+    aiHistorial.push({ role: 'assistant', content: textoVisible || (accion ? 'Te armé un pedido.' : '(sin respuesta)') });
+
     if (textoVisible) renderMensajeAI('assistant', textoVisible);
     if (accion) {
       _aiResolverYConfirmar(accion);
+    } else if (!textoVisible) {
+      renderMensajeAI('assistant', '(sin respuesta)');
     }
     if (data.cuota && data.cuota.restantes <= 10) {
       renderMensajeAI('assistant', 'Te quedan ' + data.cuota.restantes + ' consultas IA este mes.');

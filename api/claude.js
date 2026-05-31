@@ -378,6 +378,14 @@ module.exports = async function handler(req, res) {
       apiBody.system = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
     }
 
+    // Tool use (opcional): el frontend puede pasar `tools` y `tool_choice`.
+    // Se usa para que el asistente arme pedidos de forma estructurada y
+    // confiable (en vez de pedirle que escriba un bloque JSON a mano).
+    if (Array.isArray(body.tools) && body.tools.length) {
+      apiBody.tools = body.tools;
+      if (body.tool_choice) apiBody.tool_choice = body.tool_choice;
+    }
+
     const betaHeader = usarThinking ? 'interleaved-thinking-2025-05-14' : 'prompt-caching-2024-07-31';
 
     // Retry con backoff exponencial para 429 (rate limit) y 529 (overload)
@@ -461,8 +469,11 @@ module.exports = async function handler(req, res) {
       limite: limite,
       restantes: limite - ((profile.consultas_ia_mes || 0) + 1)
     };
-    // Filtrar bloques de thinking — el frontend solo necesita los bloques de texto
-    const contentFiltrado = (claudeData.content || []).filter(function(b) { return b.type === 'text'; });
+    // Filtrar bloques de thinking, pero CONSERVAR text y tool_use (el asistente
+    // usa tool_use para armar pedidos de forma estructurada).
+    const contentFiltrado = (claudeData.content || []).filter(function(b) {
+      return b.type === 'text' || b.type === 'tool_use';
+    });
 
     return res.status(200).json({
       content: contentFiltrado,

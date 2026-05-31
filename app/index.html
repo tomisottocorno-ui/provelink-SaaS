@@ -612,8 +612,9 @@
         <button class="btn" onclick="aplicarRepeticion(1)" style="font-size:12px;padding:7px 12px;"><span class="icon-slot" data-icon="repeat"></span> Cada semana</button>
         <button class="btn" onclick="aplicarRepeticion(2)" style="font-size:12px;padding:7px 12px;"><span class="icon-slot" data-icon="repeat"></span> Cada 2 semanas</button>
         <button class="btn" onclick="aplicarRepeticion(4)" style="font-size:12px;padding:7px 12px;"><span class="icon-slot" data-icon="repeat"></span> Cada 4 semanas</button>
+        <button class="btn" onclick="repetirEnFechaCustom()" style="font-size:12px;padding:7px 12px;border-color:rgba(96,165,250,0.4);color:#60a5fa;"><span class="icon-slot" data-icon="calendar"></span> Otro día…</button>
       </div>
-      <div style="font-size:10.5px;color:var(--text-muted);margin-top:8px;">Se aplica a los próximos 3 meses. Podés cancelar la serie desde cualquier día.</div>
+      <div style="font-size:10.5px;color:var(--text-muted);margin-top:8px;">Las opciones de semanas se aplican por 3 meses. "Otro día" copia el pedido a una fecha puntual que elijas.</div>
     </div>
 
     <div class="modal-actions" style="flex-wrap:wrap;gap:8px;">
@@ -2079,6 +2080,11 @@ function crearPlanParaEsteDia() {
   if (!_calDiaEditando) return;
   var iso = _calDiaEditando;
   var hoyIso = _isoDate(new Date());
+  // No se puede planificar para días pasados
+  if (iso < hoyIso) {
+    showToast('Ese día ya pasó. Elegí hoy o una fecha futura.', 'error');
+    return;
+  }
   cerrarModalDia();
   // Si el día es HOY: mejor proponer realizar
   if (iso === hoyIso) {
@@ -2228,6 +2234,51 @@ async function aplicarRepeticion(cadaNSemanas) {
 
   showToast('Serie creada · ' + generados + ' día' + (generados !== 1 ? 's' : '') + ' programado' + (generados !== 1 ? 's' : ''), 'ok');
   $('modal-cal-subtitulo').textContent = 'Parte de una serie · cada ' + cadaNSemanas + ' semana' + (cadaNSemanas !== 1 ? 's' : '');
+  renderCalendario();
+}
+
+// Copia el pedido del día abierto a UNA fecha puntual que el usuario elija
+// (no un intervalo fijo). Útil para "lo vuelvo a pedir el 20", sin serie.
+async function repetirEnFechaCustom() {
+  if (!_calDiaEditando) return;
+  var planComb = _calMapCombinado()[_calDiaEditando];
+  if (!planComb || !planComb.items || planComb.items.length === 0) {
+    showToast('No hay productos para repetir', 'error');
+    return;
+  }
+  var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  var sugerida = new Date(hoy); sugerida.setDate(sugerida.getDate() + 7);
+  var fechaIso = prompt('¿En qué fecha querés volver a pedir esto?\n\nFormato AAAA-MM-DD (ej: ' + _isoDate(sugerida) + ')', _isoDate(sugerida));
+  if (!fechaIso) return;
+  fechaIso = fechaIso.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaIso)) { showToast('Formato de fecha inválido', 'error'); return; }
+  var d = _parseIsoDate(fechaIso);
+  if (isNaN(d.getTime())) { showToast('Fecha inválida', 'error'); return; }
+  if (fechaIso < _isoDate(hoy)) { showToast('Esa fecha ya pasó. Elegí una futura.', 'error'); return; }
+  if (_calMap[fechaIso] && _calMap[fechaIso].items && _calMap[fechaIso].items.length) {
+    if (!confirm('Ese día ya tiene un plan. ¿Reemplazarlo?')) return;
+  }
+  // Crear copia puntual (no ejecutada → precio dinámico). Sin serie_id.
+  var copia = {
+    id: (_calMap[fechaIso] && _calMap[fechaIso].id) || _uuid(),
+    fecha: fechaIso,
+    items: planComb.items.map(function(it) { return Object.assign({}, it, { _noDisponible: false }); }),
+    total: planComb.total,
+    serie_id: null,
+    cada_n_semanas: null,
+    serie_hasta: null,
+    ejecutado: false,
+    ejecutado_en: null,
+    creado_por: (sesion && sesion.user && sesion.user.id) || null
+  };
+  _calMap[fechaIso] = copia;
+  _calCacheSet(_calMap);
+  await syncCalDiaRemoto(copia).catch(function() {});
+  var dTxt = d.getDate() + ' de ' + _nombreMesLargo(d).split(' ')[0].toLowerCase();
+  showToast('Copiado al ' + dTxt, 'ok');
+  cerrarModalDia();
+  // Saltar al mes de la fecha elegida para que el usuario lo vea
+  _calFecha = new Date(d.getFullYear(), d.getMonth(), 1);
   renderCalendario();
 }
 
@@ -7136,6 +7187,11 @@ function confirmarPedido() {
   // Programación = modo 'programar' Y fecha futura (≠ hoy).
   var esProgramacion = (modo === 'programar' && fechaCal && fechaCal !== hoyIso) ||
                        (!modo && fechaCal && fechaCal !== hoyIso);  // compat: fecha del selector resumen
+  // No se permite programar para fechas pasadas
+  if (esProgramacion && fechaCal < hoyIso) {
+    showToast('No podés programar un pedido para una fecha que ya pasó.', 'error');
+    return;
+  }
   var msgConfirm;
   if (editandoPlanCal && esProgramacion) {
     msgConfirm = '¿Guardar cambios al plan del calendario?';
@@ -7647,7 +7703,7 @@ function abrirAsistente() {
   var m = $('ai-modal');
   m.style.display = 'flex';
   if (aiHistorial.length === 0) {
-    renderMensajeAI('assistant', '¡Hola! Soy tu asistente ProveLink. Puedo ayudarte a:\n\n• Buscar productos en tus listas\n• Comparar precios entre proveedores\n• Encontrar las mejores opciones\n• Revisar tus pedidos anteriores\n\nProbá: *"cuál es el dulce de leche más barato?"* o *"qué opciones de manteca hay?"*');
+    renderMensajeAI('assistant', '¡Hola! Soy tu asistente ProveLink. Puedo:\n\n• Buscar productos y comparar precios\n• Armar el pedido por vos\n• Programarlo para una fecha y repetirlo\n\nProbá: *"cuál es el dulce de leche más barato?"*, *"pedime 3 harina 000 y 2 aceite girasol"* o *"programá 5 docenas de huevo para el viernes y repetí cada semana"*');
   }
   setTimeout(function() { document.getElementById('ai-input').focus(); }, 100);
 }
@@ -7743,7 +7799,226 @@ function construirContextoIA() {
   ctx += '  5. Ordená la lista de menor a mayor precio/kg (o precio/litro)\n';
   ctx += '  6. Al final indicá cuál es el más barato y cuál el más caro por unidad\n';
   ctx += 'NUNCA compares precios absolutos de distintas presentaciones sin normalizar primero.\n';
+
+  // === CAPACIDAD DE EJECUTAR PEDIDOS ===
+  var hoyIso = _isoDate(new Date());
+  ctx += '\n=== HACER Y PROGRAMAR PEDIDOS (MUY IMPORTANTE) ===\n';
+  ctx += 'Podés ARMAR pedidos por el usuario, no solo darle texto. Cuando el usuario te pide hacer/realizar/programar un pedido (ej: "pedime 3 harinas y 2 aceites", "programá para el viernes 2 cajas de leche", "todas las semanas pedí 5 docenas de huevo"), respondé con una frase corta confirmando lo que entendiste Y AGREGÁ al final un bloque de acción EXACTO con este formato:\n';
+  ctx += '@@PEDIDO@@\n';
+  ctx += '{"modo":"realizar"|"programar","fecha":"YYYY-MM-DD" o null,"repetir":0|1|2|4,"items":[{"buscar":"nombre del producto","qty":numero}]}\n';
+  ctx += '@@FIN@@\n';
+  ctx += 'Reglas del bloque:\n';
+  ctx += '- "modo":"realizar" = lo pide HOY (va al historial). "modo":"programar" = lo deja agendado para una fecha futura.\n';
+  ctx += '- "fecha": solo si programa. Formato YYYY-MM-DD. HOY es ' + hoyIso + '. NUNCA uses fechas pasadas. Si el usuario dice "el viernes", "la semana que viene", calculá la fecha real futura.\n';
+  ctx += '- "repetir": 0 = no repetir, 1 = cada semana, 2 = cada 2 semanas, 4 = cada mes. Solo si el usuario lo pide explícitamente.\n';
+  ctx += '- "buscar": el nombre del producto tal cual para buscarlo en las listas (ej "harina 000", "aceite girasol", "leche entera"). El sistema elige el más barato disponible.\n';
+  ctx += '- "qty": cantidad de envases/unidades. Si el usuario no aclara, asumí 1.\n';
+  ctx += '- Si el usuario solo pregunta precios o compara, NO agregues bloque. El bloque es SOLO cuando quiere armar/programar un pedido.\n';
+  ctx += '- Si falta info clave (qué productos), preguntá primero, no inventes el bloque.\n';
+  ctx += 'Ejemplo: usuario dice "pedime 3 harina 000 y 2 aceite girasol para hoy". Respondés:\n';
+  ctx += '"Dale, te armo el pedido con 3 harina 000 y 2 aceite girasol al precio más bajo. Revisá y confirmá 👇\n@@PEDIDO@@\n{"modo":"realizar","fecha":null,"repetir":0,"items":[{"buscar":"harina 000","qty":3},{"buscar":"aceite girasol","qty":2}]}\n@@FIN@@"\n';
   return ctx;
+}
+
+// ============================================================
+// ASISTENTE — EJECUCIÓN DE PEDIDOS
+// ============================================================
+
+// Extrae y parsea el bloque @@PEDIDO@@ {...} @@FIN@@ de la respuesta del modelo.
+function _aiExtraerAccion(texto) {
+  var m = texto.match(/@@PEDIDO@@\s*([\s\S]*?)\s*@@FIN@@/);
+  if (!m) return null;
+  try {
+    var obj = JSON.parse(m[1].trim());
+    if (!obj || !Array.isArray(obj.items) || !obj.items.length) return null;
+    return obj;
+  } catch(e) {
+    console.warn('[AI] No se pudo parsear acción:', e, m[1]);
+    return null;
+  }
+}
+
+// Resuelve cada {buscar, qty} al producto más barato disponible y muestra
+// una tarjeta de confirmación con botones dentro del chat.
+var _aiAccionPendiente = null;
+function _aiResolverYConfirmar(accion) {
+  var resueltos = [];
+  var noEncontrados = [];
+  (accion.items || []).forEach(function(it) {
+    var q = String(it.buscar || '').trim();
+    if (!q) return;
+    var matches = buscarEnListas(q, expandirQueryLocal(q));
+    if (!matches.length) { noEncontrados.push(q); return; }
+    // Elegir el más barato por precio total del envase
+    matches.sort(function(a, b) { return (a.precio || 0) - (b.precio || 0); });
+    var mejor = matches[0];
+    resueltos.push({
+      itemId: mejor.itemId,
+      productoLista: mejor.productoLista,
+      proveedor: mejor.proveedor,
+      proveedorId: mejor.proveedorId,
+      unidad: mejor.unidad || '',
+      precio: mejor.precio,
+      qty: Math.max(1, parseInt(it.qty, 10) || 1),
+      alternativas: matches.length
+    });
+  });
+
+  if (!resueltos.length) {
+    renderMensajeAI('assistant', 'No encontré ninguno de esos productos en tus listas. Probá con otro nombre.');
+    return;
+  }
+
+  // Validar fecha si es programar
+  var hoyIso = _isoDate(new Date());
+  var fecha = accion.fecha || null;
+  var modo = accion.modo === 'programar' ? 'programar' : 'realizar';
+  if (modo === 'programar') {
+    if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha) || fecha < hoyIso) {
+      // Fecha inválida o pasada → degradar a pregunta
+      renderMensajeAI('assistant', '¿Para qué día lo querés programar? Decime la fecha (no puede ser un día que ya pasó).');
+      return;
+    }
+  }
+
+  _aiAccionPendiente = { modo: modo, fecha: fecha, repetir: parseInt(accion.repetir, 10) || 0, items: resueltos };
+
+  // Construir tarjeta de confirmación
+  var total = resueltos.reduce(function(s, r) { return s + r.precio * r.qty; }, 0);
+  var html = '<div style="background:var(--bg-elev2);border:1px solid var(--border-strong);border-radius:12px;padding:12px;">';
+  var dTxt = '';
+  if (modo === 'programar') {
+    var d = _parseIsoDate(fecha);
+    dTxt = 'Programar para ' + d.getDate() + ' de ' + _nombreMesLargo(d).split(' ')[0].toLowerCase();
+  } else {
+    dTxt = 'Realizar hoy';
+  }
+  var repTxt = _aiAccionPendiente.repetir ? ' · repite cada ' + _aiAccionPendiente.repetir + ' sem' : '';
+  html += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#60a5fa;margin-bottom:8px;">' + escapeHtml(dTxt) + repTxt + '</div>';
+  resueltos.forEach(function(r) {
+    html += '<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;">';
+    html += '<span style="flex:1;min-width:0;"><strong>' + r.qty + '×</strong> ' + escapeHtml(r.productoLista) + '<br><span style="font-size:10.5px;color:var(--text-muted);">' + escapeHtml(r.proveedor) + (r.alternativas > 1 ? ' · +' + (r.alternativas - 1) + ' opción' + (r.alternativas - 1 !== 1 ? 'es' : '') : '') + '</span></span>';
+    html += '<span style="white-space:nowrap;font-weight:600;">$' + Number(r.precio * r.qty).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</span>';
+    html += '</div>';
+  });
+  html += '<div style="display:flex;justify-content:space-between;padding-top:8px;font-size:13px;font-weight:700;"><span>Total</span><span>$' + Number(total).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + '</span></div>';
+  if (noEncontrados.length) {
+    html += '<div style="font-size:10.5px;color:var(--danger);margin-top:6px;">No encontré: ' + noEncontrados.map(escapeHtml).join(', ') + '</div>';
+  }
+  html += '<div style="display:flex;gap:6px;margin-top:10px;">';
+  html += '<button onclick="_aiConfirmarPedido()" class="btn primary" style="flex:1;font-size:12px;padding:8px;">✓ ' + (modo === 'programar' ? 'Programar' : 'Confirmar pedido') + '</button>';
+  html += '<button onclick="_aiVerYEditar()" class="btn" style="font-size:12px;padding:8px;">Ver y editar</button>';
+  html += '<button onclick="_aiCancelarAccion(this)" class="btn" style="font-size:12px;padding:8px;">Cancelar</button>';
+  html += '</div>';
+  html += '</div>';
+  _renderMensajeHTML('assistant', html);
+}
+
+// Renderiza un mensaje del asistente con HTML arbitrario (para tarjetas).
+function _renderMensajeHTML(role, html) {
+  var chat = document.getElementById('ai-chat');
+  if (!chat) return;
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'align-self:flex-start;max-width:92%;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px 12px 12px 4px;padding:4px;';
+  wrap.innerHTML = html;
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+// Carga la acción pendiente en pedidoActual y abre el flujo para revisar/editar.
+function _aiVerYEditar() {
+  if (!_aiAccionPendiente) return;
+  var acc = _aiAccionPendiente;
+  var nuevoItems = {};
+  acc.items.forEach(function(r) { nuevoItems[r.itemId] = { qty: r.qty }; });
+  pedidoSet({
+    items: nuevoItems,
+    modo: acc.modo,
+    fechaCalendario: acc.modo === 'programar' ? acc.fecha : null
+  });
+  actualizarBadgePedido();
+  _aiAccionPendiente = null;
+  cerrarAsistente();
+  cambiarTab('pedido');
+  verPedidoActual();
+}
+
+// Ejecuta directamente la acción pendiente (sin pasar por el flujo manual).
+async function _aiConfirmarPedido() {
+  if (!_aiAccionPendiente) return;
+  var acc = _aiAccionPendiente;
+  _aiAccionPendiente = null;
+  var hoyIso = _isoDate(new Date());
+
+  // Armar items con info fresca
+  var items = acc.items.map(function(r) {
+    return {
+      itemId: r.itemId, productoLista: r.productoLista, qty: r.qty,
+      unidad: r.unidad || '', proveedorId: r.proveedorId, proveedor: r.proveedor,
+      precio: r.precio, subtotal: r.precio * r.qty
+    };
+  });
+  var total = items.reduce(function(s, it) { return s + it.subtotal; }, 0);
+
+  if (acc.modo === 'programar' && acc.fecha && acc.fecha > hoyIso) {
+    // === PROGRAMAR ===
+    var planAGuardar = {
+      id: (_calMap[acc.fecha] && _calMap[acc.fecha].id) || _uuid(),
+      fecha: acc.fecha, items: items, total: total,
+      serie_id: null, cada_n_semanas: null, serie_hasta: null,
+      ejecutado: false, ejecutado_en: null,
+      creado_por: (sesion && sesion.user && sesion.user.id) || null
+    };
+    _calMap[acc.fecha] = planAGuardar;
+    _calCacheSet(_calMap);
+    await syncCalDiaRemoto(planAGuardar).catch(function() {});
+    if (acc.repetir > 0) {
+      await _generarSerieDesde(acc.fecha, acc.repetir, planAGuardar, null);
+    }
+    renderMensajeAI('assistant', '✅ Listo, lo programé' + (acc.repetir ? ' y se repite cada ' + acc.repetir + ' semana' + (acc.repetir !== 1 ? 's' : '') : '') + '. Lo ves en el Calendario.');
+    if (typeof renderCalendario === 'function') renderCalendario();
+    showToast('Pedido programado por el asistente', 'ok');
+    return;
+  }
+
+  // === REALIZAR (hoy → historial + calendario) ===
+  var pedidoNuevo = {
+    id: _uuid(),
+    fecha: new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+    timestamp: Date.now(), items: items, total: total,
+    recepcionado: false, faltantes: [], cambios: [],
+    creado_por: quienSoy(), creado_por_uid: (sesion && sesion.user && sesion.user.id) || null
+  };
+  var hist = histGet();
+  hist.unshift(pedidoNuevo);
+  histSet(hist);
+  syncPedidoRemoto(pedidoNuevo).catch(function() {});
+  // Reflejar en calendario (hoy, ejecutado, precio congelado)
+  if (calendarioPermitido()) {
+    var planHoy = {
+      id: (_calMap[hoyIso] && _calMap[hoyIso].id) || _uuid(),
+      fecha: hoyIso, items: items, total: total,
+      serie_id: null, cada_n_semanas: null, serie_hasta: null,
+      ejecutado: true, ejecutado_en: Date.now(),
+      creado_por: (sesion && sesion.user && sesion.user.id) || null
+    };
+    _calMap[hoyIso] = planHoy;
+    _calCacheSet(_calMap);
+    syncCalDiaRemoto(planHoy).catch(function() {});
+    if (acc.repetir > 0) {
+      await _generarSerieDesde(hoyIso, acc.repetir, { items: items, total: total }, null);
+    }
+  }
+  renderHistorial();
+  renderMensajeAI('assistant', '✅ Pedido realizado y guardado en el historial' + (acc.repetir ? ', repitiéndose cada ' + acc.repetir + ' semana' + (acc.repetir !== 1 ? 's' : '') : '') + '. Andá a Pedidos para enviarlo por WhatsApp.');
+  showToast('Pedido realizado por el asistente', 'ok');
+}
+
+function _aiCancelarAccion(btn) {
+  _aiAccionPendiente = null;
+  // Reemplazar la tarjeta por un texto simple
+  var card = btn.closest('div[style*="align-self"]') || (btn.parentElement && btn.parentElement.parentElement);
+  if (card) card.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:var(--text-muted);">Pedido cancelado.</div>';
 }
 
 async function enviarMensajeAI() {
@@ -7764,7 +8039,7 @@ async function enviarMensajeAI() {
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
       body: JSON.stringify({
         tipo: 'chat',
-        max_tokens: 800,
+        max_tokens: 1500,
         system: construirContextoIA(),
         messages: aiHistorial.slice(-6)
       })
@@ -7781,7 +8056,13 @@ async function enviarMensajeAI() {
     }
     var contenido = (data.content && data.content[0] && data.content[0].text) || '(sin respuesta)';
     aiHistorial.push({ role: 'assistant', content: contenido });
-    renderMensajeAI('assistant', contenido);
+    // Detectar bloque de acción @@PEDIDO@@...@@FIN@@
+    var accion = _aiExtraerAccion(contenido);
+    var textoVisible = contenido.replace(/@@PEDIDO@@[\s\S]*?@@FIN@@/g, '').trim();
+    if (textoVisible) renderMensajeAI('assistant', textoVisible);
+    if (accion) {
+      _aiResolverYConfirmar(accion);
+    }
     if (data.cuota && data.cuota.restantes <= 10) {
       renderMensajeAI('assistant', 'Te quedan ' + data.cuota.restantes + ' consultas IA este mes.');
     }
@@ -7810,7 +8091,7 @@ async function enviarMensajeAI() {
       <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#60a5fa);display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0;"><span class="icon-slot" data-icon="sparkles"></span></div>
       <div>
         <div style="font-size:14px;font-weight:600;color:#60a5fa;">Asistente ProveLink</div>
-        <div style="font-size:11px;color:var(--text-muted);">Buscar productos · Comparar precios</div>
+        <div style="font-size:11px;color:var(--text-muted);">Comparar precios · Hacer y programar pedidos</div>
       </div>
     </div>
     <button onclick="cerrarAsistente()" style="background:transparent;border:none;color:var(--text-muted);cursor:pointer;padding:4px;line-height:1;display:inline-flex;align-items:center;"><span class="icon-slot" data-icon="x"></span></button>

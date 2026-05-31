@@ -509,7 +509,7 @@
     <p style="font-size:13px;color:var(--text-muted);margin:6px 0 20px;">Cambiá cuando quieras · Sin permanencia.</p>
     <div id="planes-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:20px;"></div>
     <div style="padding:12px 16px;background:var(--bg-elev2);border-radius:var(--r-md);font-size:12px;color:var(--text-muted);text-align:center;line-height:1.6;">
-      ¿Dudas? Escribinos a <a href="mailto:soporte@provelink.app" style="color:var(--accent-bright);">soporte@provelink.app</a>
+      ¿Dudas? Escribinos a <a href="mailto:soporte@provelink.com" style="color:var(--accent-bright);">soporte@provelink.com</a>
     </div>
     <div class="modal-actions">
       <button class="btn" onclick="cerrarPlanes()">Cerrar</button>
@@ -6089,7 +6089,7 @@ async function eliminarCuenta() {
   }
   // En producción esto llamaría un endpoint con service_role.
   // Por ahora pedimos contactar soporte.
-  showToast('Enviá un mail a soporte@provelink.app para eliminar tu cuenta.', 'warn');
+  showToast('Enviá un mail a soporte@provelink.com para eliminar tu cuenta.', 'warn');
 }
 
 // ============================================================
@@ -6134,7 +6134,7 @@ function renderPlanesGrid() {
       var waMsg = encodeURIComponent('Hola! Quiero activar el plan ' + p.nombre + ' de ProveLink. Mi email es: ' + userEmail);
       html += '<a href="https://wa.me/5491112345678?text=' + waMsg + '" target="_blank" rel="noopener" style="display:block;text-align:center;padding:10px 14px;border-radius:var(--r-md);background:' + p.color + ';color:#fff;font-size:13px;font-weight:700;text-decoration:none;margin-top:auto;">Mejorar a ' + p.nombre + '</a>';
     } else if (planActual !== 'free') {
-      html += '<a href="mailto:soporte@provelink.app?subject=Cancelar+plan+' + encodeURIComponent(p.nombre) + '&body=' + encodeURIComponent('Hola, quiero cancelar mi plan ' + p.nombre + '. Mi email es: ' + userEmail) + '" style="display:block;text-align:center;padding:8px 14px;border-radius:var(--r-md);border:1px solid var(--border-hi);color:var(--text-muted);font-size:12px;text-decoration:none;margin-top:auto;">Cancelar plan</a>';
+      html += '<a href="mailto:soporte@provelink.com?subject=Cancelar+plan+' + encodeURIComponent(p.nombre) + '&body=' + encodeURIComponent('Hola, quiero cancelar mi plan ' + p.nombre + '. Mi email es: ' + userEmail) + '" style="display:block;text-align:center;padding:8px 14px;border-radius:var(--r-md);border:1px solid var(--border-hi);color:var(--text-muted);font-size:12px;text-decoration:none;margin-top:auto;">Cancelar plan</a>';
     }
     html += '</div>';
   });

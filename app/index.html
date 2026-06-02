@@ -3557,6 +3557,11 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna,
     '  NUNCA pongas solo "KG", "LTS", "BOL", "CAJ", "PAQ" en el campo unidad.\n' +
     '  Extraé el tamaño numerico SOLO del nombre: "X 5 LTS" → "5 lt", "X 2.9 KG" → "2.9 kg", "X 500 GR" → "500 g".\n' +
     '  Si el nombre no tiene tamaño explícito, usá ""\n' +
+    '  ⚠️ CAJA DE PORCIONES (conteo en columna aparte): si la presentación es "Caja/Pack/Display/Bandeja x N"\n' +
+    '  (contenedor + número SIN unidad de peso/volumen) Y el nombre tiene un tamaño chico por unidad ("M cc/ml/gr"),\n' +
+    '  es una caja de N porciones. Poné en unidad el formato "N x M unidad" (conteo × tamaño), NO descartes el número.\n' +
+    '  Ej: nombre "Aderezos Aceite Maiz 8 cc" + presentación "Caja x 200" → unidad: "200 x 8 cc".\n' +
+    '  Ej: nombre "Mayonesa Sobre 10 gr" + presentación "Pack x 50" → unidad: "50 x 10 gr".\n' +
     '- alerta: true si NO estás seguro de cuál es el precio correcto de la columna objetivo (mejor marcar dudoso que adivinar mal)\n' +
     '- Ignorá encabezados, totales, líneas vacías. Incluí TODOS los productos.\n\n' +
     'Texto:\n\n' + textoCrudo;
@@ -3707,6 +3712,8 @@ var SYSTEM_NORMALIZACION = [
   '   - "Caja 12 x 1lt" → tamano: 12, unidad_base: "L"',
   '   - "200 x 8cc" (cc pequeño, N razonable) → tamano: 1.6, unidad_base: "L"',
   '   - "100 x 5gr" → tamano: 0.5, unidad_base: "kg"',
+  '   - Presentación "Caja/Pack x N" (conteo, sin unidad) + nombre con "M cc/gr" → tamano = N×M/1000.',
+  '     Ej: "Caja x 200" + nombre "Aceite Maiz 8 cc" → tamano: 1.6, unidad_base: "L" (200 × 8cc).',
   '',
   '   ⚠️ MULTIPACK ANIDADO "N CAJA (M×P gr)" — MUY IMPORTANTE:',
   '   Cuando el formato es "N CAJA (M×P gr/cc)" o "NCAJA (M×P GR)", el precio en la lista',
@@ -3964,7 +3971,8 @@ function calcularPrecios(grupos, resultadosModo) {
       var unidadBaseCalc = grupo.unidad_base;
       // Caja de porciones individuales (sachets/sobres): el precio de la lista es
       // el del bulto completo → forzar PACK y tamaño = contenido total (N×M).
-      var _caja = analizarCajaIndividual(prov.nombre_original || prov.presentacion_original || grupo.clave_canonica || '');
+      var _txtCaja = ((prov.nombre_original || '') + ' ' + (prov.presentacion_original || '')).trim() || grupo.clave_canonica || '';
+      var _caja = analizarCajaIndividual(_txtCaja) || analizarCajaPorciones(prov.nombre_original, prov.presentacion_original);
       if (_caja) {
         modoInfo = { modo: 'pack', confianza: 0.9, razonamiento: 'caja de porciones individuales: precio del bulto completo' };
         tamano = _caja.total;
@@ -5102,6 +5110,35 @@ function analizarCajaIndividual(texto) {
   var unidad = (unitRaw === 'cc' || unitRaw === 'ml') ? 'L' : 'kg';
   var total = n * size / 1000; // gr→kg y cc/ml→L (ambos /1000)
   if (total <= 0 || total > 300) return null;   // sanity
+  return { total: total, unidad: unidad };
+}
+
+// Caja de porciones con CONTEO SEPARADO del tamaño: el tamaño por unidad está en
+// el NOMBRE ("8 cc") y la cantidad de unidades viene aparte como "Caja x 200" /
+// "Pack x 50" (contenedor + número, SIN unidad de peso/volumen). Ninguna de las
+// dos por separado alcanza → hay que combinarlas: total = N × M.
+// Ej: nombre "Aderezos Aceite Maiz 8 cc" + presentación "Caja x 200" → 1.6 L.
+// Solo unidades CHICAS (cc/ml/gr/g): son las porciones individuales. Para kg/L NO
+// se combina (riesgo de confundir un código de producto con un conteo).
+function analizarCajaPorciones(nombre, presentacion) {
+  var nom = String(nombre || '');
+  var todo = (nom + ' ' + String(presentacion || '')).trim();
+  if (todo.indexOf('(') >= 0) return null; // anidado "N CAJA (MxP)" → otra regla
+  // Conteo: palabra de contenedor + "x" + número que NO sea un tamaño (sin unidad detrás).
+  var contWord = '(?:caja|pack|display|bandeja|set|lote|bulto|estuche|cart[oó]n|carton)';
+  var reCont = new RegExp('\\b' + contWord + '\\s*x\\s*(\\d{1,4})(?!\\s*(?:cc|ml|gr|g|kg|lts?|litros?|l)\\b)', 'i');
+  var mCont = todo.match(reCont);
+  if (!mCont) return null;
+  // Tamaño por unidad: número + unidad chica, buscado en el NOMBRE.
+  var mSize = nom.match(/\b(\d+(?:[.,]\d+)?)\s*(c\s*\.?\s*c|cc|ml|gr|g)\b/i);
+  if (!mSize) return null;
+  var n = parseInt(mCont[1], 10);
+  var size = parseFloat(mSize[1].replace(',', '.'));
+  if (!(n >= 2 && n <= 2000) || !(size > 0)) return null;
+  var unitRaw = mSize[2].toLowerCase().replace(/[\s.]/g, ''); // "c.c" → "cc"
+  var unidad = (unitRaw === 'cc' || unitRaw === 'ml') ? 'L' : 'kg';
+  var total = n * size / 1000; // gr→kg y cc/ml→L (ambos /1000)
+  if (total <= 0 || total > 300) return null; // sanity
   return { total: total, unidad: unidad };
 }
 
@@ -6343,7 +6380,7 @@ function todosLosItems() {
       // el del BULTO COMPLETO, no el sobrecito. Corrige el precio diminuto que
       // salía por tomar el tamaño de un sobre como tamaño total. Arregla listas
       // ya cargadas sin re-procesarlas.
-      var _caja = analizarCajaIndividual(nombreLimpio);
+      var _caja = analizarCajaIndividual((nombreLimpio + ' ' + (it.unidad || '')).trim()) || analizarCajaPorciones(nombreLimpio, it.unidad);
       var modoItem = it.modo || null;
       var tamanoItem = it.tamano || null;
       var unidadBaseItem = it.unidad_base || null;

@@ -573,8 +573,9 @@
 
 <!-- Modal recepcionar pedido -->
 <div class="modal-overlay modal-lg" id="modal-recepcionar" style="display:none;">
-  <div class="modal">
-    <h3>Recepcionar pedido</h3>
+  <div class="modal" style="position:relative;">
+    <button onclick="cerrarModalRecepcionar()" title="Cerrar" style="position:absolute;top:12px;right:12px;z-index:2;background:var(--bg-elev2);border:1px solid var(--border-hi);color:var(--text-muted);cursor:pointer;width:30px;height:30px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;line-height:1;"><span class="icon-slot" data-icon="x"></span></button>
+    <h3 style="padding-right:38px;">Recepcionar pedido</h3>
     <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px;" id="modal-rec-fecha"></div>
     <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Tildá lo que llegó. Lo que quede destildado queda como faltante. Usá el botón "Cambio" si vino algo diferente al pedido.</p>
     <!-- Barra de acciones rápidas -->
@@ -6758,25 +6759,34 @@ function renderBuscarProducto(expansionesExtras) {
   var ped = pedidoGet();
   var totalItems = Object.keys(ped.items || {}).filter(function(k) { return ped.items[k].qty > 0; }).length;
 
-  // Productos del último pedido confirmado (para badge "Última compra").
-  // Matcheo por NOMBRE NORMALIZADO + PROVEEDOR (no por itemId) porque el
-  // itemId cambia cuando se re-procesa una lista (nuevo pipeline = nuevos ids).
-  // El nombre + proveedor es estable entre re-cargas.
-  var hist = histGet();
-  var ultimoPedidoKeys = {};
-  if (hist.length > 0) {
-    (hist[0].items || []).forEach(function(hit) {
-      var nombre = String(hit.productoLista || '').toLowerCase().trim().replace(/\s+/g, ' ');
-      var prov = String(hit.proveedorId || hit.proveedor || '');
-      ultimoPedidoKeys[nombre + '|' + prov] = true;
-      // También guardar el itemId por si todavía matchea (compatibilidad)
-      if (hit.itemId) ultimoPedidoKeys['__id__' + hit.itemId] = true;
+  // Badge "Última compra" — POR TIPO, recorriendo TODO el historial.
+  // Para cada tipo de producto (clave canónica), marca el item exacto que
+  // compraste la ÚLTIMA vez. Así, si pediste dulce de leche hace 3 pedidos
+  // y nunca más, ese dulce de leche sigue marcado (no se borra al hacer
+  // pedidos nuevos de otros productos).
+  function _normUC(s) { return String(s || '').toLowerCase().trim().replace(/\s+/g, ' '); }
+  // Índice de listas actuales: firma(nombre+prov) → tipo/clave canónica
+  var _idxTipoActual = {};
+  todosLosItems().forEach(function(t) {
+    var f = _normUC(t.productoLista) + '|' + t.proveedorId;
+    _idxTipoActual[f] = t.clave_canonica || t.tipo || _normUC(t.productoLista);
+  });
+  // Recorrer historial del más reciente al más viejo; la primera firma que
+  // aparece para cada tipo es la última compra de ese tipo.
+  var _histOrden = histGet().slice().sort(function(a, b) { return (b.timestamp || 0) - (a.timestamp || 0); });
+  var _ultCompraPorTipo = {};
+  _histOrden.forEach(function(h) {
+    (h.items || []).forEach(function(it) {
+      var prov = String(it.proveedorId || it.proveedor || '');
+      var firma = _normUC(it.productoLista) + '|' + prov;
+      var tipo = _idxTipoActual[firma] || _normUC(it.productoLista);
+      if (!(tipo in _ultCompraPorTipo)) _ultCompraPorTipo[tipo] = firma;
     });
-  }
+  });
   function _esUltimaCompra(it) {
-    if (ultimoPedidoKeys['__id__' + it.itemId]) return true;
-    var nombre = String(it.productoLista || '').toLowerCase().trim().replace(/\s+/g, ' ');
-    return !!ultimoPedidoKeys[nombre + '|' + it.proveedorId];
+    var firma = _normUC(it.productoLista) + '|' + it.proveedorId;
+    var tipo = it.clave_canonica || it.tipo || _normUC(it.productoLista);
+    return _ultCompraPorTipo[tipo] === firma;
   }
   var btnVer = $('btn-ver-pedido');
   if (btnVer) btnVer.style.display = totalItems > 0 ? '' : 'none';
@@ -6848,7 +6858,12 @@ function renderBuscarProducto(expansionesExtras) {
   });
 
   var minGlobal = Math.min.apply(null, resultados.map(function(r) { return r.precio; }));
+  // Ordenar columnas por CANTIDAD de resultados ASC: el proveedor con menos
+  // variedad de lo buscado va a la izquierda, el de más a la derecha.
+  // Desempate: el que tenga el más barato primero.
   var provsOrden = Object.keys(porProv).sort(function(a, b) {
+    var d = porProv[a].items.length - porProv[b].items.length;
+    if (d !== 0) return d;
     return porProv[a].items[0].precio - porProv[b].items[0].precio;
   });
 

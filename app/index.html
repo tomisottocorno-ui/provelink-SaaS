@@ -7866,7 +7866,7 @@ var TOOL_ARMAR_PEDIDO = {
         items: {
           type: 'object',
           properties: {
-            buscar: { type: 'string', description: 'Nombre del producto para buscarlo en las listas' },
+            buscar: { type: 'string', description: 'Término CORTO y genérico para encontrar el producto: tipo + variedad, SIN marca ni presentación. Ej: "aceite girasol" (no "aceite girasol natura 5L"), "harina 000", "leche entera". El sistema elige el más barato que coincida.' },
             qty: { type: 'integer', description: 'Cantidad de envases/unidades' }
           },
           required: ['buscar', 'qty']
@@ -7880,6 +7880,35 @@ var TOOL_ARMAR_PEDIDO = {
 // ============================================================
 // ASISTENTE — EJECUCIÓN DE PEDIDOS
 // ============================================================
+
+// Busca un producto para el asistente, más tolerante que el buscador manual:
+// 1. SIEMPRE en modo amplio (ignora el toggle "búsqueda específica").
+// 2. Fallback progresivo: si el modelo escribió palabras de más (marca,
+//    presentación, ej "aceite girasol natura 5 litros") y no matchea, va
+//    sacando palabras hasta encontrar (→ "aceite girasol" → "aceite").
+function _aiBuscarProducto(q) {
+  q = String(q || '').trim();
+  if (!q) return [];
+  var prev = busquedaEspecifica;
+  busquedaEspecifica = false;  // forzar modo amplio
+  try {
+    // Intento 1: query completo + expansiones locales
+    var r = buscarEnListas(q, expandirQueryLocal(q));
+    if (r.length) return r;
+    // Intento 2..N: ir reduciendo a las primeras palabras significativas
+    var sig = q.toLowerCase().split(/\s+/).filter(function(p) { return p.length > 2; });
+    var maxN = Math.min(3, Math.max(1, sig.length - 1));
+    for (var n = maxN; n >= 1; n--) {
+      var sub = sig.slice(0, n).join(' ');
+      if (!sub) continue;
+      r = buscarEnListas(sub, expandirQueryLocal(sub));
+      if (r.length) return r;
+    }
+    return [];
+  } finally {
+    busquedaEspecifica = prev;
+  }
+}
 
 // Extrae y parsea el bloque @@PEDIDO@@ {...} @@FIN@@ de la respuesta del modelo.
 function _aiExtraerAccion(texto) {
@@ -7904,7 +7933,7 @@ function _aiResolverYConfirmar(accion) {
   (accion.items || []).forEach(function(it) {
     var q = String(it.buscar || '').trim();
     if (!q) return;
-    var matches = buscarEnListas(q, expandirQueryLocal(q));
+    var matches = _aiBuscarProducto(q);
     if (!matches.length) { noEncontrados.push(q); return; }
     // Elegir el más barato por precio total del envase
     matches.sort(function(a, b) { return (a.precio || 0) - (b.precio || 0); });

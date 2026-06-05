@@ -7898,28 +7898,57 @@ var TOOL_ARMAR_PEDIDO = {
 // ASISTENTE — EJECUCIÓN DE PEDIDOS
 // ============================================================
 
-// Busca un producto para el asistente, más tolerante que el buscador manual:
-// 1. SIEMPRE en modo amplio (ignora el toggle "búsqueda específica").
-// 2. Fallback progresivo: si el modelo escribió palabras de más (marca,
-//    presentación, ej "aceite girasol natura 5 litros") y no matchea, va
-//    sacando palabras hasta encontrar (→ "aceite girasol" → "aceite").
+// Puntúa qué tan bien un producto coincide con lo que se buscó.
+// Evita que "dulce de leche" traiga "salsa de dulce de leche": el que
+// EMPIEZA con el término pedido gana sobre el que lo tiene en el medio.
+function _aiScoreRelevancia(it, qNorm) {
+  var nom = _normBusq(it.productoLista);
+  var tipo = _normBusq(it.tipo || '');
+  if (nom.indexOf(qNorm) === 0) return 100;                 // nombre empieza con el query
+  if (tipo && tipo === qNorm) return 95;                     // tipo canónico exacto
+  if (tipo && tipo.indexOf(qNorm) === 0) return 90;          // tipo empieza con el query
+  var idx = nom.indexOf(qNorm);
+  if (idx > 0) return 60 - Math.min(50, idx);                // contiene, penaliza posición tardía
+  return 10;                                                  // match débil (palabras sueltas)
+}
+
+// Busca un producto para el asistente. Más tolerante que el buscador manual
+// pero con RELEVANCIA: prioriza el match más fiel, no el más barato a secas.
+// 1. Ignora el toggle "búsqueda específica" (siempre amplio para juntar todo).
+// 2. Ordena por relevancia (empieza-con > tipo > contiene-temprano) y desempata
+//    por precio. Así "dulce de leche" elige un dulce de leche, no una salsa.
+// 3. Fallback progresivo de palabras solo si no hay ningún match.
 function _aiBuscarProducto(q) {
   q = String(q || '').trim();
   if (!q) return [];
+  var qNorm = _normBusq(q);
   var prev = busquedaEspecifica;
   busquedaEspecifica = false;  // forzar modo amplio
   try {
-    // Intento 1: query completo + expansiones locales
+    var ordenar = function(arr) {
+      return arr.slice().sort(function(a, b) {
+        var sa = _aiScoreRelevancia(a, qNorm), sb = _aiScoreRelevancia(b, qNorm);
+        if (sb !== sa) return sb - sa;                 // más relevante primero
+        return (a.precio || 0) - (b.precio || 0);      // desempate: más barato
+      });
+    };
+    // Intento 1: query completo + expansiones
     var r = buscarEnListas(q, expandirQueryLocal(q));
-    if (r.length) return r;
-    // Intento 2..N: ir reduciendo a las primeras palabras significativas
-    var sig = q.toLowerCase().split(/\s+/).filter(function(p) { return p.length > 2; });
+    if (r.length) {
+      var ord = ordenar(r);
+      // Si hay al menos un match fuerte (empieza-con o tipo), descartar los
+      // débiles (ej "salsa de…") para no ofrecerlos como mejor opción.
+      var fuertes = ord.filter(function(it) { return _aiScoreRelevancia(it, qNorm) >= 60; });
+      return fuertes.length ? fuertes : ord;
+    }
+    // Intento 2..N: reducir a las primeras palabras significativas
+    var sig = qNorm.split(/\s+/).filter(function(p) { return p.length > 2; });
     var maxN = Math.min(3, Math.max(1, sig.length - 1));
     for (var n = maxN; n >= 1; n--) {
       var sub = sig.slice(0, n).join(' ');
       if (!sub) continue;
       r = buscarEnListas(sub, expandirQueryLocal(sub));
-      if (r.length) return r;
+      if (r.length) return ordenar(r);
     }
     return [];
   } finally {
@@ -7952,8 +7981,9 @@ function _aiResolverYConfirmar(accion) {
     if (!q) return;
     var matches = _aiBuscarProducto(q);
     if (!matches.length) { noEncontrados.push(q); return; }
-    // Elegir el más barato por precio total del envase
-    matches.sort(function(a, b) { return (a.precio || 0) - (b.precio || 0); });
+    // _aiBuscarProducto ya devuelve ordenado por relevancia (y precio como
+    // desempate). El primero es el mejor match — NO re-ordenar por precio
+    // solo, porque eso traería "salsa de dulce de leche" si es más barata.
     var mejor = matches[0];
     resueltos.push({
       itemId: mejor.itemId,

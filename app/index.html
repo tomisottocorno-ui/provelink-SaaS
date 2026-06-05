@@ -2608,8 +2608,10 @@ function verRecepcionSoloLectura(id) {
       actions.innerHTML = '<div style="font-size:11px;color:var(--text-muted);flex:1;display:inline-flex;align-items:center;gap:6px;">' + Icon.lock({size:13}) + ' Recepción cerrada definitivamente</div>' +
         '<button class="btn" onclick="cerrarModalRecepcionar()">Cerrar</button>';
     }
-    // Deshabilitar Limpiar/Seleccionar todos
-    $('modal-recepcionar').querySelectorAll('button[onclick*="Recepcion"]').forEach(function(b) {
+    // Deshabilitar SOLO Limpiar/Seleccionar todos (NO los botones de cerrar,
+    // que también contienen "Recepcion" en su onclick — ese era el bug que
+    // dejaba el modal sin forma de cerrarse).
+    $('modal-recepcionar').querySelectorAll('button[onclick*="seleccionarTodosRecepcion"], button[onclick*="limpiarSeleccionRecepcion"]').forEach(function(b) {
       b.disabled = true; b.style.opacity = '0.4';
     });
   }, 0);

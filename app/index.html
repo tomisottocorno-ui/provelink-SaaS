@@ -2464,11 +2464,29 @@ function abrirModalRecepcionar(id) {
       var rowOpacity = (!esCambio && noLlego) ? '0.45' : '1';
       var cambioStyle = esCambio ? 'background:rgba(251,191,36,0.12);border-color:rgba(251,191,36,0.5);color:var(--gold-bright);' : '';
       var cambioActive = esCambio ? 'true' : 'false';
-      html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;border:1px solid ' + rowBorder + ';background:' + rowBg + ';opacity:' + rowOpacity + ';" id="rec-row-' + it.itemId + '">';
+      // Peso variable (fiambres/quesos por kg): el precio de lista es por kg/L
+      // y el costo final = peso real × precio unitario. El proveedor informa el
+      // peso al despachar; acá se carga y el total del pedido se recalcula.
+      var esPesoVar = it.modo === 'unitario' && (parseFloat(it.precio_unitario) > 0) &&
+                      (it.unidad_base === 'kg' || it.unidad_base === 'L');
+      var uLabel = (it.unidad_base === 'L') ? 'L' : 'kg';
+      var pesoGuardado = (parseFloat(it.pesoReal) > 0) ? parseFloat(it.pesoReal) : null;
+      var pesoEstimado = (parseFloat(it.tamano) > 0) ? Math.round(parseFloat(it.tamano) * it.qty * 100) / 100 : null;
+      html += '<div style="display:flex;flex-direction:column;gap:0;padding:8px 10px;border-radius:8px;border:1px solid ' + rowBorder + ';background:' + rowBg + ';opacity:' + rowOpacity + ';" id="rec-row-' + it.itemId + '">';
+      html += '<div style="display:flex;align-items:center;gap:10px;">';
       html += '<input type="checkbox" data-item-id="' + it.itemId + '" ' + (noLlego ? '' : 'checked') + ' onchange="actualizarFilaRecepcion(this)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--emerald);flex-shrink:0;">';
       html += '<span style="flex:1;font-size:12px;line-height:1.3;">' + escapeHtml(it.productoLista) + '</span>';
       html += '<span style="font-size:11px;color:var(--text-muted);white-space:nowrap;">' + it.qty + ' · $' + formatPrecio(it.precio) + '</span>';
       html += '<button data-cambio-id="' + it.itemId + '" data-cambio-active="' + cambioActive + '" onclick="toggleCambioRecepcion(this)" style="flex-shrink:0;background:transparent;border:1px solid var(--border-hi);color:var(--text-muted);padding:3px 8px;border-radius:6px;font-size:10px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;' + cambioStyle + '" title="Vino diferente al pedido">' + Icon.refreshCw({size:11}) + ' Cambio</button>';
+      html += '</div>';
+      if (esPesoVar) {
+        html += '<div style="display:flex;align-items:center;gap:8px;margin-left:26px;margin-top:6px;flex-wrap:wrap;">';
+        html += '<span style="font-size:11px;color:var(--text-muted);">⚖️ $' + formatPrecio(it.precio_unitario) + '/' + uLabel + ' · peso real:</span>';
+        html += '<input type="number" step="0.01" min="0" inputmode="decimal" data-peso-id="' + it.itemId + '" data-peso-unit="' + it.precio_unitario + '" value="' + (pesoGuardado != null ? pesoGuardado : '') + '" placeholder="' + (pesoEstimado != null ? '~' + pesoEstimado : '') + '" oninput="actualizarPesoRecepcion(this)" style="width:78px;background:var(--bg);border:1px solid var(--border-hi);color:var(--text);padding:4px 7px;border-radius:6px;font-size:12px;">';
+        html += '<span style="font-size:11px;color:var(--text-muted);">' + uLabel + '</span>';
+        html += '<span data-peso-subtotal="' + it.itemId + '" style="font-size:11px;font-weight:600;color:var(--emerald);">' + (pesoGuardado != null ? '→ $' + formatPrecio(Math.round(pesoGuardado * it.precio_unitario * 100) / 100) : '') + '</span>';
+        html += '</div>';
+      }
       html += '</div>';
     });
   });
@@ -2480,6 +2498,21 @@ function abrirModalRecepcionar(id) {
 
 function actualizarFilaRecepcion(checkbox) {
   actualizarEstiloFilaRecepcion(checkbox.getAttribute('data-item-id'));
+}
+
+// Muestra en vivo el subtotal real (peso × $/kg) mientras se tipea el peso.
+function actualizarPesoRecepcion(input) {
+  var itemId = input.getAttribute('data-peso-id');
+  var precioUnit = parseFloat(input.getAttribute('data-peso-unit')) || 0;
+  var peso = parseFloat(String(input.value).replace(',', '.')) || 0;
+  var spans = $('modal-rec-items').querySelectorAll('[data-peso-subtotal]');
+  for (var i = 0; i < spans.length; i++) {
+    if (spans[i].getAttribute('data-peso-subtotal') !== itemId) continue;
+    spans[i].textContent = (peso > 0 && precioUnit > 0)
+      ? '→ $' + formatPrecio(Math.round(peso * precioUnit * 100) / 100)
+      : '';
+    break;
+  }
 }
 
 function actualizarEstiloFilaRecepcion(itemId) {
@@ -2566,6 +2599,33 @@ function guardarRecepcion(definitivo) {
     }
   });
 
+  // Pesos reales (productos por kg/L): el costo final es peso × precio unitario.
+  // Input vacío o 0 = sin dato → vuelve al estimado (precio × qty).
+  var huboPesos = false;
+  var nPesos = 0;
+  var pesosMap = {};
+  $('modal-rec-items').querySelectorAll('input[data-peso-id]').forEach(function(inp) {
+    pesosMap[inp.getAttribute('data-peso-id')] = parseFloat(String(inp.value).replace(',', '.')) || 0;
+  });
+  hist[idx].items.forEach(function(it) {
+    if (!(it.itemId in pesosMap)) return;
+    var peso = pesosMap[it.itemId];
+    var pu = parseFloat(it.precio_unitario) || 0;
+    if (peso > 0 && pu > 0) {
+      it.pesoReal = peso;
+      it.subtotal = Math.round(peso * pu * 100) / 100;
+      huboPesos = true;
+      nPesos++;
+    } else if (it.pesoReal) {
+      delete it.pesoReal;
+      it.subtotal = (parseFloat(it.precio) || 0) * (it.qty || 0);
+      huboPesos = true;
+    }
+  });
+  if (huboPesos) {
+    hist[idx].total = hist[idx].items.reduce(function(s, it) { return s + (it.subtotal || 0); }, 0);
+  }
+
   hist[idx].recepcionado    = true;          // mover a historial siempre
   hist[idx]._recepcionGuardada = true;        // marca que ya tiene datos guardados
   hist[idx].recepcionFinal  = !!definitivo;   // definitivo = no editable
@@ -2575,6 +2635,26 @@ function guardarRecepcion(definitivo) {
   histSet(hist);
   syncPedidoRemoto(hist[idx]).catch(function() {});
 
+  // Reflejar el costo real en el calendario: el pedido quedó registrado como
+  // plan ejecutado (con precio congelado al confirmar) → actualizarlo.
+  if (huboPesos && typeof _calMap !== 'undefined') {
+    var planCal = null;
+    if (hist[idx].desde_plan_cal_id) {
+      Object.keys(_calMap).forEach(function(k) {
+        if (_calMap[k] && _calMap[k].id === hist[idx].desde_plan_cal_id) planCal = _calMap[k];
+      });
+    }
+    if (!planCal) {
+      var fIso = _isoDate(new Date(hist[idx].timestamp || Date.now()));
+      if (_calMap[fIso] && _calMap[fIso].ejecutado) planCal = _calMap[fIso];
+    }
+    if (planCal) {
+      planCal.items = JSON.parse(JSON.stringify(hist[idx].items));
+      planCal.total = hist[idx].total;
+      syncCalDiaRemoto(planCal).catch(function() {});
+    }
+  }
+
   cerrarModalRecepcionar();
   renderHistorial();
   renderIngreso();
@@ -2582,6 +2662,7 @@ function guardarRecepcion(definitivo) {
   var partes = [];
   if (faltantes.length > 0) partes.push(faltantes.length + ' faltante' + (faltantes.length !== 1 ? 's' : ''));
   if (cambios.length > 0) partes.push(cambios.length + ' cambio' + (cambios.length !== 1 ? 's' : ''));
+  if (nPesos > 0) partes.push(nPesos + ' peso' + (nPesos !== 1 ? 's' : '') + ' real' + (nPesos !== 1 ? 'es' : '') + ' → total $' + formatPrecio(hist[idx].total));
   var resumen = partes.length > 0 ? ' · ' + partes.join(' · ') : ' completo';
   if (definitivo) {
     showToast('Recepción cerrada definitivamente' + resumen);
@@ -2602,6 +2683,7 @@ function verRecepcionSoloLectura(id) {
     var items = $('modal-rec-items');
     if (!items) return;
     items.querySelectorAll('input[type="checkbox"]').forEach(function(cb) { cb.disabled = true; });
+    items.querySelectorAll('input[data-peso-id]').forEach(function(inp) { inp.disabled = true; inp.style.opacity = '0.6'; });
     items.querySelectorAll('button[data-cambio-id]').forEach(function(btn) { btn.disabled = true; btn.style.opacity = '0.5'; });
     // Reemplazar footer: solo cerrar
     var actions = $('modal-recepcionar').querySelector('.modal-actions');
@@ -6809,9 +6891,11 @@ function renderHistorialProveedores() {
     html += '<div><div style="font-size:15px;font-weight:600;">' + escapeHtml(h.fecha) + porTagP + '</div>';
     var faltantesCount = (h.faltantes || []).length;
     var cambiosCount   = (h.cambios   || []).length;
+    var pesosCount     = (h.items || []).filter(function(it) { return parseFloat(it.pesoReal) > 0; }).length;
     var faltantesTag = faltantesCount > 0 ? ' · <span style="color:var(--danger);">' + faltantesCount + ' faltante' + (faltantesCount !== 1 ? 's' : '') + '</span>' : '';
     var cambiosTag   = cambiosCount   > 0 ? ' · <span style="color:var(--gold-bright);">' + Icon.refreshCw({size:11}) + ' ' + cambiosCount + ' cambio' + (cambiosCount !== 1 ? 's' : '') + '</span>' : '';
-    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + faltantesTag + cambiosTag + '</div></div>';
+    var pesosTag     = pesosCount     > 0 ? ' · <span style="color:var(--emerald);">⚖️ ' + pesosCount + ' con peso real</span>' : '';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + faltantesTag + cambiosTag + pesosTag + '</div></div>';
     html += '<div style="text-align:right;"><div style="font-size:11px;color:var(--text-muted);">Total</div><div style="font-size:18px;font-weight:700;">$' + formatPrecio(h.total) + '</div></div></div>';
 
     // Botones WhatsApp por proveedor
@@ -6875,7 +6959,11 @@ function verDetalleHistorial(id) {
     bodyHtml += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
     bodyHtml += '<thead><tr style="background:#f5f5f5;"><th style="text-align:left;padding:8px 10px;border-bottom:2px solid #ddd;">Producto</th><th style="padding:8px 10px;border-bottom:2px solid #ddd;text-align:right;">Cant.</th><th style="padding:8px 10px;border-bottom:2px solid #ddd;text-align:right;">Precio</th><th style="padding:8px 10px;border-bottom:2px solid #ddd;text-align:right;">Subtotal</th></tr></thead><tbody>';
     prov.items.forEach(function(it) {
-      bodyHtml += '<tr><td style="padding:8px 10px;border-bottom:1px solid #eee;">' + escapeHtml(it.productoLista) + '</td><td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;">' + it.qty + '</td><td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;">$' + formatPrecio(it.precio) + '</td><td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">$' + formatPrecio(it.subtotal) + '</td></tr>';
+      var qtyTxt = String(it.qty);
+      if (parseFloat(it.pesoReal) > 0) {
+        qtyTxt += ' <span style="color:#888;font-size:11px;">(' + it.pesoReal + ' ' + (it.unidad_base === 'L' ? 'L' : 'kg') + ' reales)</span>';
+      }
+      bodyHtml += '<tr><td style="padding:8px 10px;border-bottom:1px solid #eee;">' + escapeHtml(it.productoLista) + '</td><td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;">' + qtyTxt + '</td><td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;">$' + formatPrecio(it.precio) + '</td><td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">$' + formatPrecio(it.subtotal) + '</td></tr>';
     });
     bodyHtml += '</tbody></table>';
   });

@@ -864,3 +864,29 @@ function decidirModoCascada(grupos, opts) {
 
   return { decididos: decididos, paraIA: paraIA };
 }
+
+// Detecta productos de PESO VARIABLE: se cotizan por kg pero cada pieza/barra/
+// horma pesa distinto, y el peso real se confirma al recibir (el proveedor pesa
+// y cobra peso × precio/kg). Ej: "barra de queso", "jamón crudo", "salame".
+//
+// NO son peso variable, aunque estén en modo unitario (por kg/L):
+//   - Líquidos (aceite, vinagre, leche): vienen en botellas/bidones de tamaño
+//     EXACTO. Un bidón de "5 LT" siempre trae 5 L. → unidadBase 'L' nunca aplica.
+//   - Sólidos en envase preciso: harina/azúcar/sal/fécula en bolsa, dulce de
+//     leche/mermelada en balde, levadura en paquete. La bolsa de 25kg pesa 25kg.
+//
+// Por eso exigimos: unidadBase 'kg' + tipo de queso/fiambre/embutido/carne.
+// Es deliberadamente conservador (match positivo): ante la duda, NO lo marca,
+// así no aparece la UI de pesaje en productos envasados.
+function esProductoPesoVariable(tipo, nombre, unidadBase) {
+  if (unidadBase !== 'kg') return false; // líquidos y unidades: tamaño exacto
+  var txt = (String(tipo || '') + ' ' + String(nombre || '')).toLowerCase();
+  // Envasados que igual contienen palabras de queso/fiambre → excluir explícito.
+  // "queso rallado" (bolsa sellada), "queso crema/untable" (pote), "queso en
+  // polvo" → precio por kg pero envase preciso, no se pesan al recibir.
+  if (/\b(rallad\w*|untable|en\s*polvo|polvo)\b/.test(txt)) return false;
+  if (/\bqueso\s+crema\b/.test(txt)) return false;
+  // Quesos enteros, fiambres, embutidos y carnes vendidos por pieza/peso.
+  var re = /\b(queso|mozzarella|muzzarella|muza|cremoso|sardo|reggianito|reggiano|provolone|provoleta|fontina|gouda|pategr[aá]s|parmesano|gruyere|gruy[eè]re|emmental|roquefort|azul|port\s*salut|tybo|barra|horma|fiambre|jam[oó]n|salame|salam[ií]n|mortadela|bondiola|panceta|lomo|paleta|leberwurst|morcilla|chorizo|longaniza|salchich[oó]n|matambre|peceto|nalga|carne|pollo|milanesa|bondiola)\b/;
+  return re.test(txt);
+}

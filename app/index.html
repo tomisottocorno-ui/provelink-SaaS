@@ -2464,12 +2464,13 @@ function abrirModalRecepcionar(id) {
       var rowOpacity = (!esCambio && noLlego) ? '0.45' : '1';
       var cambioStyle = esCambio ? 'background:rgba(251,191,36,0.12);border-color:rgba(251,191,36,0.5);color:var(--gold-bright);' : '';
       var cambioActive = esCambio ? 'true' : 'false';
-      // Peso variable (fiambres/quesos por kg): el precio de lista es por kg/L
-      // y el costo final = peso real × precio unitario. El proveedor informa el
-      // peso al despachar; acá se carga y el total del pedido se recalcula.
+      // Peso variable (quesos/fiambres enteros por kg): el precio de lista es
+      // por kg y el costo final = peso real × precio unitario. El proveedor
+      // informa el peso al despachar; acá se carga y el total se recalcula.
+      // Líquidos y envasados quedan EXCLUIDOS (tamaño exacto, no se pesan).
       var esPesoVar = it.modo === 'unitario' && (parseFloat(it.precio_unitario) > 0) &&
-                      (it.unidad_base === 'kg' || it.unidad_base === 'L');
-      var uLabel = (it.unidad_base === 'L') ? 'L' : 'kg';
+                      esProductoPesoVariable(it.tipo, it.productoLista, it.unidad_base);
+      var uLabel = 'kg';
       var pesoGuardado = (parseFloat(it.pesoReal) > 0) ? parseFloat(it.pesoReal) : null;
       var pesoEstimado = (parseFloat(it.tamano) > 0) ? Math.round(parseFloat(it.tamano) * it.qty * 100) / 100 : null;
       html += '<div style="display:flex;flex-direction:column;gap:0;padding:8px 10px;border-radius:8px;border:1px solid ' + rowBorder + ';background:' + rowBg + ';opacity:' + rowOpacity + ';" id="rec-row-' + it.itemId + '">';
@@ -6279,16 +6280,17 @@ function renderBuscarProducto(expansionesExtras) {
           mostrarUnidad = ' <span style="color:var(--text-muted);font-weight:500;">· ' + escapeHtml(unidadStr) + '</span>';
         }
       }
-      // Peso variable (fiambres/quesos cotizados por kg/L): el dato real de la
-      // lista es el precio POR KILO — mostrarlo grande y gritarlo, porque el
-      // costo final depende del peso real de la pieza (se carga al recepcionar).
+      // Peso variable (quesos/fiambres enteros cotizados por kg): el dato real
+      // de la lista es el precio POR KILO — mostrarlo grande y gritarlo, porque
+      // el costo final depende del peso real de la pieza (se carga al recepcionar).
+      // Líquidos (aceite x5L) y envasados quedan EXCLUIDOS: tamaño exacto.
       var esPesoVarComp = it.modo === 'unitario' && parseFloat(it.precio_unitario) > 0 &&
-                          (it.unidad_base === 'kg' || it.unidad_base === 'L');
-      var uTxtComp = it.unidad_base === 'L' ? 'litro' : 'kilo';
+                          esProductoPesoVariable(it.tipo, it.productoLista, it.unidad_base);
+      var uTxtComp = 'kilo';
       var pbHtml;
       if (esPesoVarComp) {
         var piezaTxt = (parseFloat(it.tamano) > 0 && it.precio > 0)
-          ? 'pieza ~' + it.tamano + ' ' + (it.unidad_base === 'L' ? 'L' : 'kg') + ' ≈ $' + formatPrecio(it.precio)
+          ? 'pieza ~' + it.tamano + ' kg ≈ $' + formatPrecio(it.precio)
           : 'se cobra por peso real al recibir';
         pbHtml = '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">⚖️ ' + piezaTxt + '</div>';
       } else {
@@ -6655,7 +6657,8 @@ function confirmarPedido() {
       modo: info.modo || null,
       precio_unitario: info.precio_unitario || null,
       unidad_base: info.unidad_base || null,
-      tamano: info.tamano || null });
+      tamano: info.tamano || null,
+      tipo: info.tipo || null });
   });
 
   // === RAMA A: PROGRAMACIÓN (solo calendario, no historial) ===

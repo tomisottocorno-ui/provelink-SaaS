@@ -595,6 +595,44 @@ create policy "Auditoría: usuarios actualizan la propia"
 
 
 -- ============================================================================
+-- TABLA: pl_modo_correcciones (correcciones manuales pack/unitario del usuario)
+-- ============================================================================
+create table if not exists public.pl_modo_correcciones (
+  id             uuid primary key default gen_random_uuid(),
+  owner_id       uuid not null references auth.users(id)        on delete cascade,
+  proveedor_id   uuid not null references public.proveedores(id) on delete cascade,
+  nombre_key     text not null,
+  clave_canonica text,
+  modo           text not null check (modo in ('pack', 'unitario')),
+  precio_al_corregir numeric,
+  fecha          timestamptz default now(),
+  unique (owner_id, proveedor_id, nombre_key)
+);
+
+alter table public.pl_modo_correcciones enable row level security;
+
+drop policy if exists "sel_modo_correcciones" on public.pl_modo_correcciones;
+create policy "sel_modo_correcciones" on public.pl_modo_correcciones
+  for select using (owner_id = get_owner_id());
+
+drop policy if exists "ins_modo_correcciones" on public.pl_modo_correcciones;
+create policy "ins_modo_correcciones" on public.pl_modo_correcciones
+  for insert with check (owner_id = get_owner_id());
+
+drop policy if exists "upd_modo_correcciones" on public.pl_modo_correcciones;
+create policy "upd_modo_correcciones" on public.pl_modo_correcciones
+  for update using (owner_id = get_owner_id());
+
+drop policy if exists "del_modo_correcciones" on public.pl_modo_correcciones;
+create policy "del_modo_correcciones" on public.pl_modo_correcciones
+  for delete using (owner_id = get_owner_id());
+
+-- Columnas de trazabilidad en pl_auditoria_precios
+alter table public.pl_auditoria_precios
+  add column if not exists fuente_decision text,
+  add column if not exists corregido       boolean default false;
+
+-- ============================================================================
 -- STORAGE: provider-logos - permitir a empleados acceder a la carpeta del owner
 -- ============================================================================
 -- Las políticas viejas usaban `(storage.foldername(name))[1] = auth.uid()::text`.

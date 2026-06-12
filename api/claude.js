@@ -479,7 +479,8 @@ module.exports = async function handler(req, res) {
       content: contentFiltrado,
       stop_reason: claudeData.stop_reason,
       usage: usage,
-      cuota: cuotaInfo
+      cuota: cuotaInfo,
+      costo_usd: costo
     });
 
   } catch (e) {

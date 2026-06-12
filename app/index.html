@@ -3189,6 +3189,7 @@ function removeBarraProgreso(jobId) {
 async function procesarArchivo(event) {
   var file = event.target.files[0];
   if (!file) return;
+  _costoListaUSD = 0; // medir el costo IA de esta subida
 
   var ficha = cargaActiva();
   if (!ficha) { event.target.value = ''; return; }
@@ -3442,6 +3443,7 @@ async function detectarColumnasPDF(muestraTexto, proveedorId) {
     })
   });
   var data = await resp.json();
+  _sumarCostoLista(data);
   if (!resp.ok) {
     var msg = data.error || 'Error detectando columnas';
     if (data.detalle) msg += ' — ' + data.detalle;
@@ -3595,12 +3597,14 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna,
 
   var prompt = 'Extraé productos de esta lista de precios argentina. REGLA ABSOLUTA: copiá los precios EXACTAMENTE como aparecen, NUNCA dividas ni multipliques, NUNCA conviertas formato.\n\n' +
     ctxColumna + '\n\n' +
-    'Devolvé ÚNICAMENTE un array JSON:\n[{"nombre":"...","precio":"texto_exacto","unidad":"...","alerta":false}]\n' +
-    '- nombre: nombre completo (marca, variedad, presentación). QUITÁ las comillas dobles (" “ ”) del texto — ej: SALAME "42" → SALAME 42, QUESO 24" → QUESO 24.\n' +
+    'Devolvé ÚNICAMENTE una línea de texto plano por producto, con 4 campos separados por "|" (sin JSON, sin markdown):\n' +
+    'nombre|precio|unidad|alerta\n' +
+    'Ejemplo:\nACEITE GIRASOL COCINERO X 5 LT|16.940,00|5 lt|0\nSAL FINA BOLSA|892,15||0\n' +
+    '- nombre: nombre completo (marca, variedad, presentación). QUITÁ las comillas dobles (" “ ”) del texto — ej: SALAME "42" → SALAME 42, QUESO 24" → QUESO 24. Si el nombre contiene el carácter "|", reemplazalo por "/".\n' +
     '- precio: STRING con el texto EXACTO de la COLUMNA OBJETIVO "' + nombreColumna + '" tal como aparece en el PDF.\n' +
     '  IMPORTANTE: en cada fila puede haber varios números (códigos, stock, distintas columnas de precio).\n' +
     '  Usá el valor TÍPICO de la columna objetivo (' + (ejemploColumna || 'sin ejemplo') + ') como referencia de qué número buscar.\n' +
-    '  Si el orden de columnas cambia o no estás 100% seguro de cuál es el precio correcto, marcá alerta: true.\n' +
+    '  Si el orden de columnas cambia o no estás 100% seguro de cuál es el precio correcto, marcá alerta: 1.\n' +
     '  Conservá puntos y comas (ej: "13.996,53" → devolver "13.996,53" como string). NO conviertas a número.\n' +
     '- unidad: tamaño del bulto/envase, extraído SIEMPRE del NOMBRE del producto (buscá "X N UNIDAD", ej: "X 5 LTS", "X 1 KG", "X 500 GR" → "5 lt", "1 kg", "500 g").\n' +
     '  ⚠️ COLUMNA DE TIPO DE ENVASE: muchas listas tienen una columna con códigos abreviados junto al precio\n' +
@@ -3614,7 +3618,7 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna,
     '  es una caja de N porciones. Poné en unidad el formato "N x M unidad" (conteo × tamaño), NO descartes el número.\n' +
     '  Ej: nombre "Aderezos Aceite Maiz 8 cc" + presentación "Caja x 200" → unidad: "200 x 8 cc".\n' +
     '  Ej: nombre "Mayonesa Sobre 10 gr" + presentación "Pack x 50" → unidad: "50 x 10 gr".\n' +
-    '- alerta: true si NO estás seguro de cuál es el precio correcto de la columna objetivo (mejor marcar dudoso que adivinar mal)\n' +
+    '- alerta: 1 si NO estás seguro de cuál es el precio correcto de la columna objetivo (mejor marcar dudoso que adivinar mal), 0 si está claro.\n' +
     '- Ignorá encabezados, totales, líneas vacías. Incluí TODOS los productos.\n\n' +
     'Texto:\n\n' + textoCrudo;
   var resp = await fetch('/api/claude', {
@@ -3631,6 +3635,7 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna,
     })
   });
   var data = await resp.json();
+  _sumarCostoLista(data);
   if (!resp.ok) {
     var msg = data.error || 'Error en API';
     if (data.detalle) msg += ' — ' + data.detalle;
@@ -3648,6 +3653,33 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna,
   }
 
   var texto = (data.content && data.content[0] && data.content[0].text || '').replace(/```json|```/g, '').trim();
+
+  // Formato pipe "nombre|precio|unidad|alerta". Los 3 últimos campos son fijos
+  // → se parsea desde la derecha y el nombre absorbe cualquier "|" extra.
+  // Una línea truncada al final simplemente se descarta (sin precio numérico).
+  var itemsPipe = [];
+  texto.split('\n').forEach(function(ln) {
+    ln = ln.trim();
+    if (!ln || ln.indexOf('|') < 0) return;
+    var f = ln.split('|');
+    var nombre, precio, unidad = '', alerta = '0';
+    if (f.length >= 4) {
+      alerta = f.pop().trim();
+      unidad = f.pop().trim();
+      precio = f.pop().trim();
+      nombre = f.join('|').trim();
+    } else if (f.length === 3) {
+      unidad = f[2].trim(); precio = f[1].trim(); nombre = f[0].trim();
+    } else {
+      precio = f[1].trim(); nombre = f[0].trim();
+    }
+    if (!nombre || !precio || !/\d/.test(precio)) return; // header/ejemplo/basura
+    itemsPipe.push({ nombre: nombre, precio: precio, unidad: unidad,
+      alerta: alerta === '1' || alerta === 'true' });
+  });
+  if (itemsPipe.length > 0) return itemsPipe;
+
+  // Fallbacks por si el modelo devolvió JSON (formato viejo)
   try {
     var arr = JSON.parse(texto);
     if (!Array.isArray(arr)) throw new Error('No es array');
@@ -3676,6 +3708,7 @@ async function llamarClaudeProcesarLista(payload) {
     body: JSON.stringify(payload)
   });
   var data = await resp.json();
+  _sumarCostoLista(data);
   if (!resp.ok) {
     var msg = data.error || 'Error desconocido';
     if (data.detalle) msg += ' — ' + data.detalle;
@@ -3713,7 +3746,7 @@ async function llamarClaudeProcesarLista(payload) {
 
 var SYSTEM_NORMALIZACION = [
   'Normalizás nombres de productos de distintos proveedores para poder agruparlos y compararlos.',
-  'Devolvé SOLO un array JSON, sin texto adicional ni markdown.',
+  'Devolvé SOLO líneas de texto plano (una por producto) según el FORMATO DE SALIDA del final. Sin JSON, sin markdown, sin texto adicional.',
   '',
   'Para cada producto generá una "clave_canonica" siguiendo estas reglas ESTRICTAS:',
   '',
@@ -3830,21 +3863,26 @@ var SYSTEM_NORMALIZACION = [
   '4. FORMATO: "[tipo] [tamaño][unidad]" todo minúsculas sin acentos.',
   '   Ejemplos: "aceite girasol 5L", "harina 000 25kg", "levadura fresca 0.5kg", "mayonesa 2.9kg"',
   '',
-  'Devolvé:',
-  '[{',
-  '  "id_original": "el id que te pase",',
-  '  "clave_canonica": "la clave normalizada",',
-  '  "tipo": "categoria: aceite|harina|arroz|azucar|levadura|sal|etc",',
-  '  "tamano": número (ej: 5, 25, 0.5, 1),',
-  '  "unidad_base": "kg" | "L" | "u",',
-  '  "confianza": 0.0 a 1.0,',
-  '  "m": "P" | "U" | null',
-  '}]',
+  'FORMATO DE SALIDA — una línea por producto, 7 campos separados por "|":',
+  'id|clave_canonica|tipo|tamano|unidad_base|confianza|m',
   '',
-  'El campo "m" (modo del precio) es una señal del documento:',
-  '  "U" = precio UNITARIO (el campo unidad es "KG", "LTS" u otro indicador de precio-por-unidad-base)',
-  '  "P" = precio PACK (el campo unidad es "BOL", "CAJ", "PAQ", "LAT", "FCO", "POT", "POM", "BOT", "UN", etc.)',
-  '  null = no hay señal clara en el documento (omití el campo o ponelo null)'
+  '- id: el id que te pasé (copialo exacto)',
+  '- clave_canonica: la clave normalizada',
+  '- tipo: la categoría específica (ej: aceite girasol, harina 000, dulce de leche)',
+  '- tamano: número (ej: 5, 25, 0.5, 1) — vacío si no se puede determinar',
+  '- unidad_base: kg, L o u',
+  '- confianza: 0.0 a 1.0',
+  '- m: señal del documento sobre el modo del precio. U = precio UNITARIO (el campo',
+  '  unidad es "KG", "LTS" u otro indicador de precio-por-unidad-base). P = precio',
+  '  PACK (el campo unidad es "BOL", "CAJ", "PAQ", "LAT", "FCO", "POT", "POM",',
+  '  "BOT", "UN", etc.). Dejá el campo vacío si no hay señal clara.',
+  '',
+  'Ejemplo de salida (nada más que estas líneas):',
+  'i1|aceite girasol 5L|aceite girasol|5|L|0.95|U',
+  'i2|mayonesa 2.9kg|mayonesa|2.9|kg|0.9|P',
+  'i3|queso azul 1kg|queso azul|1|kg|0.7|',
+  '',
+  'Los nombres de producto nunca llevan el carácter "|"; no lo uses dentro de los campos.'
 ].join('\n');
 
 var SYSTEM_DETECCION_MODO = [
@@ -3880,19 +3918,15 @@ var SYSTEM_DETECCION_MODO = [
   '  mayonesa 4000-18000/kg · mostaza 4000-22000/kg · leche 1500-9000/L · cerveza 2000-16000/L',
   '  productos premium o gourmet pueden estar en la mitad alta de estos rangos.',
   '',
-  'IMPORTANTE: siempre elegí "pack" o "unitario". Nunca devuelvas null.',
+  'IMPORTANTE: siempre elegí "pack" o "unitario". Nunca dejes una fila sin decidir.',
   '',
-  'Devolvé SOLO un array JSON:',
-  '[{',
-  '  "clave_canonica": "clave del grupo",',
-  '  "resultados": [{',
-  '    "id_original": "id de la fila",',
-  '    "proveedor_id": "id del proveedor",',
-  '    "modo": "unitario" | "pack",',
-  '    "confianza": 0.0 a 1.0,',
-  '    "razonamiento": "una línea explicando"',
-  '  }]',
-  '}]'
+  'Devolvé SOLO una línea de texto plano por cada ID que te pasé (sin JSON, sin markdown):',
+  'id|modo|confianza',
+  '- modo: pack o unitario (exactamente esas palabras)',
+  '- confianza: 0.0 a 1.0',
+  'Ejemplo:',
+  'f12|pack|0.9',
+  'f13|unitario|0.85'
 ].join('\n');
 
 // ---- Helpers de código puro (sin IA) ----
@@ -3965,6 +3999,14 @@ async function guardarCacheNorm(nuevos) {
 
 // ---- Llamadas a la IA ----
 
+// Acumulador de costo IA por subida de lista (se resetea en procesarArchivo).
+// El backend devuelve costo_usd en cada respuesta; acá se suma para mostrar
+// al final cuánto costó procesar la lista completa.
+var _costoListaUSD = 0;
+function _sumarCostoLista(data) {
+  if (data && typeof data.costo_usd === 'number') _costoListaUSD += data.costo_usd;
+}
+
 // Semaforo de concurrencia: limita cuantas llamadas a /api/claude pueden estar
 // "en vuelo" al mismo tiempo, para no superar el rate limit de Anthropic
 // (10K output tokens/min en cuentas chicas). 3 paralelos da ~ 4500 tok*3 = 13500
@@ -4005,6 +4047,7 @@ async function _fetchClaude(payload) {
       try { txt = await resp.text(); } catch(e) {}
       data = { error: 'Respuesta no-JSON', detalle: txt.slice(0, 200) };
     }
+    _sumarCostoLista(data);
     return { resp: resp, data: data };
   } finally {
     _claudeRelease();
@@ -4165,13 +4208,36 @@ async function _normBatch(batch) {
     });
   };
 
-  // Intento 1: parse directo
+  // Intento 1: formato pipe "id|clave|tipo|tamano|unidad|confianza|m" (una
+  // línea por producto). Tolerante a truncado: una línea incompleta no llega
+  // a 6 campos o su id no está en el batch → se descarta sola.
+  var parsedPipe = [];
+  txt.split('\n').forEach(function(ln) {
+    ln = ln.trim();
+    if (!ln || ln.indexOf('|') < 0) return;
+    var f = ln.split('|');
+    if (f.length < 6) return;
+    var idLn = f[0].trim();
+    if (!batchPorId[idLn]) return; // header, ejemplo o basura
+    var mVal = (f[6] || '').trim().toUpperCase();
+    parsedPipe.push({
+      id_original: idLn,
+      clave_canonica: f[1].trim(),
+      tipo: f[2].trim(),
+      tamano: parseFloat(String(f[3]).trim().replace(',', '.')) || null,
+      unidad_base: f[4].trim(),
+      confianza: parseFloat(f[5]) || 0.5,
+      m: (mVal === 'P' || mVal === 'U') ? mVal : null
+    });
+  });
+  if (parsedPipe.length > 0) return refinar(parsedPipe);
+
+  // Fallbacks por si el modelo devolvió JSON (formato viejo)
   try {
     var parsed = JSON.parse(txt);
     if (Array.isArray(parsed)) return refinar(parsed);
   } catch(e) {}
 
-  // Intento 2: slice entre primer [ y último ]
   var ini = txt.indexOf('['), fin = txt.lastIndexOf(']');
   if (ini >= 0 && fin > ini) {
     try {
@@ -4180,7 +4246,6 @@ async function _normBatch(batch) {
     } catch(e2) {}
   }
 
-  // Intento 3: recovery — extraer objetos completos de array truncado
   var recuperados = recuperarObjetosJsonArray(txt);
   if (recuperados.length > 0) {
     console.warn('[normBatch] JSON truncado pero recuperados ' + recuperados.length + '/' + batch.length + ' items');
@@ -4658,6 +4723,43 @@ async function llamarDetectarModoIA(grupos) {
     return a.concat(b);
   }
 
+  // Formato pipe "id|modo|confianza". La clave canónica y el proveedor se
+  // reconstruyen acá desde los grupos (la IA no los repite → menos tokens).
+  var metaPorId = {};
+  grupos.forEach(function(g) {
+    (g.proveedores || []).forEach(function(p) {
+      metaPorId[p.id_original] = { clave: g.clave_canonica, provId: p.proveedor_id };
+    });
+  });
+  var porClave = {};
+  var nPipe = 0;
+  txt.split('\n').forEach(function(ln) {
+    ln = ln.trim();
+    if (!ln || ln.indexOf('|') < 0) return;
+    var f = ln.split('|');
+    if (f.length < 3) return;
+    var id = f[0].trim();
+    var meta = metaPorId[id];
+    if (!meta) return; // header, ejemplo o id desconocido
+    var modo = f[1].trim().toLowerCase();
+    if (modo !== 'pack' && modo !== 'unitario') return;
+    (porClave[meta.clave] = porClave[meta.clave] || []).push({
+      id_original: id,
+      proveedor_id: meta.provId,
+      modo: modo,
+      confianza: parseFloat(f[2]) || 0.5,
+      razonamiento: 'decidido por IA',
+      fuente_decision: 'ia'
+    });
+    nPipe++;
+  });
+  if (nPipe > 0) {
+    return Object.keys(porClave).map(function(k) {
+      return { clave_canonica: k, resultados: porClave[k] };
+    });
+  }
+
+  // Fallbacks por si el modelo devolvió JSON (formato viejo)
   try {
     var parsed = JSON.parse(txt);
     if (Array.isArray(parsed)) return parsed;
@@ -4671,15 +4773,14 @@ async function llamarDetectarModoIA(grupos) {
     } catch(e2) {}
   }
 
-  // Recovery de objetos completos en array truncado
   var recuperados = recuperarObjetosJsonArray(txt);
   if (recuperados.length > 0) {
     console.warn('[detectarModo] JSON truncado pero recuperados ' + recuperados.length + '/' + grupos.length + ' grupos');
     return recuperados;
   }
 
-  console.error('[detectarModo] JSON inválido. Inicio respuesta:', txt.slice(0, 300));
-  throw new Error('IA respondió con JSON inválido (' + txt.length + ' chars)');
+  console.error('[detectarModo] respuesta inválida. Inicio:', txt.slice(0, 300));
+  throw new Error('IA respondió formato inválido (' + txt.length + ' chars)');
 }
 
 async function llamarDetectarModoIAConRetry(grupos, intentos) {
@@ -4879,6 +4980,14 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
 
   console.log('[Pipeline] Completado: ' + resultado.length + ' items · ' +
     resultado.filter(function(r){return r.modo;}).length + ' con modo detectado');
+  if (_costoListaUSD > 0) {
+    var _cu = resultado.length > 0 ? (_costoListaUSD / resultado.length) : 0;
+    console.log('[Pipeline] Costo IA de esta lista: US$' + _costoListaUSD.toFixed(4) +
+      ' (US$' + _cu.toFixed(5) + '/producto)');
+    if (typeof showToast === 'function') {
+      showToast('Procesado · costo IA US$' + _costoListaUSD.toFixed(3), 'ok');
+    }
+  }
 
   // Etapa 6: Afinar rangos en pl_rangos_precio con los datos detectados
   // (defensas anti-outlier internas; solo data con confianza >= 0.7 alimenta).

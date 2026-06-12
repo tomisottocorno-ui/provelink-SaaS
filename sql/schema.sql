@@ -613,19 +613,19 @@ alter table public.pl_modo_correcciones enable row level security;
 
 drop policy if exists "sel_modo_correcciones" on public.pl_modo_correcciones;
 create policy "sel_modo_correcciones" on public.pl_modo_correcciones
-  for select using (owner_id = get_owner_id());
+  for select using (owner_id = public.get_owner_id(auth.uid()));
 
 drop policy if exists "ins_modo_correcciones" on public.pl_modo_correcciones;
 create policy "ins_modo_correcciones" on public.pl_modo_correcciones
-  for insert with check (owner_id = get_owner_id());
+  for insert with check (owner_id = public.get_owner_id(auth.uid()));
 
 drop policy if exists "upd_modo_correcciones" on public.pl_modo_correcciones;
 create policy "upd_modo_correcciones" on public.pl_modo_correcciones
-  for update using (owner_id = get_owner_id());
+  for update using (owner_id = public.get_owner_id(auth.uid()));
 
 drop policy if exists "del_modo_correcciones" on public.pl_modo_correcciones;
 create policy "del_modo_correcciones" on public.pl_modo_correcciones
-  for delete using (owner_id = get_owner_id());
+  for delete using (owner_id = public.get_owner_id(auth.uid()));
 
 -- Columnas de trazabilidad en pl_auditoria_precios
 alter table public.pl_auditoria_precios

@@ -3754,8 +3754,14 @@ var SYSTEM_NORMALIZACION = [
   '  "tipo": "categoria: aceite|harina|arroz|azucar|levadura|sal|etc",',
   '  "tamano": número (ej: 5, 25, 0.5, 1),',
   '  "unidad_base": "kg" | "L" | "u",',
-  '  "confianza": 0.0 a 1.0',
-  '}]'
+  '  "confianza": 0.0 a 1.0,',
+  '  "m": "P" | "U" | null',
+  '}]',
+  '',
+  'El campo "m" (modo del precio) es una señal del documento:',
+  '  "U" = precio UNITARIO (el campo unidad es "KG", "LTS" u otro indicador de precio-por-unidad-base)',
+  '  "P" = precio PACK (el campo unidad es "BOL", "CAJ", "PAQ", "LAT", "FCO", "POT", "POM", "BOT", "UN", etc.)',
+  '  null = no hay señal clara en el documento (omití el campo o ponelo null)'
 ].join('\n');
 
 var SYSTEM_DETECCION_MODO = [
@@ -3790,6 +3796,8 @@ var SYSTEM_DETECCION_MODO = [
   '  harina 1000-6000/kg · azúcar 1200-5000/kg · arroz 2000-10000/kg · sal 300-3000/kg',
   '  mayonesa 4000-18000/kg · mostaza 4000-22000/kg · leche 1500-9000/L · cerveza 2000-16000/L',
   '  productos premium o gourmet pueden estar en la mitad alta de estos rangos.',
+  '',
+  'IMPORTANTE: siempre elegí "pack" o "unitario". Nunca devuelvas null.',
   '',
   'Devolvé SOLO un array JSON:',
   '[{',
@@ -4686,84 +4694,52 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     return enriquecido;
   });
 
-  // Etapa 4: Detectar modo (orden de prioridad: 100% gratis → Haiku barato)
-  //   1. Heurística estructural (presentación = solo unidad sin número) → unitario
-  //   2. Tamaño explícito "x N unidad" en el nombre → pack
-  //   3. Rango cacheado en pl_rangos_precio (seed HORECA, compartido) → pack/unitario
-  //   4. Rangos hardcodeados en el código (fallback gratis) → pack/unitario
-  //   5. IA Haiku en batch para lo que queda ambiguo (~$0.001 por grupo)
-  //
-  // Búsqueda web DESACTIVADA: Sonnet+web_search cuesta $0.10-0.30 por tipo, lo
-  // que volaba el presupuesto de una lista grande. Sin ella, el peor caso por
-  // tipo desconocido es Haiku (~$0.001) o marcado "revisar" para confirmar.
-  //
-  // Coherencia interna DESACTIVADA: cruzaba precios de dos tamaños del mismo
-  // producto en la misma lista; en la práctica confundía al usuario porque
-  // marcaba con "revisar" items que estaban bien cargados.
+  // Etapa 4: Detectar modo — cascada de 8 pasos (0=memoria → 7=IA)
   if (loadingEl) loadingEl.textContent = 'Detectando modo de precio...';
-  var todosLosModos = [];
-  var gruposParaIA = [];
-  var nRangos = 0, nRangosDinamicos = 0;
 
-  // Cargar rangos dinámicos (gratis, una consulta)
+  // Cargar rangos DB y correcciones manuales (ambos gratis, una consulta cada uno)
   var rangosCacheados = await getRangosCacheados();
-
-  var aplicar = function(g, h) {
-    var propios = g.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
-    todosLosModos.push({
-      clave_canonica: g.clave_canonica,
-      resultados: propios.map(function(p) {
-        return { id_original: p.id_original, proveedor_id: p.proveedor_id,
-                 modo: h.modo, confianza: h.confianza, razonamiento: h.razonamiento };
-      })
-    });
-  };
-
-  for (var iG = 0; iG < gruposConComparacion.length; iG++) {
-    var g = gruposConComparacion[iG];
-
-    // 1) Heurística estructural
-    var h = detectarModoHeuristico(g);
-    if (h) { aplicar(g, h); continue; }
-
-    var tipoKey = (g.tipo || '').toLowerCase().trim();
-    var rangoRow = tipoKey ? lookupRangoCacheado(rangosCacheados, tipoKey) : null;
-    var primerPropio = g.proveedores.find(function(p) { return p.id_original.indexOf('ext_') !== 0; });
-
-    // 2) Tamaño explícito "x N unidad" en el nombre → el precio es del bulto.
-    //    Señal fuerte: el nombre manda. El rango sólo veta tamaños absurdos (OCR).
-    if (primerPropio && tamanoExplicitoEnNombre(g)) {
-      var detExp = decidirPackPorTamanoExplicito(g, primerPropio, rangoRow);
-      if (detExp) { aplicar(g, detExp); nRangos++; continue; }
-    }
-
-    // 3) Rango cacheado (de pl_rangos_precio, seed HORECA+CENTENO ~90 tipos)
-    if (rangoRow && primerPropio) {
-      var det = detectarPorRangoDinamico(
-        { precio_raw: primerPropio.precio_raw, tamano: g.tamano },
-        rangoRow
-      );
-      if (det) { aplicar(g, det); nRangosDinamicos++; continue; }
-    }
-
-    // 4) Rangos hardcodeados en el código (fallback gratis para ~20 productos básicos)
-    var r = decidirModoPorRangos(g);
-    if (r) { aplicar(g, r); nRangos++; continue; }
-
-    // 5) Sin rango disponible → cae a IA Haiku (último resort barato).
-    //    Si Haiku no decide con confianza alta, queda con `revisar:true` y el
-    //    usuario lo confirma con un click en el preview (botones 📦 / ⚖️).
-    gruposParaIA.push(g);
+  var memoria = {};
+  var _provIdActual = gruposConComparacion.length > 0
+    ? ((gruposConComparacion[0].proveedores || [])[0] || {}).proveedor_id || null
+    : null;
+  if (_provIdActual) {
+    try {
+      var { data: _corr } = await supabase
+        .from('pl_modo_correcciones')
+        .select('nombre_key, modo')
+        .eq('owner_id', effectiveUserId())
+        .eq('proveedor_id', _provIdActual);
+      (_corr || []).forEach(function(c) { memoria[c.nombre_key] = c.modo; });
+    } catch(e) { console.warn('[Cascada] Error cargando correcciones:', e); }
   }
 
-  console.log('[Pipeline] Modo — heurística: ' + (todosLosModos.length - nRangos - nRangosDinamicos) +
-    ' · rangos DB: ' + nRangosDinamicos +
-    ' · rangos hardcoded: ' + nRangos +
-    ' · IA Haiku (fallback): ' + gruposParaIA.length + ' grupos');
+  var cascResult = decidirModoCascada(gruposConComparacion, {
+    memoria: memoria, rangosCacheados: rangosCacheados, skipIA: false
+  });
+  var decididos = cascResult.decididos;
 
-  // Batches de 25 en PARALELO (cada grupo lleva varios proveedores, baja TPM)
-  // Cada batch reintenta hasta 3 veces. Si falla definitivamente, contamos los
-  // grupos perdidos para reportar al usuario.
+  // Convertir decididos al formato todosLosModos esperado por calcularPrecios
+  var todosLosModos = [];
+  gruposConComparacion.forEach(function(g) {
+    var propios = g.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
+    var res = propios.filter(function(p) { return !!decididos[p.id_original]; })
+      .map(function(p) {
+        var d = decididos[p.id_original];
+        return { id_original: p.id_original, proveedor_id: p.proveedor_id,
+                 modo: d.modo, confianza: d.confianza, razonamiento: d.razonamiento,
+                 fuente_decision: d.fuente_decision };
+      });
+    if (res.length > 0) todosLosModos.push({ clave_canonica: g.clave_canonica, resultados: res });
+  });
+
+  // Grupos que la cascada no pudo decidir → IA Haiku
+  var gruposParaIA = cascResult.paraIA.map(function(x) { return x.grupo; });
+
+  console.log('[Pipeline] Cascada — decididos: ' + Object.keys(decididos).length +
+    ' · IA pendiente: ' + gruposParaIA.length + ' grupos');
+
+  // Batches de 15 en PARALELO. Cada batch reintenta hasta 3 veces.
   if (gruposParaIA.length > 0) {
     var modoPromises = [];
     var modoPerdidos = 0;
@@ -4783,7 +4759,7 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     var modoResultados = await Promise.all(modoPromises);
     modoResultados.forEach(function(r) { todosLosModos = todosLosModos.concat(r); });
     if (modoPerdidos > 0 && typeof showToast === 'function') {
-      showToast(modoPerdidos + ' grupo(s) sin modo detectado tras 3 reintentos — quedan para revisar', 'warn');
+      showToast(modoPerdidos + ' grupo(s) sin modo detectado — quedan como pack por defecto', 'warn');
     }
   }
 
@@ -4965,6 +4941,7 @@ function setModoPreview(idx, modo) {
   it.razonamiento = 'corregido manualmente';
   it.revisar = false;
   it.confianza = 1;
+  it.confirmado_manual = true;
   if (modo === 'pack') {
     it.precio_total = precio;
     it.precio_unitario = (tamano > 0) ? redondear(precio / tamano) : null;
@@ -5045,6 +5022,27 @@ async function guardarLista() {
           items: items
         });
       if (error) throw error;
+    }
+
+    // Persistir correcciones manuales (confirmado_manual = true) asíncronamente
+    var itemsCorregidos = items.filter(function(it) { return it.confirmado_manual && it.modo; });
+    if (itemsCorregidos.length > 0) {
+      var corrRows = itemsCorregidos.map(function(it) {
+        return {
+          owner_id:          effectiveUserId(),
+          proveedor_id:      proveedorId,
+          nombre_key:        normalizarNombreKey(it.productoLista || ''),
+          clave_canonica:    it.clave_canonica || null,
+          modo:              it.modo,
+          precio_al_corregir: parseFloat(it.precio) || null
+        };
+      });
+      supabase.from('pl_modo_correcciones')
+        .upsert(corrRows, { onConflict: 'owner_id,proveedor_id,nombre_key' })
+        .then(function(r) {
+          if (r.error) console.warn('[Correcciones] Error guardando:', r.error.message);
+          else console.log('[Correcciones] Guardadas:', corrRows.length);
+        });
     }
 
     // Auditoría asíncrona (no bloquea el guardado)

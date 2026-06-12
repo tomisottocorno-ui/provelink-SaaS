@@ -6279,13 +6279,34 @@ function renderBuscarProducto(expansionesExtras) {
           mostrarUnidad = ' <span style="color:var(--text-muted);font-weight:500;">· ' + escapeHtml(unidadStr) + '</span>';
         }
       }
-      var pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
+      // Peso variable (fiambres/quesos cotizados por kg/L): el dato real de la
+      // lista es el precio POR KILO — mostrarlo grande y gritarlo, porque el
+      // costo final depende del peso real de la pieza (se carga al recepcionar).
+      var esPesoVarComp = it.modo === 'unitario' && parseFloat(it.precio_unitario) > 0 &&
+                          (it.unidad_base === 'kg' || it.unidad_base === 'L');
+      var uTxtComp = it.unidad_base === 'L' ? 'litro' : 'kilo';
+      var pbHtml;
+      if (esPesoVarComp) {
+        var piezaTxt = (parseFloat(it.tamano) > 0 && it.precio > 0)
+          ? 'pieza ~' + it.tamano + ' ' + (it.unidad_base === 'L' ? 'L' : 'kg') + ' ≈ $' + formatPrecio(it.precio)
+          : 'se cobra por peso real al recibir';
+        pbHtml = '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">⚖️ ' + piezaTxt + '</div>';
+      } else {
+        pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
+      }
       var ultimaBadge = esUlt
         ? '<span style="font-size:9px;padding:1px 5px;border-radius:10px;background:rgba(251,191,36,0.2);color:var(--gold-bright);border:1px solid rgba(251,191,36,0.45);margin-left:4px;vertical-align:middle;white-space:nowrap;">Última compra</span>'
         : '';
       html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + ultimaBadge + pbHtml + '</div>';
       html += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">';
-      html += '<strong style="font-size:13px;white-space:nowrap;color:#4ade80;">$' + formatPrecio(precioMostrar) + '</strong>';
+      if (esPesoVarComp) {
+        html += '<div style="text-align:right;white-space:nowrap;">' +
+          '<strong style="font-size:15px;color:#4ade80;">$' + formatPrecio(it.precio_unitario) + '</strong>' +
+          '<div style="font-size:11px;font-weight:800;color:#4ade80;text-transform:uppercase;letter-spacing:0.06em;line-height:1.2;">por ' + uTxtComp + '</div>' +
+          '</div>';
+      } else {
+        html += '<strong style="font-size:13px;white-space:nowrap;color:#4ade80;">$' + formatPrecio(precioMostrar) + '</strong>';
+      }
       if (enPed > 0) {
         html += '<button class="btn" data-restar="' + escapeHtmlAttr(it.itemId) + '" style="padding:2px 7px;font-size:12px;">−</button>';
         html += '<span style="font-size:13px;font-weight:700;min-width:20px;text-align:center;">' + enPed + '</span>';

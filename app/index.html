@@ -631,7 +631,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="pipeline.js"></script>
+<script src="/app/pipeline.js"></script>
 <script>
 // Configurar el worker de PDF.js
 if (typeof pdfjsLib !== 'undefined') {
@@ -6545,7 +6545,14 @@ function confirmarPedido() {
   ids.forEach(function(itemId) {
     var info = byId[itemId];
     if (!info) return;
-    items.push({ itemId: itemId, productoLista: info.productoLista, qty: ped.items[itemId].qty, unidad: info.unidad || '', proveedorId: info.proveedorId, proveedor: info.proveedor, precio: info.precio, subtotal: info.precio * ped.items[itemId].qty });
+    items.push({ itemId: itemId, productoLista: info.productoLista, qty: ped.items[itemId].qty, unidad: info.unidad || '', proveedorId: info.proveedorId, proveedor: info.proveedor, precio: info.precio, subtotal: info.precio * ped.items[itemId].qty,
+      // Datos de modo para recepción con peso real (fiambres/quesos por kg):
+      // si modo=unitario el precio de lista es por kg/L y el costo final
+      // depende del peso real que pese el proveedor al despachar.
+      modo: info.modo || null,
+      precio_unitario: info.precio_unitario || null,
+      unidad_base: info.unidad_base || null,
+      tamano: info.tamano || null });
   });
 
   // === RAMA A: PROGRAMACIÓN (solo calendario, no historial) ===
@@ -6592,6 +6599,16 @@ function confirmarPedido() {
     if (idx >= 0) {
       var prev = hist[idx];
       var nuevoEditCount = (prev.editCount || 0) + 1;
+      // Re-aplicar pesos reales ya cargados en recepción (por itemId):
+      // al editar se reconstruyen los items desde la lista y se perderían.
+      var prevPesos = {};
+      (prev.items || []).forEach(function(pi) { if (pi.pesoReal > 0) prevPesos[pi.itemId] = pi.pesoReal; });
+      items.forEach(function(it) {
+        if (prevPesos[it.itemId] && it.modo === 'unitario' && it.precio_unitario > 0) {
+          it.pesoReal  = prevPesos[it.itemId];
+          it.subtotal  = Math.round(it.pesoReal * it.precio_unitario * 100) / 100;
+        }
+      });
       var pedidoEditado = {
         id: prev.id, fecha: prev.fecha, timestamp: prev.timestamp,
         items: items, total: items.reduce(function(s, it) { return s + it.subtotal; }, 0),

@@ -607,9 +607,8 @@ function decidirPackPorTamanoExplicito(grupo, propio, rangoRow) {
     }
   }
 
-  // Sin rango o ambiguo: el nombre manda → pack con confianza media.
-  return { modo: 'pack', confianza: 0.7,
-    razonamiento: 'nombre con tamaño explícito (' + tamano + (grupo.unidad_base || '') + ') → asumido bulto (sin rango para validar)' };
+  // Sin rango: no podemos validar si pack o unitario → dejar a IA.
+  return null;
 }
 
 // Detecta patron multipack en el texto. Devuelve { total, unidad } o null.

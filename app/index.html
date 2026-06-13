@@ -247,8 +247,8 @@
           <div style="display:flex;align-items:center;gap:10px;">
             <span class="icon-slot" data-icon="calendar"></span>
             <div>
-              <div style="font-size:13px;font-weight:600;">¿Para qué día lo programás?</div>
-              <div style="font-size:11px;color:var(--text-muted);">Se guarda en el calendario. El precio se actualiza con la lista hasta que lo realices.</div>
+              <div style="font-size:13px;font-weight:600;">¿Qué día vas a recibir el pedido?</div>
+              <div style="font-size:11px;color:var(--text-muted);">Queda agendado en el calendario para esa fecha.</div>
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -6548,26 +6548,27 @@ function renderResumen() {
 
   // Selector de día del calendario: SOLO en modo 'programar' (para poder
   // ajustar la fecha objetivo). En modo 'realizar' no se muestra (va a hoy).
+  // Selector de fecha de RECEPCIÓN: siempre visible y obligatorio.
   var selBox = $('resumen-cal-selector');
   if (selBox) {
-    if (calendarioPermitido() && ped.modo === 'programar') {
-      selBox.style.display = '';
-      var inp = $('resumen-fecha-cal');
-      if (inp && ped.fechaCalendario) inp.value = ped.fechaCalendario;
-      var btnBorrarFecha = $('btn-limpiar-fecha-cal');
-      if (btnBorrarFecha) btnBorrarFecha.style.display = 'none';  // en modo programar la fecha es obligatoria
-      if (inp && !inp._listenerAttached) {
+    selBox.style.display = '';
+    var inp = $('resumen-fecha-cal');
+    if (inp) {
+      inp.min = _isoDate(new Date());
+      if (!inp.value) {
+        // Default: la preseleccionada (si vino del calendario) o mañana.
+        var manana = new Date(); manana.setDate(manana.getDate() + 1);
+        inp.value = ped.fechaRecepcionEsperada || _isoDate(manana);
+        pedidoSet(Object.assign({}, pedidoGet(), { fechaRecepcionEsperada: inp.value }));
+      }
+      if (!inp._listenerAttached) {
         inp.addEventListener('change', function() {
-          var v = inp.value;
           var p = pedidoGet();
-          pedidoSet(Object.assign({}, p, { fechaCalendario: v || null }));
-          actualizarBotonConfirmar();
+          pedidoSet(Object.assign({}, p, { fechaRecepcionEsperada: inp.value || null }));
+          renderResumen(); // re-render para actualizar el mensaje y el botón
         });
         inp._listenerAttached = true;
       }
-      if (inp) inp.min = _isoDate(new Date());
-    } else {
-      selBox.style.display = 'none';
     }
     actualizarBotonConfirmar();
     pintarIconosEstaticos(selBox);
@@ -6580,7 +6581,9 @@ function renderResumen() {
     var prov = porProv[provId];
     var total = prov.items.reduce(function(s, it) { return s + it.precio * it.qty; }, 0);
     totalGeneral += total;
-    var mensaje = 'Hola, buen día ' + prov.nombre + '! Te paso el pedido:\n';
+    var _fr = pedidoGet().fechaRecepcionEsperada;
+    var _frTxt = _fr ? _parseIsoDate(_fr).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
+    var mensaje = 'Hola, buen día ' + prov.nombre + '! Te paso el pedido' + (_frTxt ? ' para el ' + _frTxt : '') + ':\n';
     prov.items.forEach(function(it) { mensaje += it.qty + ' ' + it.productoLista + '\n'; });
     var waNum = (prov.tel || '').replace(/[^\d]/g, '');
     provData[provId] = { prov: prov, total: total, mensaje: mensaje, waNum: waNum, msgEnc: encodeURIComponent(mensaje) };
@@ -6658,14 +6661,13 @@ function actualizarBotonConfirmar() {
   var fecha = inp && inp.value;
   if (fecha) {
     var d = _parseIsoDate(fecha);
-    var hoyIso = _isoDate(new Date());
-    if (fecha === hoyIso) {
-      btn.innerHTML = '<span class="icon-slot" data-icon="check"></span> Confirmar pedido para HOY';
-    } else {
-      btn.innerHTML = '<span class="icon-slot" data-icon="calendar"></span> Programar para ' + d.getDate() + ' ' + _nombreMesLargo(d).split(' ')[0].toLowerCase();
-    }
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.innerHTML = '<span class="icon-slot" data-icon="check"></span> Confirmar — recibo el ' + d.getDate() + ' ' + _nombreMesLargo(d).split(' ')[0].toLowerCase();
   } else {
-    btn.innerHTML = '<span class="icon-slot" data-icon="check"></span> Confirmar y guardar pedido';
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    btn.innerHTML = '<span class="icon-slot" data-icon="check"></span> Elegí la fecha de recepción';
   }
   pintarIconosEstaticos(btn);
 }

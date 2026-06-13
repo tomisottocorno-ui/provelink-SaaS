@@ -3189,7 +3189,8 @@ function removeBarraProgreso(jobId) {
 async function procesarArchivo(event) {
   var file = event.target.files[0];
   if (!file) return;
-  _costoListaUSD = 0; // medir el costo IA de esta subida
+  _costoListaUSD = 0; _costoPorEtapa = {}; // medir el costo IA de esta subida
+  _cacheStats = { hits: 0, total: 0, escritos: 0 };
 
   var ficha = cargaActiva();
   if (!ficha) { event.target.value = ''; return; }
@@ -3443,7 +3444,7 @@ async function detectarColumnasPDF(muestraTexto, proveedorId) {
     })
   });
   var data = await resp.json();
-  _sumarCostoLista(data);
+  _sumarCostoLista(data, 'detectar_columnas');
   if (!resp.ok) {
     var msg = data.error || 'Error detectando columnas';
     if (data.detalle) msg += ' — ' + data.detalle;
@@ -3635,7 +3636,7 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna,
     })
   });
   var data = await resp.json();
-  _sumarCostoLista(data);
+  _sumarCostoLista(data, 'procesar_chunk');
   if (!resp.ok) {
     var msg = data.error || 'Error en API';
     if (data.detalle) msg += ' — ' + data.detalle;
@@ -3708,7 +3709,7 @@ async function llamarClaudeProcesarLista(payload) {
     body: JSON.stringify(payload)
   });
   var data = await resp.json();
-  _sumarCostoLista(data);
+  _sumarCostoLista(data, payload && payload.tipo);
   if (!resp.ok) {
     var msg = data.error || 'Error desconocido';
     if (data.detalle) msg += ' — ' + data.detalle;
@@ -3937,21 +3938,42 @@ function normalKey(nombre) {
   return (nombre || '').toLowerCase().trim().replace(/\s+/g, ' ').replace(/['"´`‘’“”]/g, '');
 }
 
-var _cacheNorm = null; // en memoria para evitar recargar en el mismo tab
+var _cacheNorm = {};            // nombre_key -> row, acumulado en la sesión
+var _cacheNormConsultadas = {}; // nombre_key -> true (ya consultado, con o sin hit)
 
-async function getCacheNorm() {
-  if (_cacheNorm) return _cacheNorm;
-  try {
-    var res = await supabase.from('pl_cache_normalizacion').select('*');
-    if (res.error) { console.warn('[CacheNorm] Error cargando:', res.error.message); return {}; }
-    var c = {};
-    (res.data || []).forEach(function(row) {
-      // Sanear filas viejas que pueden tener unidad_base = "cc"/"ml"/"gr"
-      c[row.nombre_key] = canonizarUnidadBase(row);
-    });
-    _cacheNorm = c;
-    return c;
-  } catch(e) { console.warn('[CacheNorm] excepción:', e); return {}; }
+// Carga del cache POR KEYS (no toda la tabla). Antes hacía select('*') sin
+// limit → PostgREST corta en 1000 filas, sin ORDER. Con el cache global ya
+// superando las 1000, las keys de una lista puntual quedaban fuera del lote
+// cargado → 0 hits aunque estuvieran guardadas. Ahora pedimos exactamente las
+// keys de la lista actual con .in(), en chunks → inmune al tope de 1000.
+// _cacheNorm acumula los hits de la sesión; _cacheNormConsultadas recuerda las
+// keys ya consultadas (con o sin hit) para no re-preguntarlas.
+async function getCacheNormParaKeys(keys) {
+  var pendientes = [];
+  var vistos = {};
+  keys.forEach(function(k) {
+    if (k && !_cacheNorm[k] && !_cacheNormConsultadas[k] && !vistos[k]) {
+      vistos[k] = true;
+      pendientes.push(k);
+    }
+  });
+  // Chunk de 120: .in() arma la lista en la URL (GET) y nombres largos podrían
+  // pasar el límite de URL si pedimos demasiados de una.
+  for (var i = 0; i < pendientes.length; i += 120) {
+    var chunk = pendientes.slice(i, i + 120);
+    try {
+      var res = await supabase.from('pl_cache_normalizacion').select('*').in('nombre_key', chunk);
+      if (res.error) { console.warn('[CacheNorm] Error cargando:', res.error.message); continue; }
+      (res.data || []).forEach(function(row) {
+        // Sanear filas viejas que pueden tener unidad_base = "cc"/"ml"/"gr"
+        _cacheNorm[row.nombre_key] = canonizarUnidadBase(row);
+      });
+      chunk.forEach(function(k) { _cacheNormConsultadas[k] = true; });
+    } catch(e) { console.warn('[CacheNorm] excepción:', e); }
+  }
+  var out = {};
+  keys.forEach(function(k) { if (_cacheNorm[k]) out[k] = _cacheNorm[k]; });
+  return out;
 }
 
 async function guardarCacheNorm(nuevos) {
@@ -3992,7 +4014,13 @@ async function guardarCacheNorm(nuevos) {
       }
       totalGuardados += chunk.length;
     }
-    _cacheNorm = null; // invalidar cache en memoria
+    // Poblar el memo de sesión con lo recién escrito (así una re-subida en el
+    // mismo tab pega sin volver a consultar). Antes invalidaba todo (= null).
+    filasUnicas.forEach(function(f) {
+      _cacheNorm[f.nombre_key] = canonizarUnidadBase(f);
+      _cacheNormConsultadas[f.nombre_key] = true;
+    });
+    _cacheStats.escritos += totalGuardados;
     console.log('[CacheNorm] Guardados', totalGuardados, 'items (de', filas.length, 'normalizados,', filasUnicas.length, 'únicos)');
   } catch(e) { console.warn('[CacheNorm] excepción guardando:', e); }
 }
@@ -4000,11 +4028,18 @@ async function guardarCacheNorm(nuevos) {
 // ---- Llamadas a la IA ----
 
 // Acumulador de costo IA por subida de lista (se resetea en procesarArchivo).
-// El backend devuelve costo_usd en cada respuesta; acá se suma para mostrar
-// al final cuánto costó procesar la lista completa.
+// El backend devuelve costo_usd en cada respuesta; acá se suma total y por
+// etapa (tipo) para diagnosticar dónde se va la plata. _cacheStats mide los
+// hits del cache de normalización en la misma subida.
 var _costoListaUSD = 0;
-function _sumarCostoLista(data) {
-  if (data && typeof data.costo_usd === 'number') _costoListaUSD += data.costo_usd;
+var _costoPorEtapa = {};
+var _cacheStats = { hits: 0, total: 0, escritos: 0 };
+function _sumarCostoLista(data, tipo) {
+  if (data && typeof data.costo_usd === 'number') {
+    _costoListaUSD += data.costo_usd;
+    var k = tipo || 'otro';
+    _costoPorEtapa[k] = (_costoPorEtapa[k] || 0) + data.costo_usd;
+  }
 }
 
 // Semaforo de concurrencia: limita cuantas llamadas a /api/claude pueden estar
@@ -4047,7 +4082,7 @@ async function _fetchClaude(payload) {
       try { txt = await resp.text(); } catch(e) {}
       data = { error: 'Respuesta no-JSON', detalle: txt.slice(0, 200) };
     }
-    _sumarCostoLista(data);
+    _sumarCostoLista(data, payload && payload.tipo);
     return { resp: resp, data: data };
   } finally {
     _claudeRelease();
@@ -4582,7 +4617,12 @@ async function actualizarRangosConDetecciones(filasDetectadas) {
 var CACHE_HIT_MIN_CONFIANZA = 0.6;
 
 async function normalizarConCache(itemsConId, loadingEl) {
-  var cache = await getCacheNorm();
+  // Pedir SOLO las keys de esta lista (no toda la tabla global → evita el tope
+  // de 1000 filas de PostgREST que dejaba afuera las keys recién guardadas).
+  var keysLista = itemsConId.map(function(p) {
+    return normalKey(p.nombre_original || p.productoLista || '');
+  });
+  var cache = await getCacheNormParaKeys(keysLista);
   var sinCache = [];
   var resultado = [];
 
@@ -4685,6 +4725,8 @@ async function normalizarConCache(itemsConId, loadingEl) {
   }
 
   var nCache = resultado.filter(function(r) { return r.desde_cache; }).length;
+  _cacheStats.hits += nCache;
+  _cacheStats.total += itemsConId.length;
   console.log('[Normalización] Cache: ' + nCache + '/' + itemsConId.length + ' · IA: ' + sinCache.length);
   return resultado;
 }
@@ -4982,10 +5024,15 @@ async function ejecutarPipelineNormalizacion(filasBase, proveedorId, loadingEl) 
     resultado.filter(function(r){return r.modo;}).length + ' con modo detectado');
   if (_costoListaUSD > 0) {
     var _cu = resultado.length > 0 ? (_costoListaUSD / resultado.length) : 0;
-    console.log('[Pipeline] Costo IA de esta lista: US$' + _costoListaUSD.toFixed(4) +
-      ' (US$' + _cu.toFixed(5) + '/producto)');
+    var _hitPct = _cacheStats.total > 0 ? Math.round(_cacheStats.hits / _cacheStats.total * 100) : 0;
+    var _etapas = Object.keys(_costoPorEtapa).map(function(k) {
+      return '  ' + k + ': US$' + _costoPorEtapa[k].toFixed(4);
+    }).join('\n');
+    console.log('[Pipeline] Costo IA US$' + _costoListaUSD.toFixed(4) +
+      ' (US$' + _cu.toFixed(5) + '/producto) · cache ' + _cacheStats.hits + '/' +
+      _cacheStats.total + ' (' + _hitPct + '%) · escritos ' + _cacheStats.escritos + '\n' + _etapas);
     if (typeof showToast === 'function') {
-      showToast('Procesado · costo IA US$' + _costoListaUSD.toFixed(3), 'ok');
+      showToast('Procesado · IA US$' + _costoListaUSD.toFixed(3) + ' · cache ' + _hitPct + '%', 'ok');
     }
   }
 

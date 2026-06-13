@@ -933,3 +933,40 @@ function esProductoPesoVariable(tipo, nombre, unidadBase) {
   var re = /\b(queso|mozzarella|muzzarella|muza|cremoso|sardo|reggianito|reggiano|provolone|provoleta|fontina|gouda|pategr[aá]s|parmesano|gruyere|gruy[eè]re|emmental|roquefort|azul|port\s*salut|tybo|barra|horma|fiambre|jam[oó]n|salame|salam[ií]n|mortadela|bondiola|panceta|lomo|paleta|leberwurst|morcilla|chorizo|longaniza|salchich[oó]n|matambre|peceto|nalga|carne|pollo|milanesa|bondiola)\b/;
   return re.test(txt);
 }
+
+// Fecha (YYYY-MM-DD) a la que se atribuye el gasto de un pedido en métricas:
+//   recepcionado            → su fecha de recepción real (fechaRecepcion, ms)
+//   pendiente con esperada  → la fecha esperada (fechaRecepcionEsperada)
+//   pedido viejo (fallback) → la fecha en que se hizo (timestamp, ms)
+function fechaAtribucionGastoISO(pedido) {
+  if (!pedido) return null;
+  var toISO = function(ts) {
+    var d = new Date(ts);
+    if (isNaN(d.getTime())) return null;
+    var mm = ('0' + (d.getMonth() + 1)).slice(-2);
+    var dd = ('0' + d.getDate()).slice(-2);
+    return d.getFullYear() + '-' + mm + '-' + dd;
+  };
+  if (pedido.recepcionado && pedido.fechaRecepcion) return toISO(pedido.fechaRecepcion);
+  if (pedido.fechaRecepcionEsperada) return String(pedido.fechaRecepcionEsperada).slice(0, 10);
+  if (pedido.timestamp) return toISO(pedido.timestamp);
+  return null;
+}
+
+// Gasto real y estimado de un mes (year, monthIdx 0-11), atribuyendo cada pedido
+// por su fecha de recepción. real = ya recepcionados; estimado = real + pendientes
+// cuya fecha de recepción cae en el mes. Pura.
+function gastoDelMes(pedidos, year, monthIdx) {
+  var real = 0, estimado = 0, nReal = 0, nPend = 0;
+  (pedidos || []).forEach(function(p) {
+    var iso = fechaAtribucionGastoISO(p);
+    if (!iso) return;
+    var partes = iso.split('-');
+    if (+partes[0] !== year || (+partes[1] - 1) !== monthIdx) return;
+    var total = p.total || 0;
+    estimado += total;
+    if (p.recepcionado) { real += total; nReal++; }
+    else { nPend++; }
+  });
+  return { real: real, estimado: estimado, nReal: nReal, nPend: nPend };
+}

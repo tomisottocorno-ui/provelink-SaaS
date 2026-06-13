@@ -865,6 +865,49 @@ function decidirModoCascada(grupos, opts) {
   return { decididos: decididos, paraIA: paraIA };
 }
 
+// Compara dos versiones de una lista (actual vs anterior), matcheando productos
+// por nombre normalizado, y devuelve las variaciones de precio. Pura y testeable.
+// opts.umbralPct (default 0.5) ignora cambios chiquitos (redondeo). Usa el campo
+// `precio` crudo (el precio listado), igual en ambas versiones → % comparable.
+function compararListasPrecio(actual, anterior, opts) {
+  opts = opts || {};
+  var umbral = opts.umbralPct != null ? opts.umbralPct : 0.5;
+  var norm = function(s) {
+    return String(s || '').toLowerCase().trim().replace(/\s+/g, ' ').replace(/['"´`‘’“”]/g, '');
+  };
+  var precioDe = function(it) {
+    var p = it && it.precio;
+    if (typeof p === 'number') return isFinite(p) ? p : 0;
+    return parseFloat(String(p == null ? '' : p).replace(/[^\d.,]/g, '').replace(/\.(?=\d{3})/g, '').replace(',', '.')) || 0;
+  };
+  var prevByKey = {};
+  (anterior || []).forEach(function(it) {
+    var k = norm(it.productoLista || it.nombre || '');
+    var p = precioDe(it);
+    if (k && p > 0) prevByKey[k] = p;
+  });
+  var subieron = [], bajaron = [];
+  var nuevos = 0, sinCambio = 0;
+  var actualKeys = {};
+  (actual || []).forEach(function(it) {
+    var k = norm(it.productoLista || it.nombre || '');
+    var ahora = precioDe(it);
+    if (!k || ahora <= 0) return;
+    actualKeys[k] = true;
+    var antes = prevByKey[k];
+    if (antes == null) { nuevos++; return; }
+    var pct = (ahora - antes) / antes * 100;
+    if (Math.abs(pct) < umbral) { sinCambio++; return; }
+    var reg = { nombre: it.productoLista || it.nombre, antes: antes, ahora: ahora, pct: pct };
+    if (pct > 0) subieron.push(reg); else bajaron.push(reg);
+  });
+  subieron.sort(function(a, b) { return b.pct - a.pct; });
+  bajaron.sort(function(a, b) { return a.pct - b.pct; });
+  var descontinuados = Object.keys(prevByKey).filter(function(k) { return !actualKeys[k]; }).length;
+  return { subieron: subieron, bajaron: bajaron, nuevos: nuevos,
+           sinCambio: sinCambio, descontinuados: descontinuados };
+}
+
 // Detecta productos de PESO VARIABLE: se cotizan por kg pero cada pieza/barra/
 // horma pesa distinto, y el peso real se confirma al recibir (el proveedor pesa
 // y cobra peso × precio/kg). Ej: "barra de queso", "jamón crudo", "salame".

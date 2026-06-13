@@ -7320,8 +7320,11 @@ function abrirAsistente() {
   var m = $('ai-modal');
   m.style.display = 'flex';
   if (aiHistorial.length === 0) {
-    renderMensajeAI('assistant', '¡Hola! Soy tu asistente ProveLink. Puedo:\n\n• Buscar productos y comparar precios\n• Armar el pedido por vos\n• Programarlo para una fecha y repetirlo\n\nProbá: *"cuál es el dulce de leche más barato?"*, *"pedime 3 harina 000 y 2 aceite girasol"* o *"programá 5 docenas de huevo para el viernes y repetí cada semana"*');
+    renderMensajeAI('assistant', '¡Hola! Soy tu asistente ProveLink. Puedo:\n\n• Buscar productos y comparar precios\n• Decirte qué aumentó o bajó desde la lista anterior\n• Armar el pedido por vos\n• Programarlo para una fecha y repetirlo\n\nProbá: *"cuál es el dulce de leche más barato?"*, *"qué aumentó del último proveedor?"* o *"pedime 3 harina 000 y 2 aceite girasol"*');
   }
+  // Computar los cambios de precio (lista actual vs snapshot anterior) en
+  // background; queda listo en _cambiosPrecioTexto antes de que el usuario tipee.
+  _cargarCambiosPrecios();
   setTimeout(function() { document.getElementById('ai-input').focus(); }, 100);
 }
 
@@ -7362,6 +7365,45 @@ function quitarEscribiendo() {
   if (d) d.remove();
 }
 
+// Resumen de variaciones de precio (lista actual vs. último snapshot por
+// proveedor), para que el asistente pueda responder "qué aumentó/bajó". Se
+// computa al abrir el asistente y se inyecta en el contexto (system, cacheado).
+var _cambiosPrecioTexto = '';
+async function _cargarCambiosPrecios() {
+  _cambiosPrecioTexto = '';
+  if (typeof compararListasPrecio !== 'function') return;
+  try {
+    var bloques = [];
+    for (var i = 0; i < listas.length; i++) {
+      var l = listas[i];
+      if (!l.items || !l.items.length) continue;
+      var snap = await supabase.from('snapshots_precios')
+        .select('items, fecha')
+        .eq('proveedor_id', l.proveedor_id)
+        .order('fecha', { ascending: false })
+        .limit(1);
+      if (snap.error || !snap.data || !snap.data.length) continue;
+      var cmp = compararListasPrecio(l.items, snap.data[0].items || [], { umbralPct: 0.5 });
+      if (!cmp.subieron.length && !cmp.bajaron.length) continue;
+      var prov = proveedores.find(function(p) { return p.id === l.proveedor_id; });
+      var fechaPrev = snap.data[0].fecha ? new Date(snap.data[0].fecha).toLocaleDateString('es-AR') : '?';
+      var bloque = '\n--- ' + (prov ? prov.nombre : '?') + ' (actual vs ' + fechaPrev + ') ---\n';
+      var fmt = function(n) { return Number(Math.round(n)).toLocaleString('es-AR'); };
+      cmp.subieron.slice(0, 25).forEach(function(c) {
+        bloque += 'SUBIO ' + c.nombre + ': $' + fmt(c.antes) + ' → $' + fmt(c.ahora) + ' (+' + c.pct.toFixed(1) + '%)\n';
+      });
+      cmp.bajaron.slice(0, 10).forEach(function(c) {
+        bloque += 'BAJO ' + c.nombre + ': $' + fmt(c.antes) + ' → $' + fmt(c.ahora) + ' (' + c.pct.toFixed(1) + '%)\n';
+      });
+      var resto = cmp.subieron.length - Math.min(25, cmp.subieron.length);
+      if (resto > 0) bloque += '... y ' + resto + ' aumento(s) más\n';
+      bloques.push(bloque);
+    }
+    _cambiosPrecioTexto = bloques.join('');
+    console.log('[CambiosPrecio] Resumen listo (' + bloques.length + ' proveedor(es) con cambios)');
+  } catch(e) { console.warn('[CambiosPrecio] error:', e); }
+}
+
 function construirContextoIA() {
   var ctx = 'Sos un asistente de ProveLink que ayuda al usuario a buscar productos, comparar precios entre proveedores y gestionar pedidos.\n\n';
 
@@ -7390,6 +7432,9 @@ function construirContextoIA() {
     });
     if (items.length > 400) ctx += '... y ' + (items.length - 400) + ' productos más\n';
   });
+  if (_cambiosPrecioTexto) {
+    ctx += '\n=== CAMBIOS DE PRECIO (lista actual vs. anterior) ===\n' + _cambiosPrecioTexto;
+  }
   var hist = histGet();
   if (hist.length) {
     ctx += '\n=== HISTORIAL (últimos 5 pedidos) ===\n';
@@ -7405,6 +7450,7 @@ function construirContextoIA() {
   ctx += '- Respondé en español argentino (vos, podés), breve y claro\n';
   ctx += '- Formato de precios: $9.644,07 (punto de miles, coma decimal)\n';
   ctx += '- No inventes datos. Si no sabés, decilo\n';
+  ctx += '- Si preguntan qué AUMENTÓ, bajó o cambió de precio, usá la sección CAMBIOS DE PRECIO: nombrá el producto, el precio antes → ahora y el %. Ordená de mayor a menor aumento. Si no hay sección de cambios o un proveedor no aparece ahí, decí que todavía no hay una versión anterior para comparar (recién se compara después de actualizar una lista que ya existía).\n';
   ctx += '\n=== MOSTRAR PRODUCTOS — MUY IMPORTANTE ===\n';
   ctx += 'Cuando el usuario busca un producto o pide comparar precios:\n';
   ctx += '  1. Mostrá TODOS los productos que coincidan (no solo los más baratos)\n';

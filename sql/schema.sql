@@ -118,7 +118,8 @@ create table if not exists public.historial_pedidos (
   items jsonb default '[]'::jsonb not null,
   ediciones int default 0,
   verificado boolean default false,
-  faltantes jsonb default '[]'::jsonb
+  faltantes jsonb default '[]'::jsonb,
+  fecha_recepcion_esperada date
 );
 
 create index if not exists idx_historial_user on public.historial_pedidos(user_id);

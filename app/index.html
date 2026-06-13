@@ -2048,31 +2048,23 @@ function abrirModalDiaCalendario(iso) {
 // Crea un plan vacío para este día → manda al flujo de Armar Pedido en modo
 // 'programar' con la fecha pre-seleccionada. Al confirmar el pedido se guarda
 // como plan en el calendario (no en el historial).
+// Inicia un pedido nuevo con este día del calendario como fecha de recepción.
 function crearPlanParaEsteDia() {
   if (!_calDiaEditando) return;
   var iso = _calDiaEditando;
   var hoyIso = _isoDate(new Date());
-  // No se puede planificar para días pasados
   if (iso < hoyIso) {
     showToast('Ese día ya pasó. Elegí hoy o una fecha futura.', 'error');
     return;
   }
   cerrarModalDia();
-  // Si el día es HOY: mejor proponer realizar
-  if (iso === hoyIso) {
-    if (confirm('Estás en el día de hoy. ¿Realizar el pedido ahora? (Si elegís cancelar, lo programa igual para hoy en el calendario)')) {
-      pedidoSet({ items: {}, modo: 'realizar', fechaCalendario: null });
-      cambiarTab('pedido');
-      return;
-    }
-  }
-  pedidoSet({ items: {}, modo: 'programar', fechaCalendario: iso });
+  pedidoSet({ items: {}, fechaRecepcionEsperada: iso });
   cambiarTab('pedido');
-  showToast('Armá el pedido. Al confirmar se guarda en el calendario.', 'info');
+  showToast('Armá el pedido. Lo vas a recibir el ' + _fechaCortaES(iso) + '.', 'info');
 }
 
 // Edita un plan existente: precarga los productos en Armar Pedido con la fecha
-// del calendario pre-seleccionada en modo 'programar'.
+// del calendario como fecha de recepción.
 function editarPlanDelDia() {
   if (!_calDiaEditando) return;
   var iso = _calDiaEditando;
@@ -2084,14 +2076,13 @@ function editarPlanDelDia() {
   });
   pedidoSet({
     items: nuevoItems,
-    modo: 'programar',
-    fechaCalendario: iso,
+    fechaRecepcionEsperada: iso,
     editandoPlanCalId: plan.id
   });
   actualizarBadgePedido();
   cerrarModalDia();
   cambiarTab('pedido');
-  showToast('Editando plan. Modificá y confirmá para guardar.', 'info');
+  showToast('Editando. Modificá y confirmá para guardar.', 'info');
 }
 
 function cerrarModalDia() {

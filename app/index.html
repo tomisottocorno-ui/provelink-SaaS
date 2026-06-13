@@ -6677,32 +6677,12 @@ function confirmarPedido() {
   var ids = Object.keys(ped.items || {}).filter(function(k) { return ped.items[k].qty > 0; });
   if (!ids.length) { showToast('El pedido está vacío'); return; }
   var editando = ped.editandoHistId || null;
-  var editandoPlanCal = ped.editandoPlanCalId || null;
-  var modo = ped.modo;
-  var fechaCal = ped.fechaCalendario || null;  // si está, programa para esa fecha
   var hoyIso = _isoDate(new Date());
-  // Decide si es PROGRAMACIÓN (solo calendario, sin historial) o EJECUCIÓN
-  // (va al historial Y se refleja en el calendario como ejecutado).
-  // Programación = modo 'programar' Y fecha futura (≠ hoy).
-  var esProgramacion = (modo === 'programar' && fechaCal && fechaCal !== hoyIso) ||
-                       (!modo && fechaCal && fechaCal !== hoyIso);  // compat: fecha del selector resumen
-  // No se permite programar para fechas pasadas
-  if (esProgramacion && fechaCal < hoyIso) {
-    showToast('No podés programar un pedido para una fecha que ya pasó.', 'error');
-    return;
-  }
-  var msgConfirm;
-  if (editandoPlanCal && esProgramacion) {
-    msgConfirm = '¿Guardar cambios al plan del calendario?';
-  } else if (esProgramacion) {
-    var dCal = _parseIsoDate(fechaCal);
-    msgConfirm = '¿Programar este pedido para el ' + dCal.getDate() + ' de ' + _nombreMesLargo(dCal).split(' ')[0].toLowerCase() + '? Se guardará en el calendario, no en el historial.';
-  } else if (editando) {
-    msgConfirm = '¿Guardar los cambios al pedido?';
-  } else {
-    msgConfirm = '¿Confirmar el pedido? Se guarda en el historial' + (calendarioPermitido() ? ' y queda registrado en el calendario.' : '.');
-  }
-  if (!confirm(msgConfirm)) return;
+  var fechaRecepcion = ped.fechaRecepcionEsperada || null;
+  if (!fechaRecepcion) { showToast('Elegí el día en que vas a recibir el pedido', 'error'); return; }
+  if (fechaRecepcion < hoyIso) { showToast('La fecha de recepción no puede ser pasada.', 'error'); return; }
+
+  if (!confirm('¿Confirmar el pedido? Se guarda en el historial' + (calendarioPermitido() ? ' y en el calendario el día de recepción.' : '.'))) return;
 
   var todos = todosLosItems();
   var byId = {};
@@ -6723,43 +6703,7 @@ function confirmarPedido() {
       tipo: info.tipo || null });
   });
 
-  // === RAMA A: PROGRAMACIÓN (solo calendario, no historial) ===
-  if (esProgramacion) {
-    var planExistente = _calMap[fechaCal];
-    var planAGuardar = {
-      id: (planExistente && planExistente.id) || editandoPlanCal || _uuid(),
-      fecha: fechaCal,
-      items: items,
-      total: items.reduce(function(s, it) { return s + it.subtotal; }, 0),
-      serie_id: planExistente ? planExistente.serie_id : null,
-      cada_n_semanas: planExistente ? planExistente.cada_n_semanas : null,
-      serie_hasta: planExistente ? planExistente.serie_hasta : null,
-      ejecutado: false,
-      ejecutado_en: null,
-      creado_por: (planExistente && planExistente.creado_por) || ((sesion && sesion.user && sesion.user.id) || null)
-    };
-    _calMap[fechaCal] = planAGuardar;
-    syncCalDiaRemoto(planAGuardar).catch(function() {});
-    pedidoSet({ items: {} });
-    actualizarBadgePedido();
-
-    // Ofrecer repetición (solo si NO es ya parte de una serie)
-    if (!planAGuardar.serie_id) {
-      var nRep = _promptRepeticion('Programaste el pedido. ');
-      if (nRep && nRep > 0) {
-        _generarSerieDesde(fechaCal, nRep, planAGuardar, null).then(function(gen) {
-          showToast('Programado + serie de ' + gen + ' repeticiones', 'ok');
-          cambiarTab('calendario');
-        });
-        return;
-      }
-    }
-    cambiarTab('calendario');
-    showToast(planExistente ? 'Plan actualizado en el calendario' : 'Plan guardado en el calendario', 'ok');
-    return;
-  }
-
-  // === RAMA B: REALIZAR (historial + reflejo en calendario) ===
+  // === REALIZAR (historial + reflejo en calendario en la fecha de recepción) ===
   var hist = histGet();
 
   if (editando) {
@@ -6785,6 +6729,7 @@ function confirmarPedido() {
         faltantes: prev.faltantes || [],
         cambios: prev.cambios || [],
         fechaRecepcion: prev.fechaRecepcion || null,
+        fechaRecepcionEsperada: fechaRecepcion,
         creado_por: prev.creado_por || quienSoy(),  // preservamos quien lo creó originalmente
         editado_por: quienSoy(),
         creado_por_uid: prev.creado_por_uid || (sesion && sesion.user && sesion.user.id) || null,
@@ -6809,6 +6754,7 @@ function confirmarPedido() {
     items: items,
     total: items.reduce(function(s, it) { return s + it.subtotal; }, 0),
     recepcionado: false,
+    fechaRecepcionEsperada: fechaRecepcion,
     faltantes: [],
     cambios: [],
     creado_por: quienSoy(),
@@ -6822,26 +6768,25 @@ function confirmarPedido() {
   histSet(hist);
   syncPedidoRemoto(pedidoNuevo).catch(function() {});
 
-  // === Reflejar en el calendario el día que se hizo ===
-  // Si veníamos ejecutando un plan del calendario, marcarlo como ejecutado
-  // EN SU FECHA (congela el precio pagado). Si no, crear una entrada para HOY.
+  // === Reflejar en el calendario en la FECHA DE RECEPCIÓN ===
+  // El pedido realizado es real (ejecutado), pero se ubica el día que llega.
   var veniaDeSerie = false;
   if (calendarioPermitido()) {
-    var planExistenteHoy = ped.ejecutandoPlanCalId
+    var planExistente = ped.ejecutandoPlanCalId
       ? Object.keys(_calMap).map(function(k) { return _calMap[k]; }).find(function(p) { return p.id === ped.ejecutandoPlanCalId; })
-      : _calMap[hoyIso];
-    if (planExistenteHoy && planExistenteHoy.serie_id) veniaDeSerie = true;
+      : _calMap[fechaRecepcion];
+    if (planExistente && planExistente.serie_id) veniaDeSerie = true;
     var planRegistro = {
-      id: (planExistenteHoy && planExistenteHoy.id) || _uuid(),
-      fecha: (planExistenteHoy && planExistenteHoy.fecha) || hoyIso,
-      items: items,                         // precio CONGELADO al confirmar
+      id: (planExistente && planExistente.id) || _uuid(),
+      fecha: fechaRecepcion,
+      items: items,
       total: pedidoNuevo.total,
-      serie_id: planExistenteHoy ? planExistenteHoy.serie_id : null,
-      cada_n_semanas: planExistenteHoy ? planExistenteHoy.cada_n_semanas : null,
-      serie_hasta: planExistenteHoy ? planExistenteHoy.serie_hasta : null,
+      serie_id: planExistente ? planExistente.serie_id : null,
+      cada_n_semanas: planExistente ? planExistente.cada_n_semanas : null,
+      serie_hasta: planExistente ? planExistente.serie_hasta : null,
       ejecutado: true,
       ejecutado_en: Date.now(),
-      creado_por: (planExistenteHoy && planExistenteHoy.creado_por) || ((sesion && sesion.user && sesion.user.id) || null)
+      creado_por: (planExistente && planExistente.creado_por) || ((sesion && sesion.user && sesion.user.id) || null)
     };
     _calMap[planRegistro.fecha] = planRegistro;
     syncCalDiaRemoto(planRegistro).catch(function() {});
@@ -6861,7 +6806,7 @@ function confirmarPedido() {
       var nRep = _promptRepeticion('Pedido realizado. ');
       if (nRep && nRep > 0) {
         var base = { items: items, total: pedidoNuevo.total };
-        _generarSerieDesde(hoyIso, nRep, base, null).then(function(gen) {
+        _generarSerieDesde(fechaRecepcion, nRep, base, null).then(function(gen) {
           showToast('Se programaron ' + gen + ' repeticiones a futuro', 'ok');
         });
       }

@@ -45,13 +45,18 @@ elección "Realizar vs Programar"; se conserva la repetición de pedidos.
 
 ### 2. Pregunta de fecha de recepción
 
-- Al tocar **"Confirmar y guardar pedido"**, antes de guardar se abre un
-  **mini-modal** con un `<input type="date">`:
+La pantalla de resumen ("Pedidos por proveedor", `tab-resumen`) es el paso previo
+a confirmar y ya tiene un selector de fecha (`resumen-fecha-cal`) hoy oculto salvo
+en modo programar. Se **reutiliza ese selector** en vez de un popup:
+
+- El selector pasa a estar **siempre visible** en el resumen, con un `<input
+  type="date">`:
   - Título: *"¿Qué día vas a recibir el pedido?"*
   - `min` = hoy (no se permite fecha pasada).
   - Default = **mañana** (o el `fechaRecepcionPreset` si vino del calendario).
-  - Obligatorio: sin fecha no se confirma.
-- Al aceptar, se realiza el pedido normalmente con esa fecha.
+  - **Obligatorio**: el botón "Confirmar" queda deshabilitado hasta elegir fecha.
+- Ventaja: el mensaje de WhatsApp se previsualiza ahí mismo con la fecha ya
+  incluida, antes de enviar.
 
 ### 3. Mensaje de WhatsApp
 

@@ -146,7 +146,6 @@
       <div class="seccion-titulo">
         <h2>Calendario de pedidos</h2>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-          <button class="btn primary" onclick="arrancarProgramarPedido()" style="font-size:12px;padding:7px 14px;"><span class="icon-slot" data-icon="plus"></span> Programar pedido</button>
           <button class="btn" onclick="cambiarMesCalendario(-1)" title="Mes anterior" style="font-size:14px;padding:6px 10px;">‹</button>
           <span id="cal-mes-titulo" style="font-size:14px;font-weight:600;min-width:130px;text-align:center;">—</span>
           <button class="btn" onclick="cambiarMesCalendario(1)" title="Mes siguiente" style="font-size:14px;padding:6px 10px;">›</button>
@@ -195,29 +194,8 @@
 
     <!-- ============ TAB: ARMAR PEDIDO ============ -->
     <div class="tab-section" id="tab-pedido">
-      <!-- LANDING: 2 opciones grandes (visible solo si no hay items y no se eligió modo) -->
-      <div id="pedido-landing" style="display:none;">
-        <div class="seccion-titulo">
-          <h2>Armar pedido</h2>
-        </div>
-        <p style="color:var(--text-muted);font-size:13px;margin:0 0 22px;">¿Cómo querés armar este pedido?</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-          <button onclick="arrancarRealizarPedido()" class="pedido-modo-btn" style="display:flex;flex-direction:column;align-items:flex-start;gap:10px;background:linear-gradient(135deg, rgba(16,185,129,0.10), rgba(16,185,129,0.04));border:1px solid rgba(16,185,129,0.35);border-radius:16px;padding:22px 20px;cursor:pointer;font-family:inherit;text-align:left;transition:transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;">
-            <span style="width:40px;height:40px;border-radius:12px;background:rgba(16,185,129,0.15);color:var(--emerald-bright);display:inline-flex;align-items:center;justify-content:center;">
-              <span class="icon-slot" data-icon="cart"></span>
-            </span>
-            <span style="font-size:15px;font-weight:700;color:var(--text);letter-spacing:-0.01em;">Realizar pedido</span>
-            <span style="font-size:12px;color:var(--text-muted);line-height:1.45;">Lo pedís ahora. Se guarda en el historial para recepcionar y queda registrado en el calendario con la fecha de hoy.</span>
-          </button>
-          <button onclick="arrancarProgramarPedido()" class="pedido-modo-btn" style="display:flex;flex-direction:column;align-items:flex-start;gap:10px;background:linear-gradient(135deg, rgba(96,165,250,0.10), rgba(96,165,250,0.04));border:1px solid rgba(96,165,250,0.35);border-radius:16px;padding:22px 20px;cursor:pointer;font-family:inherit;text-align:left;transition:transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;">
-            <span style="width:40px;height:40px;border-radius:12px;background:rgba(96,165,250,0.15);color:#60a5fa;display:inline-flex;align-items:center;justify-content:center;">
-              <span class="icon-slot" data-icon="calendar"></span>
-            </span>
-            <span style="font-size:15px;font-weight:700;color:var(--text);letter-spacing:-0.01em;">Programar pedido</span>
-            <span style="font-size:12px;color:var(--text-muted);line-height:1.45;">Lo dejás listo para una fecha futura. Va al calendario. Cuando llegue el día, lo realizás desde ahí.</span>
-          </button>
-        </div>
-      </div>
+      <!-- (Landing de 2 modos eliminado: el flujo es único — armar y al confirmar se pide la fecha de recepción) -->
+      <div id="pedido-landing" style="display:none;"></div>
 
       <!-- FLUJO DE BUSCADOR (visible cuando ya se eligió modo o hay items) -->
       <div id="pedido-flujo" style="display:none;">
@@ -6155,120 +6133,44 @@ function toggleBusquedaEspecifica() {
 
 // Llamado al entrar al tab 'pedido'. Decide entre landing y flujo.
 function _entrarTabPedido() {
-  var ped = pedidoGet();
-  var tieneItems = Object.keys(ped.items || {}).filter(function(k) { return ped.items[k].qty > 0; }).length > 0;
-  var modo = ped.modo;
   var landing = $('pedido-landing');
   var flujo = $('pedido-flujo');
-  if (!landing || !flujo) return;
-  if (!modo && !tieneItems) {
-    landing.style.display = '';
-    flujo.style.display = 'none';
-    pintarIconosEstaticos(landing);
-  } else {
-    landing.style.display = 'none';
-    flujo.style.display = '';
-    _renderBannerModoPedido();
-    renderFaltantesSugerencia();
-    renderBuscarProducto();
-    actualizarBadgePedido();
-    pintarIconosEstaticos(flujo);
-  }
+  if (landing) landing.style.display = 'none';
+  if (!flujo) return;
+  flujo.style.display = '';
+  var titulo = $('pedido-flujo-titulo');
+  if (titulo) titulo.textContent = 'Armar pedido';
+  var banner = $('pedido-modo-banner');
+  if (banner) banner.style.display = 'none';
+  renderFaltantesSugerencia();
+  renderBuscarProducto();
+  actualizarBadgePedido();
+  pintarIconosEstaticos(flujo);
 }
 
 function _renderBannerModoPedido() {
   var banner = $('pedido-modo-banner');
-  var titulo = $('pedido-flujo-titulo');
-  if (!banner) return;
-  var ped = pedidoGet();
-  var modo = ped.modo;
-  if (modo === 'programar' && ped.fechaCalendario) {
-    var d = _parseIsoDate(ped.fechaCalendario);
-    var fechaTxt = d.getDate() + ' de ' + _nombreMesLargo(d).split(' ')[0].toLowerCase() + ' de ' + d.getFullYear();
-    banner.style.display = '';
-    banner.innerHTML = '<div style="background:rgba(96,165,250,0.10);border:1px solid rgba(96,165,250,0.35);border-radius:10px;padding:9px 13px;font-size:12px;color:#60a5fa;display:flex;align-items:center;gap:8px;">' +
-      Icon.calendar({ size: 14 }) +
-      '<strong>Programando pedido para ' + fechaTxt + '</strong>' +
-      '<span style="opacity:0.75;">— al confirmar se guarda en el calendario</span>' +
-      '</div>';
-    if (titulo) titulo.textContent = 'Programar pedido';
-  } else if (modo === 'realizar') {
-    banner.style.display = '';
-    banner.innerHTML = '<div style="background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.35);border-radius:10px;padding:9px 13px;font-size:12px;color:var(--emerald-bright);display:flex;align-items:center;gap:8px;">' +
-      Icon.cart({ size: 14 }) +
-      '<strong>Realizando pedido para hoy</strong>' +
-      '<span style="opacity:0.75;">— al confirmar va al historial</span>' +
-      '</div>';
-    if (titulo) titulo.textContent = 'Realizar pedido';
-  } else {
-    banner.style.display = 'none';
-    if (titulo) titulo.textContent = 'Armar pedido';
-  }
+  if (banner) banner.style.display = 'none';
 }
 
 function arrancarRealizarPedido() {
   var p = pedidoGet();
-  pedidoSet(Object.assign({}, p, { modo: 'realizar', fechaCalendario: null }));
+  pedidoSet(Object.assign({}, p, { fechaRecepcionEsperada: null }));
   _entrarTabPedido();
-  setTimeout(function() {
-    var inp = $('buscar-producto');
-    if (inp) inp.focus();
-  }, 80);
+  setTimeout(function() { var inp = $('buscar-producto'); if (inp) inp.focus(); }, 80);
 }
 
 function arrancarProgramarPedido() {
-  // Si no tiene plan Max, redirigir al modo realizar
-  if (!calendarioPermitido()) {
-    showToast('Programar pedidos es parte del plan Max', 'warn');
-    arrancarRealizarPedido();
-    return;
-  }
-  // Pedir fecha con un date picker dentro de un dialog
-  var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-  var sugerida = new Date(hoy); sugerida.setDate(sugerida.getDate() + 7);
-  var fechaIso = prompt('¿Para qué día querés programarlo?\n\nFormato: AAAA-MM-DD (ej: ' + _isoDate(sugerida) + ')', _isoDate(sugerida));
-  if (!fechaIso) return;
-  fechaIso = fechaIso.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaIso)) {
-    showToast('Formato de fecha inválido', 'error');
-    return;
-  }
-  var d = _parseIsoDate(fechaIso);
-  if (isNaN(d.getTime())) {
-    showToast('Fecha inválida', 'error');
-    return;
-  }
-  if (d < hoy) {
-    showToast('No podés programar para fechas pasadas', 'error');
-    return;
-  }
-  // Si la fecha es HOY, mejor preguntamos si quiere realizar en vez de programar
-  if (_isoDate(d) === _isoDate(hoy)) {
-    if (confirm('Elegiste hoy. ¿Querés realizar el pedido ahora en lugar de programarlo?')) {
-      arrancarRealizarPedido();
-      return;
-    }
-  }
-  var p = pedidoGet();
-  pedidoSet(Object.assign({}, p, { modo: 'programar', fechaCalendario: fechaIso }));
-  cambiarTab('pedido');
-  setTimeout(function() {
-    var inp = $('buscar-producto');
-    if (inp) inp.focus();
-  }, 80);
+  arrancarRealizarPedido();
 }
 
 function volverALandingPedido() {
   var p = pedidoGet();
   var tieneItems = Object.keys(p.items || {}).filter(function(k) { return p.items[k].qty > 0; }).length > 0;
-  if (tieneItems) {
-    if (!confirm('Tenés productos cargados. ¿Cambiar de modo va a borrar lo cargado. Seguir?')) return;
-    pedidoSet({ items: {} });
-  } else {
-    pedidoSet({ items: {} });
-  }
+  if (tieneItems && !confirm('¿Vaciar el pedido en curso?')) return;
+  pedidoSet({ items: {} });
   actualizarBadgePedido();
-  _entrarTabPedido();
+  renderBuscarProducto();
 }
 
 function renderBuscarProducto(expansionesExtras) {

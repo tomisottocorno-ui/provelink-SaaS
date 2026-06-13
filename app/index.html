@@ -6841,6 +6841,14 @@ function switchHistorialTab(tab) {
   }
 }
 
+// Formatea una fecha ISO YYYY-MM-DD como "mar 17 jun" (corto, es-AR). '' si vacía.
+function _fechaCortaES(iso) {
+  if (!iso) return '';
+  var d = _parseIsoDate(String(iso).slice(0, 10));
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
 function renderHistorialRecepcion() {
   var cont = document.getElementById('historial-content-recepcion');
   if (!cont) return;
@@ -6863,7 +6871,8 @@ function renderHistorialRecepcion() {
     html += '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:12px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;flex-wrap:wrap;">';
     html += '<div><div style="font-size:15px;font-weight:600;">' + escapeHtml(h.fecha) + porTag + '</div>';
-    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + '</div></div>';
+    var _recTxt = h.fechaRecepcionEsperada ? ' · <span style="color:#60a5fa;">📅 recibís el ' + _fechaCortaES(h.fechaRecepcionEsperada) + '</span>' : '';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + _recTxt + '</div></div>';
     html += '<div style="text-align:right;"><div style="font-size:11px;color:var(--text-muted);">Total</div><div style="font-size:18px;font-weight:700;">$' + formatPrecio(h.total) + '</div></div></div>';
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">';
     Object.keys(porProv).forEach(function(pid) {
@@ -6926,7 +6935,9 @@ function renderHistorialProveedores() {
     var faltantesTag = faltantesCount > 0 ? ' · <span style="color:var(--danger);">' + faltantesCount + ' faltante' + (faltantesCount !== 1 ? 's' : '') + '</span>' : '';
     var cambiosTag   = cambiosCount   > 0 ? ' · <span style="color:var(--gold-bright);">' + Icon.refreshCw({size:11}) + ' ' + cambiosCount + ' cambio' + (cambiosCount !== 1 ? 's' : '') + '</span>' : '';
     var pesosTag     = pesosCount     > 0 ? ' · <span style="color:var(--emerald);">⚖️ ' + pesosCount + ' con peso real</span>' : '';
-    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + faltantesTag + cambiosTag + pesosTag + '</div></div>';
+    var _espTxt = h.fechaRecepcionEsperada ? ' · 📅 para el ' + _fechaCortaES(h.fechaRecepcionEsperada) : '';
+    var _realTxt = h.fechaRecepcion ? ' · <span style="color:var(--emerald);">✓ recibido el ' + new Date(h.fechaRecepcion).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) + '</span>' : '';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + h.items.length + ' productos · ' + Object.keys(porProv).length + ' proveedor' + (Object.keys(porProv).length !== 1 ? 'es' : '') + _espTxt + _realTxt + faltantesTag + cambiosTag + pesosTag + '</div></div>';
     html += '<div style="text-align:right;"><div style="font-size:11px;color:var(--text-muted);">Total</div><div style="font-size:18px;font-weight:700;">$' + formatPrecio(h.total) + '</div></div></div>';
 
     // Botones WhatsApp por proveedor

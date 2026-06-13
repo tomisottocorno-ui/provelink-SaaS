@@ -1229,7 +1229,8 @@ function gastosPorPeriodo(modo, n) {
   var hist = histGet();
   var agrupado = {};
   hist.forEach(function(h) {
-    var ts = h.timestamp || Date.parse(h.fecha) || Date.now();
+    var iso = fechaAtribucionGastoISO(h);
+    var ts = iso ? _parseIsoDate(iso).getTime() : (h.timestamp || Date.now());
     var k = modo === 'semana' ? _claveSemana(ts) : _claveMes(ts);
     if (!agrupado[k]) agrupado[k] = { clave: k, total: 0, count: 0 };
     agrupado[k].total += h.total || 0;
@@ -1384,23 +1385,14 @@ function renderMetricas() {
     return;
   }
 
-  // KPIs principales
-  var ahora = Date.now();
-  var unMes  = 30 * 24 * 60 * 60 * 1000;
-  var unaSem = 7  * 24 * 60 * 60 * 1000;
-  var dosSem = 14 * 24 * 60 * 60 * 1000;
-  var dosMes = 60 * 24 * 60 * 60 * 1000;
-  var gastoMes = 0, gastoSem = 0, gastoMesPrev = 0, gastoSemPrev = 0, nPedidosMes = 0, nPedidosSem = 0;
-  hist.forEach(function(h) {
-    var ts = h.timestamp || Date.parse(h.fecha) || 0;
-    var diff = ahora - ts;
-    if (diff <= unMes)  { gastoMes += h.total || 0; nPedidosMes++; }
-    if (diff <= unaSem) { gastoSem += h.total || 0; nPedidosSem++; }
-    if (diff > unMes && diff <= dosMes) gastoMesPrev += h.total || 0;
-    if (diff > unaSem && diff <= dosSem) gastoSemPrev += h.total || 0;
-  });
-  var deltaMes = gastoMesPrev > 0 ? ((gastoMes - gastoMesPrev) / gastoMesPrev) * 100 : null;
-  var deltaSem = gastoSemPrev > 0 ? ((gastoSem - gastoSemPrev) / gastoSemPrev) * 100 : null;
+  // KPIs del mes actual, atribuidos por fecha de recepción.
+  var _hoy = new Date();
+  var _gm = gastoDelMes(hist, _hoy.getFullYear(), _hoy.getMonth());
+  var gastoMes = _gm.real;             // ya recepcionado este mes
+  var gastoMesEstimado = _gm.estimado; // real + pendientes del mes
+  var _mesPrev = new Date(_hoy.getFullYear(), _hoy.getMonth() - 1, 1);
+  var _gmPrev = gastoDelMes(hist, _mesPrev.getFullYear(), _mesPrev.getMonth());
+  var deltaMes = _gmPrev.real > 0 ? ((gastoMes - _gmPrev.real) / _gmPrev.real) * 100 : null;
 
   // Datasets para charts según periodo seleccionado
   var binsSem = gastosPorPeriodo('semana', 8);
@@ -1425,8 +1417,8 @@ function renderMetricas() {
 
   // ===== KPI CARDS =====
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px;">';
-  html += _kpiCard('Gasto últimos 30 días', fmt$full(gastoMes), deltaMes, nPedidosMes + ' pedidos', sparkMesAnim, { delay: 0, rawValue: gastoMes });
-  html += _kpiCard('Gasto últimos 7 días',  fmt$full(gastoSem), deltaSem, nPedidosSem + ' pedidos', sparkSemAnim, { delay: 1, rawValue: gastoSem });
+  html += _kpiCard('Gastado este mes', fmt$full(gastoMes), deltaMes, _gm.nReal + ' recibido(s)', sparkMesAnim, { delay: 0, rawValue: gastoMes });
+  html += _kpiCard('Estimado del mes', fmt$full(gastoMesEstimado), null, _gm.nPend + ' pendiente(s)', sparkSemAnim, { delay: 1, rawValue: gastoMesEstimado });
   html += _kpiCard('Total histórico', fmt$full(totalHist), null, hist.length + ' pedidos', '', { delay: 2, rawValue: totalHist });
   html += '</div>';
 

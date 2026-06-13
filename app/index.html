@@ -2305,11 +2305,11 @@ function convertirDiaEnPedido() {
       perdidos.push(it.productoLista);
     }
   });
-  // Marcar el pedido como "ejecutar plan": modo realizar + recordar de qué plan vino
+  // Ejecutar el plan: pre-setear la fecha de recepción al día del plan y
+  // recordar de qué plan del calendario vino.
   pedidoSet({
     items: nuevoItems,
-    modo: 'realizar',
-    fechaCalendario: null,
+    fechaRecepcionEsperada: plan.fecha || _calDiaEditando,
     ejecutandoPlanCalId: plan.id
   });
   actualizarBadgePedido();
@@ -6625,16 +6625,6 @@ function renderResumen() {
       else { var ta = document.createElement('textarea'); ta.value = texto; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); showToast('Copiado'); }
     };
   });
-}
-
-function limpiarFechaCalendario() {
-  var inp = $('resumen-fecha-cal');
-  if (inp) inp.value = '';
-  var p = pedidoGet();
-  pedidoSet(Object.assign({}, p, { fechaCalendario: null }));
-  var btn = $('btn-limpiar-fecha-cal');
-  if (btn) btn.style.display = 'none';
-  actualizarBotonConfirmar();
 }
 
 function actualizarBotonConfirmar() {

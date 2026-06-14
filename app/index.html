@@ -2249,6 +2249,22 @@ async function repetirEnFechaCustom() {
   renderCalendario();
 }
 
+// Borra del historial los pedidos cuya fecha de recepción cae en `iso` (mismo
+// cálculo que la proyección al calendario). Reload-safe: no depende de que la
+// entrada del calendario guarde el id del pedido. Devuelve cuántos borró.
+function _borrarPedidosDeFecha(iso) {
+  var borrados = 0;
+  var quedan = histGet().filter(function(p) {
+    var pIso = p.fechaRecepcionEsperada ? String(p.fechaRecepcionEsperada).slice(0, 10)
+             : (p.fechaRecepcion ? _isoDate(new Date(p.fechaRecepcion))
+             : (p.timestamp ? _isoDate(new Date(p.timestamp)) : null));
+    if (pIso === iso) { syncBorrarPedidoRemoto(p.id).catch(function() {}); borrados++; return false; }
+    return true;
+  });
+  if (borrados > 0) histSet(quedan);
+  return borrados;
+}
+
 function borrarDiaCalendario() {
   if (!_calDiaEditando) return;
   var iso = _calDiaEditando;
@@ -2261,6 +2277,7 @@ function borrarDiaCalendario() {
     if (rta === 'solo') {
       syncBorrarCalDiaRemoto(plan.id).catch(function() {});
       delete _calMap[iso];
+      if (plan.ejecutado) _borrarPedidosDeFecha(iso);  // borrar también el pedido del historial
       showToast('Día borrado', 'ok');
     } else if (rta === 'serie') {
       // Borrar todos los días con el mismo serie_id desde HOY hacia adelante
@@ -2271,6 +2288,7 @@ function borrarDiaCalendario() {
         if (p.serie_id === plan.serie_id && k >= hoyIso) {
           syncBorrarCalDiaRemoto(p.id).catch(function() {});
           delete _calMap[k];
+          if (p.ejecutado) _borrarPedidosDeFecha(k);
           borrados++;
         }
       });
@@ -2279,13 +2297,20 @@ function borrarDiaCalendario() {
       return;
     }
   } else {
-    if (!confirm('Borrar el plan de este día?')) return;
+    // Si el día tiene un pedido ya realizado, borrarlo del calendario lo borra
+    // también del historial (el usuario pidió "sacar el pedido que contiene").
+    var msg = plan.ejecutado
+      ? 'Borrar el pedido de este día? Se elimina también del historial.'
+      : 'Borrar el plan de este día?';
+    if (!confirm(msg)) return;
     syncBorrarCalDiaRemoto(plan.id).catch(function() {});
     delete _calMap[iso];
+    if (plan.ejecutado) _borrarPedidosDeFecha(iso);
     showToast('Día borrado', 'ok');
   }
   cerrarModalDia();
   renderCalendario();
+  if (typeof renderHistorial === 'function') renderHistorial();
 }
 
 // Pre-carga el plan del día en "Armar pedido" para que el usuario confirme

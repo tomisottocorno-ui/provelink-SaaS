@@ -1878,11 +1878,15 @@ function _calMapCombinado() {
   var out = {};
   // 1) Copia de _calMap (fuente principal)
   Object.keys(_calMap).forEach(function(k) { out[k] = _calMap[k]; });
-  // 2) Proyectar pedidos del historial que NO tengan ya un entry en el calendario
+  // 2) Proyectar pedidos del historial en su FECHA DE RECEPCIÓN (esperada si
+  //    está, real si ya se recibió, o la fecha en que se hizo para pedidos
+  //    viejos sin recepción). Antes proyectaba por timestamp (fecha de creación),
+  //    lo que duplicaba el pedido en un día distinto al de su entrada real.
   histGet().forEach(function(h) {
-    if (!h.timestamp) return;
-    var d = new Date(h.timestamp);
-    var iso = _isoDate(d);
+    var iso = h.fechaRecepcionEsperada ? String(h.fechaRecepcionEsperada).slice(0, 10)
+            : (h.fechaRecepcion ? _isoDate(new Date(h.fechaRecepcion))
+            : (h.timestamp ? _isoDate(new Date(h.timestamp)) : null));
+    if (!iso) return;
     if (out[iso]) {
       // Si ya hay entry, marcar como ejecutado si no lo estaba
       if (!out[iso].ejecutado) {
@@ -5753,7 +5757,19 @@ async function syncPedidoRemoto(pedido) {
   try {
     var row = _pedidoARow(pedido, uid);
     var r = await supabase.from('historial_pedidos').upsert(row, { onConflict: 'id' });
-    if (r.error) console.warn('[Historial] upsert error:', r.error.message);
+    if (r.error) {
+      // Si la columna fecha_recepcion_esperada no existe todavía (migración sin
+      // correr), reintentar SIN ella para que el pedido igual sincronice entre
+      // dispositivos. Se pierde solo la fecha de recepción hasta correr la migración.
+      if (/fecha_recepcion_esperada/.test(r.error.message || '')) {
+        delete row.fecha_recepcion_esperada;
+        var r2 = await supabase.from('historial_pedidos').upsert(row, { onConflict: 'id' });
+        if (r2.error) console.warn('[Historial] upsert error (retry sin columna):', r2.error.message);
+        else console.warn('[Historial] sincronizado sin fecha de recepción — correr MIGRACION_FECHA_RECEPCION.sql');
+      } else {
+        console.warn('[Historial] upsert error:', r.error.message);
+      }
+    }
   } catch(e) { console.warn('[Historial] excepción upsert:', e); }
 }
 

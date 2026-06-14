@@ -2161,7 +2161,7 @@ function _renderItemsDelDia(iso) {
   // - Plan ejecutado (no virtual): ver detalle + repetir.
   // - Plan no ejecutado (programado): editar + ejecutar + borrar + repetir.
   if (esVirtual) {
-    if (btnBorrar) btnBorrar.style.display = 'none';
+    if (btnBorrar) btnBorrar.style.display = '';   // borrar = eliminar el pedido del historial
     if (btnEjec) btnEjec.style.display = 'none';
     if (btnEditar) btnEditar.style.display = 'none';
     if (btnCrear) btnCrear.style.display = 'none';
@@ -2269,7 +2269,21 @@ function borrarDiaCalendario() {
   if (!_calDiaEditando) return;
   var iso = _calDiaEditando;
   var plan = _calMap[iso];
-  if (!plan) return;
+  var comb = _calMapCombinado()[iso];  // incluye la proyección del historial
+
+  // Caso VIRTUAL: el día solo muestra un pedido proyectado del historial (no hay
+  // entrada propia en _calMap, p. ej. pedidos viejos). Borrarlo = eliminar ese
+  // pedido del historial.
+  if (!plan) {
+    if (!comb) return;
+    if (!confirm('Borrar el pedido de este día? Se elimina del historial.')) return;
+    var nv = _borrarPedidosDeFecha(iso);
+    cerrarModalDia();
+    renderCalendario();
+    if (typeof renderHistorial === 'function') renderHistorial();
+    showToast(nv > 0 ? 'Pedido borrado del historial (' + nv + ')' : 'No encontré el pedido en el historial para esta fecha', nv > 0 ? 'ok' : 'warn');
+    return;
+  }
 
   // Si es parte de una serie, preguntar
   if (plan.serie_id) {
@@ -2299,14 +2313,15 @@ function borrarDiaCalendario() {
   } else {
     // Si el día tiene un pedido ya realizado, borrarlo del calendario lo borra
     // también del historial (el usuario pidió "sacar el pedido que contiene").
-    var msg = plan.ejecutado
+    var ejec = !!plan.ejecutado;
+    var msg = ejec
       ? 'Borrar el pedido de este día? Se elimina también del historial.'
       : 'Borrar el plan de este día?';
     if (!confirm(msg)) return;
     syncBorrarCalDiaRemoto(plan.id).catch(function() {});
     delete _calMap[iso];
-    if (plan.ejecutado) _borrarPedidosDeFecha(iso);
-    showToast('Día borrado', 'ok');
+    var nr = ejec ? _borrarPedidosDeFecha(iso) : 0;
+    showToast(ejec ? ('Pedido borrado del historial (' + nr + ')') : 'Día borrado', 'ok');
   }
   cerrarModalDia();
   renderCalendario();

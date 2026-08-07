@@ -3,8 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "description": "ProveLink SaaS - Gestión de proveedores y pedidos",
+  "scripts": {
+    "test": "node tests/run-golden.js && node tests/run-pedidos.js && node tests/run-flujos.js",
+    "test:golden": "node tests/run-golden.js",
+    "test:pedidos": "node tests/run-pedidos.js",
+    "test:flujos": "node tests/run-flujos.js"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
   },
   "engines": {
     "node": ">=18"

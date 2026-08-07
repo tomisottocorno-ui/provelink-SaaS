@@ -515,6 +515,11 @@ function _mediana(arr) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+// Marcador de "precio por unidad base" en texto libre: "x kg", "por kilo",
+// "p/kg", "$/kg", "x lt". Clave: NO puede haber un número entre el conector y
+// la unidad, así "x 5 kg" (tamaño del bulto) no matchea y "$ X KG" sí.
+var RE_PRECIO_POR_UNIDAD = /(?:\b(?:x|por)\s*|\bp\s*[\/.]\s*|\$\s*\/\s*)(?:kgs?|kilos?|kilogramos?|lts?|litros?)\b/i;
+
 function detectarModoHeuristico(grupo) {
   // Si hay 2+ proveedores propios con precios distintos → dejar para la IA (comparativa)
   var propios = grupo.proveedores.filter(function(p) { return p.id_original.indexOf('ext_') !== 0; });
@@ -534,6 +539,16 @@ function detectarModoHeuristico(grupo) {
   if (esUnitarioPuro) {
     return { modo: 'unitario', confianza: 0.85,
       razonamiento: 'heurístico: presentación indica unidad base (' + pres + ')' };
+  }
+
+  // Marcador explícito de precio por unidad base en el NOMBRE: "$ X KG",
+  // "JAMON X KG", "POR KILO", "$/KG". Antes solo se miraba la presentación,
+  // así que estos quedaban sin decidir y caían al default (pack) aunque el
+  // nombre dijera literalmente que el precio es por kilo.
+  var nombre = (propios[0].nombre_original || '').trim();
+  if (RE_PRECIO_POR_UNIDAD.test(nombre) || RE_PRECIO_POR_UNIDAD.test(pres)) {
+    return { modo: 'unitario', confianza: 0.9,
+      razonamiento: 'el nombre indica precio por unidad base (x kg / por kilo)' };
   }
 
   // TODO el resto (incluyendo "Bolsa x 25 kg", "Bidón 5lt", "x 5 lt", "500 ml")

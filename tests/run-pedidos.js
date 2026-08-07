@@ -54,5 +54,21 @@ eq('pesoVariable: mozzarella barra',   ctx.esProductoPesoVariable('queso mozzare
 eq('pesoVariable: NO queso rallado',   ctx.esProductoPesoVariable('queso rallado', 'QUESO RALLADO X 3 KG', 'kg'), false);
 eq('pesoVariable: NO aceite oliva 5L', ctx.esProductoPesoVariable('aceite oliva', 'ACEITE OLIVA DON HUGO X 5 LT', 'L'), false);
 
+// RE_PRECIO_POR_UNIDAD — "precio por kilo" escrito en el nombre.
+// Debe matchear el conector SIN número ("x kg") y NO el tamaño ("x 5 kg").
+[['JAMON CRUDO LA RESIDENCIA $ X KG - VENTA X PIEZA', true],
+ ['QUESO AZUL LA QUESERA X KG', true],
+ ['Mozzarella Roma x kg', true],
+ ['SALAME POR KILO', true],
+ ['TAPA P/KG', true],
+ ['ACEITE GIRASOL COSTA DEL SOL X 5 LTS.', false],
+ ['Azucar Comun x 50 kg Tipo A', false],
+ ['**QUESO MOZZARELLA CILINDRO x 3.000 KG. VACALIN en KILOS', false],
+ ['SAL 6CAJA (24X1KG)', false],
+ ['MIX DE FRUTOS KG', false]
+].forEach(function(c) {
+  eq('porUnidad: ' + c[0].slice(0, 42), ctx.RE_PRECIO_POR_UNIDAD.test(c[0]), c[1]);
+});
+
 console.log('\n' + (fallos === 0 ? 'TODOS OK' : fallos + ' FALLO(S)'));
 process.exit(fallos === 0 ? 0 : 1);

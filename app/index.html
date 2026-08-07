@@ -5964,6 +5964,18 @@ function todosLosItems() {
         tamanoItem      = _caja.total;
         unidadBaseItem  = _caja.unidad;
         precioUnitItem  = (_caja.total > 0) ? Math.round((it.precio / _caja.total) * 100) / 100 : precioUnitItem;
+      } else if (!it.confirmado_manual && modoItem !== 'unitario' &&
+                 (unidadBaseItem === 'kg' || unidadBaseItem === 'L') &&
+                 RE_PRECIO_POR_UNIDAD.test(nombreLimpio)) {
+        // El nombre dice explícitamente "x kg" / "$ X KG" / "por kilo" pero la
+        // lista quedó guardada en modo pack (la heurística del nombre se agregó
+        // después). Se corrige al vuelo para no tener que re-procesar listas ya
+        // cargadas — mismo criterio de auto-reparación que el bloque de arriba.
+        // NO pisa una corrección manual del usuario (botones 📦/⚖️).
+        modoItem        = 'unitario';
+        precioUnitItem  = it.precio;   // el precio de la lista ES por kg/L
+        precioTotalItem = (tamanoItem > 0) ? Math.round(it.precio * tamanoItem * 100) / 100 : null;
+        precioFinal     = precioTotalItem || it.precio;
       }
       out.push({
         listaId: l.id,

@@ -2477,15 +2477,26 @@ function abrirModalRecepcionar(id) {
       var rowOpacity = (!esCambio && noLlego) ? '0.45' : '1';
       var cambioStyle = esCambio ? 'background:rgba(251,191,36,0.12);border-color:rgba(251,191,36,0.5);color:var(--gold-bright);' : '';
       var cambioActive = esCambio ? 'true' : 'false';
-      // Peso variable (quesos/fiambres enteros por kg): el precio de lista es
-      // por kg y el costo final = peso real × precio unitario. El proveedor
-      // informa el peso al despachar; acá se carga y el total se recalcula.
-      // Líquidos y envasados quedan EXCLUIDOS (tamaño exacto, no se pesan).
-      var esPesoVar = it.modo === 'unitario' && (parseFloat(it.precio_unitario) > 0) &&
-                      esProductoPesoVariable(it.tipo, it.productoLista, it.unidad_base);
+      // Peso real: se ofrece para TODA la fiambrería en kg (barra suelta o
+      // envasada), porque el peso casi nunca es exacto. El costo final es
+      // peso × precio por kg. `precio_unitario` ya viene por kg en ambos modos
+      // (el pipeline lo calcula como precio/tamaño cuando el modo es pack).
+      var precioKg = parseFloat(it.precio_unitario) || 0;
+      if (!precioKg && it.modo === 'pack' && parseFloat(it.tamano) > 0) {
+        precioKg = Math.round((parseFloat(it.precio) / parseFloat(it.tamano)) * 100) / 100;
+      }
+      var esPesoVar = precioKg > 0 && esProductoPesable(it.tipo, it.productoLista, it.unidad_base);
       var uLabel = 'kg';
       var pesoGuardado = (parseFloat(it.pesoReal) > 0) ? parseFloat(it.pesoReal) : null;
       var pesoEstimado = (parseFloat(it.tamano) > 0) ? Math.round(parseFloat(it.tamano) * it.qty * 100) / 100 : null;
+      // Envasado con peso declarado (jamón x 400g) → precargar el peso esperado,
+      // editable. Pieza de peso variable (barra, horma) → vacío: hay que pesarla.
+      var esPiezaVariable = it.modo === 'unitario' &&
+                            esProductoPesoVariable(it.tipo, it.productoLista, it.unidad_base);
+      var valorPeso = (pesoGuardado != null) ? pesoGuardado
+                    : ((!esPiezaVariable && pesoEstimado != null) ? pesoEstimado : '');
+      var subtotalPeso = (valorPeso !== '' && valorPeso != null)
+                       ? Math.round(valorPeso * precioKg * 100) / 100 : null;
       html += '<div style="display:flex;flex-direction:column;gap:0;padding:8px 10px;border-radius:8px;border:1px solid ' + rowBorder + ';background:' + rowBg + ';opacity:' + rowOpacity + ';" id="rec-row-' + it.itemId + '">';
       html += '<div style="display:flex;align-items:center;gap:10px;">';
       html += '<input type="checkbox" data-item-id="' + it.itemId + '" ' + (noLlego ? '' : 'checked') + ' onchange="actualizarFilaRecepcion(this)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--emerald);flex-shrink:0;">';
@@ -2495,10 +2506,10 @@ function abrirModalRecepcionar(id) {
       html += '</div>';
       if (esPesoVar) {
         html += '<div style="display:flex;align-items:center;gap:8px;margin-left:26px;margin-top:6px;flex-wrap:wrap;">';
-        html += '<span style="font-size:11px;color:var(--text-muted);">⚖️ $' + formatPrecio(it.precio_unitario) + '/' + uLabel + ' · peso real:</span>';
-        html += '<input type="number" step="0.01" min="0" inputmode="decimal" data-peso-id="' + it.itemId + '" data-peso-unit="' + it.precio_unitario + '" value="' + (pesoGuardado != null ? pesoGuardado : '') + '" placeholder="' + (pesoEstimado != null ? '~' + pesoEstimado : '') + '" oninput="actualizarPesoRecepcion(this)" style="width:78px;background:var(--bg);border:1px solid var(--border-hi);color:var(--text);padding:4px 7px;border-radius:6px;font-size:12px;">';
+        html += '<span style="font-size:11px;color:var(--text-muted);">⚖️ $' + formatPrecio(precioKg) + '/' + uLabel + ' · peso real:</span>';
+        html += '<input type="number" step="0.01" min="0" inputmode="decimal" data-peso-id="' + it.itemId + '" data-peso-unit="' + precioKg + '" value="' + valorPeso + '" placeholder="' + (pesoEstimado != null ? '~' + pesoEstimado : '') + '" oninput="actualizarPesoRecepcion(this)" style="width:78px;background:var(--bg);border:1px solid var(--border-hi);color:var(--text);padding:4px 7px;border-radius:6px;font-size:12px;">';
         html += '<span style="font-size:11px;color:var(--text-muted);">' + uLabel + '</span>';
-        html += '<span data-peso-subtotal="' + it.itemId + '" style="font-size:11px;font-weight:600;color:var(--emerald);">' + (pesoGuardado != null ? '→ $' + formatPrecio(Math.round(pesoGuardado * it.precio_unitario * 100) / 100) : '') + '</span>';
+        html += '<span data-peso-subtotal="' + it.itemId + '" style="font-size:11px;font-weight:600;color:var(--emerald);">' + (subtotalPeso != null ? '→ $' + formatPrecio(subtotalPeso) : '') + '</span>';
         html += '</div>';
       }
       html += '</div>';
@@ -2618,13 +2629,17 @@ function guardarRecepcion(definitivo) {
   var huboPesos = false;
   var nPesos = 0;
   var pesosMap = {};
+  var precioKgMap = {};   // el $/kg que se MOSTRÓ en pantalla (incluye el
+                          // derivado precio/tamaño de los envasados en modo pack)
   $('modal-rec-items').querySelectorAll('input[data-peso-id]').forEach(function(inp) {
-    pesosMap[inp.getAttribute('data-peso-id')] = parseFloat(String(inp.value).replace(',', '.')) || 0;
+    var pid = inp.getAttribute('data-peso-id');
+    pesosMap[pid] = parseFloat(String(inp.value).replace(',', '.')) || 0;
+    precioKgMap[pid] = parseFloat(inp.getAttribute('data-peso-unit')) || 0;
   });
   hist[idx].items.forEach(function(it) {
     if (!(it.itemId in pesosMap)) return;
     var peso = pesosMap[it.itemId];
-    var pu = parseFloat(it.precio_unitario) || 0;
+    var pu = precioKgMap[it.itemId] || parseFloat(it.precio_unitario) || 0;
     if (peso > 0 && pu > 0) {
       it.pesoReal = peso;
       it.subtotal = Math.round(peso * pu * 100) / 100;
@@ -3473,45 +3488,61 @@ async function detectarColumnasPDF(muestraTexto, proveedorId) {
   }
 }
 
+var _colPdfSeq = 0;
+
 function mostrarSelectorColumnasPDF(lineas, columnas, ficha) {
-  // Crear modal dinámico
+  // IDs y name de radios ÚNICOS por modal. Antes eran fijos ('col-pdf-modal',
+  // 'btn-confirmar-col-pdf', name="sel-col-pdf"): con 2+ listas cargando en
+  // paralelo se abrían dos modales con ids duplicados → getElementById
+  // enganchaba el handler al botón del OTRO modal, y como los radios
+  // compartían name formaban un solo grupo (elegir en uno desmarcaba el otro),
+  // así que terminaba procesando la primera columna en vez de la elegida.
+  var uid = 'colpdf-' + (++_colPdfSeq);
+  var radioName = 'sel-col-' + uid;
+  // Índice por posición: evita depender del texto del nombre (que puede traer
+  // comillas/acentos y romper el match por string).
   var opciones = columnas.precios.map(function(c, idx) {
     return '<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;background:var(--bg-elev2);">' +
-      '<input type="radio" name="sel-col-pdf" value="' + escapeHtmlAttr(c.nombre) + '" ' + (idx === 0 ? 'checked' : '') + ' style="margin:0;flex-shrink:0;">' +
+      '<input type="radio" name="' + radioName + '" value="' + idx + '" ' + (idx === 0 ? 'checked' : '') + ' style="margin:0;flex-shrink:0;">' +
       '<div style="flex:1;min-width:0;">' +
       '<div style="font-weight:500;font-size:13px;">' + escapeHtml(c.nombre) + '</div>' +
       (c.ejemplo ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">ej: ' + escapeHtml(c.ejemplo) + '</div>' : '') +
       '</div></label>';
   }).join('');
   var provNom = (proveedores.find(function(p){ return p.id === ficha.proveedorId; }) || {}).nombre || '';
-  var modalHtml = '<div class="modal-overlay open" id="col-pdf-modal" style="z-index:600;">' +
+  var modalHtml = '<div class="modal-overlay open" id="' + uid + '" style="z-index:600;">' +
     '<div class="modal" style="max-width:500px;">' +
     '<h3>Elegí la columna de precio' + (provNom ? ' — ' + escapeHtml(provNom) : '') + '</h3>' +
     '<p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">La IA detectó varias columnas con precios. ¿Cuál querés tomar?</p>' +
     opciones +
     '<div class="modal-actions">' +
-    '<button class="btn" id="btn-cancelar-col-pdf">Cancelar</button>' +
-    '<button class="btn primary" id="btn-confirmar-col-pdf">Procesar</button>' +
+    '<button class="btn" data-rol="cancelar">Cancelar</button>' +
+    '<button class="btn primary" data-rol="confirmar">Procesar</button>' +
     '</div></div></div>';
   document.body.insertAdjacentHTML('beforeend', modalHtml);
-  document.getElementById('btn-cancelar-col-pdf').onclick = function() {
-    cerrarModalColPDF();
+  var modal = document.getElementById(uid);   // referencia directa a ESTE modal
+  if (!modal) return;
+
+  modal.querySelector('button[data-rol="cancelar"]').onclick = function() {
+    modal.remove();
     // Volver la ficha a "idle" para que el usuario pueda re-subir
     ficha.estado = 'idle';
     if (ficha.jobId) removeBarraProgreso(ficha.jobId);
     renderTabsCargas();
     renderPreviewSiActiva(ficha);
   };
-  document.getElementById('btn-confirmar-col-pdf').onclick = function() {
-    var sel = document.querySelector('input[name="sel-col-pdf"]:checked');
-    if (!sel) return;
-    var nombreCol = sel.value;
-    // Buscar el ejemplo correspondiente a la columna elegida
-    var colObj = columnas.precios.find(function(c) { return c.nombre === nombreCol; }) || {};
-    cerrarModalColPDF();
+  modal.querySelector('button[data-rol="confirmar"]').onclick = function() {
+    // Buscar el radio DENTRO de este modal (no en todo el documento)
+    var sel = modal.querySelector('input[name="' + radioName + '"]:checked');
+    if (!sel) { showToast('Elegí una columna', 'warn'); return; }
+    var colObj = columnas.precios[parseInt(sel.value, 10)];
+    if (!colObj) { showToast('No pude identificar la columna elegida', 'error'); return; }
+    modal.remove();
     crearBarraProgreso(ficha.jobId);
     renderCuerpoCarga();
-    procesarPDFConColumna(lineas, nombreCol, colObj.ejemplo, columnas.precios, ficha).catch(function(e) {
+    console.log('[PDF] Columna elegida:', colObj.nombre, '(ej:', colObj.ejemplo + ')');
+    showToast('Usando la columna "' + colObj.nombre + '"', 'ok');
+    procesarPDFConColumna(lineas, colObj.nombre, colObj.ejemplo, columnas.precios, ficha).catch(function(e) {
       console.error(e);
       if (ficha.jobId) removeBarraProgreso(ficha.jobId);
       if (!ficha.cancelado) {
@@ -3523,11 +3554,6 @@ function mostrarSelectorColumnasPDF(lineas, columnas, ficha) {
       }
     });
   };
-}
-
-function cerrarModalColPDF() {
-  var m = document.getElementById('col-pdf-modal');
-  if (m) m.remove();
 }
 
 async function procesarPDFConColumna(lineas, nombreColumna, ejemploColumna, todasLasColumnas, ficha) {

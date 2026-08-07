@@ -31,5 +31,18 @@ var pedidos = [
 ];
 eq('gastoDelMes junio', ctx.gastoDelMes(pedidos, 2026, 5), { real: 1000, estimado: 1500, nReal: 1, nPend: 1 });
 
+// esProductoPesable — al recepcionar: TODA la fiambrería en kg, pack o unitario
+eq('pesable: jamón envasado 400g (pack)', ctx.esProductoPesable('jamon cocido', 'JAMON BOCATTI X 400 GR', 'kg'), true);
+eq('pesable: queso rallado (envasado)',   ctx.esProductoPesable('queso rallado', 'QUESO RALLADO X 3 KG', 'kg'), true);
+eq('pesable: mozzarella barra',           ctx.esProductoPesable('queso mozzarella', 'MOZZARELLA BARRA x kg', 'kg'), true);
+eq('pesable: salame',                     ctx.esProductoPesable('salame', 'SALAME MILAN X KG', 'kg'), true);
+eq('pesable: NO aceite (litros)',         ctx.esProductoPesable('aceite oliva', 'ACEITE OLIVA X 5 LT', 'L'), false);
+eq('pesable: NO harina (kg pero no fiambre)', ctx.esProductoPesable('harina 000', 'HARINA 000 X 25 KG', 'kg'), false);
+
+// esProductoPesoVariable (comparador) sigue siendo el estricto tras el refactor
+eq('pesoVariable: mozzarella barra',   ctx.esProductoPesoVariable('queso mozzarella', 'MOZZARELLA BARRA x kg', 'kg'), true);
+eq('pesoVariable: NO queso rallado',   ctx.esProductoPesoVariable('queso rallado', 'QUESO RALLADO X 3 KG', 'kg'), false);
+eq('pesoVariable: NO aceite oliva 5L', ctx.esProductoPesoVariable('aceite oliva', 'ACEITE OLIVA DON HUGO X 5 LT', 'L'), false);
+
 console.log('\n' + (fallos === 0 ? 'TODOS OK' : fallos + ' FALLO(S)'));
 process.exit(fallos === 0 ? 0 : 1);

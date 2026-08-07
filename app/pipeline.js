@@ -921,6 +921,10 @@ function compararListasPrecio(actual, anterior, opts) {
 // Por eso exigimos: unidadBase 'kg' + tipo de queso/fiambre/embutido/carne.
 // Es deliberadamente conservador (match positivo): ante la duda, NO lo marca,
 // así no aparece la UI de pesaje en productos envasados.
+// Quesos, fiambres, embutidos y carnes (productos de fiambrería). Sin flag /g:
+// es seguro reusar la misma instancia con .test() en varias llamadas.
+var RE_FIAMBRERIA = /\b(queso|mozzarella|muzzarella|muza|cremoso|sardo|reggianito|reggiano|provolone|provoleta|fontina|gouda|pategr[aá]s|parmesano|gruyere|gruy[eè]re|emmental|roquefort|azul|port\s*salut|tybo|barra|horma|fiambre|jam[oó]n|salame|salam[ií]n|mortadela|bondiola|panceta|lomo|paleta|leberwurst|morcilla|chorizo|longaniza|salchich[oó]n|matambre|peceto|nalga|carne|pollo|milanesa)\b/;
+
 function esProductoPesoVariable(tipo, nombre, unidadBase) {
   if (unidadBase !== 'kg') return false; // líquidos y unidades: tamaño exacto
   var txt = (String(tipo || '') + ' ' + String(nombre || '')).toLowerCase();
@@ -930,8 +934,22 @@ function esProductoPesoVariable(tipo, nombre, unidadBase) {
   if (/\b(rallad\w*|untable|en\s*polvo|polvo)\b/.test(txt)) return false;
   if (/\bqueso\s+crema\b/.test(txt)) return false;
   // Quesos enteros, fiambres, embutidos y carnes vendidos por pieza/peso.
-  var re = /\b(queso|mozzarella|muzzarella|muza|cremoso|sardo|reggianito|reggiano|provolone|provoleta|fontina|gouda|pategr[aá]s|parmesano|gruyere|gruy[eè]re|emmental|roquefort|azul|port\s*salut|tybo|barra|horma|fiambre|jam[oó]n|salame|salam[ií]n|mortadela|bondiola|panceta|lomo|paleta|leberwurst|morcilla|chorizo|longaniza|salchich[oó]n|matambre|peceto|nalga|carne|pollo|milanesa|bondiola)\b/;
-  return re.test(txt);
+  return RE_FIAMBRERIA.test(txt);
+}
+
+// Productos a los que se les puede cargar el PESO REAL al recepcionar: toda la
+// fiambrería cotizada en kg, venga por pieza de peso variable (barra, horma) o
+// envasada con peso declarado (jamón x 400g).
+//
+// Más amplio a propósito que esProductoPesoVariable (que se usa en el comparador
+// para gritar "POR KILO" y ahí un falso positivo se ve feo): al recepcionar,
+// ofrecer el campo no molesta —viene precargado con el peso esperado— y en
+// cambio no ofrecerlo impide corregir un peso que en fiambrería casi nunca es
+// exacto. Por eso acá no se excluyen rallado/crema ni se exige modo unitario.
+function esProductoPesable(tipo, nombre, unidadBase) {
+  if (unidadBase !== 'kg') return false; // líquidos y unidades: no se pesan
+  var txt = (String(tipo || '') + ' ' + String(nombre || '')).toLowerCase();
+  return RE_FIAMBRERIA.test(txt);
 }
 
 // Fecha (YYYY-MM-DD) a la que se atribuye el gasto de un pedido en métricas:

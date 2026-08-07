@@ -39,7 +39,17 @@ eq('pesable: salame',                     ctx.esProductoPesable('salame', 'SALAM
 eq('pesable: NO aceite (litros)',         ctx.esProductoPesable('aceite oliva', 'ACEITE OLIVA X 5 LT', 'L'), false);
 eq('pesable: NO harina (kg pero no fiambre)', ctx.esProductoPesable('harina 000', 'HARINA 000 X 25 KG', 'kg'), false);
 
-// esProductoPesoVariable (comparador) sigue siendo el estricto tras el refactor
+// Fiambrería que ANTES no matcheaba el diccionario (causa de la inconsistencia)
+eq('pesable: cheddar',   ctx.esProductoPesable('cheddar', 'CHEDDAR EN FETAS', 'kg'), true);
+eq('pesable: ricota',    ctx.esProductoPesable('ricota', 'RICOTA X 5 KG', 'kg'), true);
+eq('pesable: dambo',     ctx.esProductoPesable('dambo', 'DAMBO LA PAULINA', 'kg'), true);
+eq('pesable: salchichas',ctx.esProductoPesable('salchicha', 'SALCHICHAS VIENA', 'kg'), true);
+eq('pesable: lomito',    ctx.esProductoPesable('lomito', 'LOMITO AHUMADO', 'kg'), true);
+eq('pesable: por salut', ctx.esProductoPesable('por salut', 'PORT SALUT LIGHT', 'kg'), true);
+eq('pesable: pastron',   ctx.esProductoPesable('pastron', 'PASTRON X KG', 'kg'), true);
+eq('pesable: NO azucar', ctx.esProductoPesable('azucar', 'AZUCAR X 25 KG', 'kg'), false);
+
+// esProductoPesoVariable (estricto) sigue excluyendo envasados tras ampliar el regex
 eq('pesoVariable: mozzarella barra',   ctx.esProductoPesoVariable('queso mozzarella', 'MOZZARELLA BARRA x kg', 'kg'), true);
 eq('pesoVariable: NO queso rallado',   ctx.esProductoPesoVariable('queso rallado', 'QUESO RALLADO X 3 KG', 'kg'), false);
 eq('pesoVariable: NO aceite oliva 5L', ctx.esProductoPesoVariable('aceite oliva', 'ACEITE OLIVA DON HUGO X 5 LT', 'L'), false);

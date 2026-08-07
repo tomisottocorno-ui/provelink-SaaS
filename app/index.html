@@ -6411,19 +6411,31 @@ function renderBuscarProducto(expansionesExtras) {
           mostrarUnidad = ' <span style="color:var(--text-muted);font-weight:500;">· ' + escapeHtml(unidadStr) + '</span>';
         }
       }
-      // Peso variable (quesos/fiambres enteros cotizados por kg): el dato real
-      // de la lista es el precio POR KILO — mostrarlo grande y gritarlo, porque
-      // el costo final depende del peso real de la pieza (se carga al recepcionar).
-      // Líquidos (aceite x5L) y envasados quedan EXCLUIDOS: tamaño exacto.
-      var esPesoVarComp = it.modo === 'unitario' && parseFloat(it.precio_unitario) > 0 &&
-                          esProductoPesoVariable(it.tipo, it.productoLista, it.unidad_base);
+      // "POR KILO" en grande = el precio de la lista YA es por kilo (modo
+      // unitario + kg). NO depende del diccionario de fiambrería: antes sí, y
+      // por eso dos productos igualmente cotizados por kg se veían distinto
+      // según si el nombre matcheaba ("cheddar" no matcheaba, "queso" sí).
+      // Los líquidos (aceite x 5 L) siguen afuera: solo kg.
+      var esPorKiloComp = it.modo === 'unitario' && parseFloat(it.precio_unitario) > 0 &&
+                          it.unidad_base === 'kg';
+      // El aviso de pesaje al recibir sí es exclusivo de fiambrería.
+      var sePesaAlRecibir = esPorKiloComp &&
+                            esProductoPesable(it.tipo, it.productoLista, it.unidad_base);
       var uTxtComp = 'kilo';
       var pbHtml;
-      if (esPesoVarComp) {
-        var piezaTxt = (parseFloat(it.tamano) > 0 && it.precio > 0)
-          ? 'pieza ~' + it.tamano + ' kg ≈ $' + formatPrecio(it.precio)
-          : 'se cobra por peso real al recibir';
-        pbHtml = '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">⚖️ ' + piezaTxt + '</div>';
+      if (esPorKiloComp) {
+        var _tamComp = parseFloat(it.tamano) || 0;
+        var refTxt;
+        if (sePesaAlRecibir) {
+          refTxt = (_tamComp > 0 && it.precio > 0)
+            ? '⚖️ pieza ~' + it.tamano + ' kg ≈ $' + formatPrecio(it.precio)
+            : '⚖️ se cobra por peso real al recibir';
+        } else {
+          refTxt = (_tamComp > 0 && it.precio > 0)
+            ? 'bulto ' + it.tamano + ' kg ≈ $' + formatPrecio(it.precio)
+            : '';
+        }
+        pbHtml = refTxt ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">' + refTxt + '</div>' : '';
       } else {
         pbHtml = pb ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">$' + formatPrecio(pb.precioBase) + '/' + pb.unidadBase + '</div>' : '';
       }
@@ -6432,7 +6444,7 @@ function renderBuscarProducto(expansionesExtras) {
         : '';
       html += '<div style="font-size:12px;flex:1;min-width:0;line-height:1.4;">' + escapeHtml(it.productoLista) + ultimaBadge + pbHtml + '</div>';
       html += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">';
-      if (esPesoVarComp) {
+      if (esPorKiloComp) {
         html += '<div style="text-align:right;white-space:nowrap;">' +
           '<strong style="font-size:15px;color:#4ade80;">$' + formatPrecio(it.precio_unitario) + '</strong>' +
           '<div style="font-size:11px;font-weight:800;color:#4ade80;text-transform:uppercase;letter-spacing:0.06em;line-height:1.2;">por ' + uTxtComp + '</div>' +

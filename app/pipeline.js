@@ -923,7 +923,7 @@ function compararListasPrecio(actual, anterior, opts) {
 // así no aparece la UI de pesaje en productos envasados.
 // Quesos, fiambres, embutidos y carnes (productos de fiambrería). Sin flag /g:
 // es seguro reusar la misma instancia con .test() en varias llamadas.
-var RE_FIAMBRERIA = /\b(queso|mozzarella|muzzarella|muza|cremoso|sardo|reggianito|reggiano|provolone|provoleta|fontina|gouda|pategr[aá]s|parmesano|gruyere|gruy[eè]re|emmental|roquefort|azul|port\s*salut|tybo|barra|horma|fiambre|jam[oó]n|salame|salam[ií]n|mortadela|bondiola|panceta|lomo|paleta|leberwurst|morcilla|chorizo|longaniza|salchich[oó]n|matambre|peceto|nalga|carne|pollo|milanesa)\b/;
+var RE_FIAMBRERIA = /\b(queso|quesos|mozzarella|muzzarella|muzza|muza|cremoso|mantecoso|sardo|reggianito|reggiano|provolone|provoleta|fontina|gouda|da[nm]bo|holanda|cheddar|brie|camembert|ricota|ricotta|pategr[aá]s|parmesano|gruyere|gruy[eè]re|emmental|roquefort|azul|por[ts]?\s*salut|tybo|barra|horma|bocconcini|boconccini|fiambre|fiambrer[ií]a|feteado|arrollado|jam[oó]n|salame|salam[ií]n|mortadela|bondiola|panceta|lomit?o|paleta|leberwurst|morcilla|chorizo|longaniza|salchich\w*|pastr[oó]n|pastrami|matambre|peceto|nalga|carne|pollo|milanesa)\b/;
 
 function esProductoPesoVariable(tipo, nombre, unidadBase) {
   if (unidadBase !== 'kg') return false; // líquidos y unidades: tamaño exacto

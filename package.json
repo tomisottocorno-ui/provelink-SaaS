@@ -17,5 +17,9 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "scripts": {
+    "test": "node tests/run-auth.js",
+    "test:auth": "node tests/run-auth.js"
   }
 }

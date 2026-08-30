@@ -54,10 +54,13 @@ values
   ('queso barra',       'kg', 7000,  0.3, 4.0, 'manual', 1, true)
 
 on conflict (tipo_producto) do update set
+  unidad_base = excluded.unidad_base,
   mediana_estimada = excluded.mediana_estimada,
   factor_min = excluded.factor_min,
   factor_max = excluded.factor_max,
   origen = excluded.origen,
+  muestras = excluded.muestras,
+  confiable = excluded.confiable,
   ultima_actualizacion = now();
 
 select count(*) as total_rangos_fiambreria from public.pl_rangos_precio;

@@ -326,6 +326,8 @@ on conflict (tipo_producto) do update set
   factor_min = excluded.factor_min,
   factor_max = excluded.factor_max,
   origen = excluded.origen,
+  muestras = excluded.muestras,
+  confiable = excluded.confiable,
   ultima_actualizacion = now();
 
 select count(*) as total_rangos from public.pl_rangos_precio;

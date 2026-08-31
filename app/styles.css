@@ -2332,3 +2332,44 @@ h3 { font-size: 18px; }
 @media (max-width: 540px) {
   #pedido-landing > div[style*="grid"] { grid-template-columns: 1fr !important; }
 }
+
+/* ============================================================
+   RECORRIDO GUIADO (tour.js)
+   ============================================================ */
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .62);
+  z-index: 9998;
+}
+.tour-resaltado {
+  position: relative;
+  z-index: 9999;
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 10px;
+}
+.tour-tarjeta {
+  position: fixed;
+  z-index: 10000;
+  width: 300px;
+  background: var(--surface-hi);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-md);
+  padding: 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.tour-paso {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.tour-tarjeta h4 { margin: 0 0 6px; font-size: 15px; color: var(--text); }
+.tour-tarjeta p { margin: 0 0 14px; font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+.tour-botones { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.tour-botones > div { display: flex; gap: 8px; }

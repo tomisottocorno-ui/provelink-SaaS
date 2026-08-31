@@ -108,7 +108,7 @@ module.exports = async function handler(req, res) {
           codigo: 'PLAN_SIN_EMPLEADOS'
         });
       }
-      if (profile.plan_estado !== 'activo' && profile.plan_estado !== null) {
+      if (profile.plan_estado !== 'activo' && profile.plan_estado !== null && profile.plan_estado !== 'prueba') {
         return res.status(403).json({
           error: 'Tu plan no está activo. Regularizá el pago para gestionar empleados.',
           codigo: 'PLAN_NO_ACTIVO'

@@ -16,7 +16,7 @@ create table if not exists public.profiles (
   email text not null,
   nombre_negocio text,                  -- "Panadería La Esquina"
   telefono text,
-  plan text default 'free' not null,    -- 'free' | 'pro' | 'business'
+  plan text default 'pro' not null,    -- 'pro' | 'business'
   plan_estado text default 'activo',    -- 'activo' | 'pendiente_pago' | 'cancelado'
   plan_vence timestamptz,               -- cuando vence el plan pago actual
   mp_suscripcion_id text,               -- id de suscripción de Mercado Pago
@@ -229,7 +229,6 @@ immutable
 as $$
 begin
   case plan_text
-    when 'free' then return 0;
     when 'pro' then return 0;        -- Pro NO tiene asistente IA
     when 'business' then return 500; -- Max: 500 consultas/mes
     else return 0;
@@ -244,7 +243,6 @@ immutable
 as $$
 begin
   case plan_text
-    when 'free' then return 2;       -- Free: 2 proveedores máximo
     when 'pro' then return 999;
     when 'business' then return 999;
     else return 2;
@@ -259,7 +257,6 @@ immutable
 as $$
 begin
   case plan_text
-    when 'free' then return 2;       -- Free: 2 procesamientos de lista por mes
     when 'pro' then return 999;
     when 'business' then return 999;
     else return 2;
@@ -458,7 +455,7 @@ create policy "Rangos: update autenticado"
 -- su propio login (email + password Supabase Auth), pero acceden a los DATOS
 -- del owner (proveedores, listas, pedidos, etc.) con permisos granulares.
 --
--- Límites por plan: Free=0, Pro=2, Business=10
+-- Límites por plan: Pro=2, Business=10
 -- ============================================================================
 
 create table if not exists public.empleados (
@@ -502,7 +499,6 @@ immutable
 as $$
 begin
   case plan_text
-    when 'free' then return 0;
     when 'pro' then return 2;
     when 'business' then return 10;
     else return 0;

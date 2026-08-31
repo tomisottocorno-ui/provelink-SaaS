@@ -34,9 +34,9 @@ const TIPOS_CON_THINKING = ['procesar_lista'];
 const TIPOS_SONNET_SIN_THINKING = [];
 
 // Asistente IA: solo plan Max (business). Pro NO lo tiene.
-const LIMITES_IA = { free: 0, pro: 0, business: 500 };
-// Listas procesadas por mes: Free 2, Pro y Max ilimitado.
-const LIMITES_LISTAS_MES = { free: 2, pro: 999, business: 999 };
+const LIMITES_IA = { pro: 0, business: 500 };
+// Listas procesadas por mes: Pro y Max ilimitado.
+const LIMITES_LISTAS_MES = { pro: 999, business: 999 };
 
 module.exports = async function handler(req, res) {
   // CORS (Vercel maneja same-origin si todo está en el mismo dominio,
@@ -128,7 +128,7 @@ module.exports = async function handler(req, res) {
       return res.status(404).json({ error: 'Profile no encontrado', detalle: profileError && profileError.message });
     }
 
-    const plan = profile.plan || 'free';
+    const plan = profile.plan || 'pro';
     const limite = LIMITES_IA[plan] || 0;
 
     // Validar payload temprano
@@ -287,41 +287,9 @@ module.exports = async function handler(req, res) {
     }
 
     if (esProcesarLista) {
-      // Validar límite de listas PROCESADAS POR MES según el plan.
-      // - Free: 2 procesamientos/mes (reset cada 30 días)
-      // - Pro y Max: ilimitado
-      // Solo cuentan los procesamientos NUEVOS, no las re-ediciones de una lista
-      // existente. El procesamiento "real" es 'procesar_lista' (foto/imagen) o el
-      // primer chunk de un PDF — el frontend manda `proveedor_id` y `nueva_lista`
-      // para que sepamos si es la primera llamada del job (incrementamos solo ahí).
-      const limiteListasMes = LIMITES_LISTAS_MES[plan] || LIMITES_LISTAS_MES.free;
-      if (plan === 'free' && tipo === 'procesar_lista') {
-        // Reset del contador si pasaron 30 días
-        let listasUsadas = profile.listas_procesadas_mes || 0;
-        const ahoraL = new Date();
-        const resetL = new Date(profile.listas_procesadas_reset || 0);
-        const diasDesdeResetL = (ahoraL - resetL) / (1000 * 60 * 60 * 24);
-        if (diasDesdeResetL >= 30) {
-          listasUsadas = 0;
-          await sb.from('profiles').update({
-            listas_procesadas_mes: 0,
-            listas_procesadas_reset: ahoraL.toISOString()
-          }).eq('id', userId);
-        }
-        if (listasUsadas >= limiteListasMes) {
-          return res.status(403).json({
-            error: 'Llegaste al límite de ' + limiteListasMes + ' listas por mes del plan Free. Mejorá a Pro para listas ilimitadas.',
-            codigo: 'LIMITE_LISTAS_FREE_MES',
-            usadas: listasUsadas,
-            limite: limiteListasMes
-          });
-        }
-        // Incrementar contador (no awaitamos, para no demorar respuesta)
-        sb.from('profiles').update({
-          listas_procesadas_mes: listasUsadas + 1
-        }).eq('id', userId).then(() => {}).catch(e => console.error('Error incrementando contador listas:', e));
-      }
-      // Pro y Max: ilimitado, no validamos cuota de IA
+      // Límite de listas PROCESADAS POR MES según el plan: Pro y Max, ilimitado.
+      const limiteListasMes = LIMITES_LISTAS_MES[plan] || LIMITES_LISTAS_MES.pro;
+      // No se valida cuota de listas: todos los planes son ilimitados.
     } else {
       // Tipo 'chat' (asistente IA): valida cuota normal
       if (limite === 0) {

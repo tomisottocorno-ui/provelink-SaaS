@@ -13,7 +13,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
-const LIMITES_EMPLEADOS = { free: 0, pro: 2, business: 10 };
+const LIMITES_EMPLEADOS = { pro: 2, business: 10 };
 const PERMISOS_VALIDOS = ['proveedores', 'listas', 'pedido', 'historial', 'verificar', 'ia', 'produccion'];
 
 module.exports = async function handler(req, res) {
@@ -62,7 +62,7 @@ module.exports = async function handler(req, res) {
       return res.status(404).json({ error: 'Profile no encontrado' });
     }
 
-    const plan = profile.plan || 'free';
+    const plan = profile.plan || 'pro';
     const limite = LIMITES_EMPLEADOS[plan] || 0;
 
     // ============================ GET — listar empleados ============================

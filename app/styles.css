@@ -867,27 +867,6 @@ h3 { font-size: 18px; }
 .empty .btn { margin-top: 14px; }
 
 /* ============================================================
-   PLAN BANNER
-   ============================================================ */
-.plan-banner {
-  background: var(--surface);
-  border: 1px solid var(--border-hi);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--r-md);
-  padding: 14px 16px;
-  margin-bottom: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-}
-.plan-banner.warn { border-left-color: var(--gold); }
-.plan-banner-txt { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
-.plan-banner-txt strong { color: var(--text); font-weight: 600; }
-
-/* ============================================================
    PROV-GRID RESPONSIVE (re-applied after layout block)
    ============================================================ */
 @media (min-width: 1024px) { .prov-grid { grid-template-columns: repeat(2, 1fr); } }

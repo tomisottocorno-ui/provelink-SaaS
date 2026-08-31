@@ -84,12 +84,6 @@
       </button>
     </div>
 
-    <!-- Banner del plan -->
-    <div class="plan-banner" id="plan-banner" style="display:none;">
-      <div class="plan-banner-txt" id="plan-banner-txt"></div>
-      <button class="btn primary" onclick="abrirPlanes()">Mejorar</button>
-    </div>
-
     <!-- Tabs (solo mobile; en desktop quedan ocultas) -->
     <div class="tabs-nav">
       <button class="tab-btn active" data-tab="ingreso" onclick="cambiarTab('ingreso')">Inicio</button>
@@ -859,12 +853,6 @@ function renderHeader() {
   });
 }
 
-function renderPlanBanner() {
-  var banner = $('plan-banner');
-  var txt = $('plan-banner-txt');
-  banner.style.display = 'none';
-}
-
 // ============================================================
 // PROVEEDORES — CRUD
 // ============================================================
@@ -877,7 +865,6 @@ async function cargarProveedores() {
     if (error) throw error;
     proveedores = data || [];
     renderProveedores();
-    renderPlanBanner();
   } catch(e) {
     console.error('cargarProveedores', e);
     showToast('Error al cargar proveedores', 'error');
@@ -2863,11 +2850,7 @@ function aplicarPermisosUI() {
   if (menuEmp) menuEmp.style.display = esOwner() ? '' : 'none';
   if (menuPlan) menuPlan.style.display = esOwner() ? '' : 'none';
 
-  // 3) Banner del plan: solo owner
-  var banner = $('plan-banner');
-  if (banner && esEmpleado()) banner.style.display = 'none';
-
-  // 4) Si el empleado NO puede editar negocio (siempre), deshabilitar inputs de config
+  // 3) Si el empleado NO puede editar negocio (siempre), deshabilitar inputs de config
   //    El email queda visible pero solo lectura
   if (esEmpleado()) {
     ['config-nombre', 'config-telefono'].forEach(function(id) {

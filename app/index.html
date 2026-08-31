@@ -751,6 +751,33 @@ document.addEventListener('click', function(e) {
 // ============================================================
 // AUTH
 // ============================================================
+// Devuelve un access_token vigente para hablar con /api/.
+//
+// El token de Supabase dura ~1 hora. `sesion` se captura una sola vez al abrir
+// la página y nunca se vuelve a mirar, así que con la pestaña abierta un rato
+// largo quedaba con un token vencido. Lo confuso es que la app SEGUÍA
+// funcionando: las consultas directas a Supabase andan igual porque el cliente
+// refresca el token solo, por dentro. Lo único que fallaba eran las llamadas a
+// /api/, que mandaban a mano el token viejo y el backend las rechazaba con
+// "Token inválido" — cargar una lista, el asistente y la gestión de empleados.
+//
+// getSession() devuelve el token vigente y lo renueva si hace falta.
+async function tokenActual() {
+  try {
+    var r = await supabase.auth.getSession();
+    var s = r && r.data && r.data.session;
+    if (s && s.access_token) {
+      sesion = s;              // dejar el global al día para el resto del código
+      return s.access_token;
+    }
+  } catch(e) {
+    console.warn('tokenActual: no se pudo refrescar', e);
+  }
+  // Sin sesión utilizable: se devuelve lo último que había. Si tampoco sirve,
+  // el backend responde 401 y el usuario ve el aviso de sesión vencida.
+  return sesion ? sesion.access_token : null;
+}
+
 async function verificarSesion() {
   try {
     var { data: { session }, error } = await supabase.auth.getSession();
@@ -3415,7 +3442,7 @@ async function detectarColumnasPDF(muestraTexto, proveedorId) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + sesion.access_token
+      'Authorization': 'Bearer ' + (await tokenActual())
     },
     body: JSON.stringify({
       tipo: 'detectar_columnas',
@@ -3618,7 +3645,7 @@ async function extraerChunkConClaude(chunkLineas, nombreColumna, ejemploColumna,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + sesion.access_token
+      'Authorization': 'Bearer ' + (await tokenActual())
     },
     body: JSON.stringify({
       tipo: 'procesar_chunk',
@@ -3696,7 +3723,7 @@ async function llamarClaudeProcesarLista(payload) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + sesion.access_token
+      'Authorization': 'Bearer ' + (await tokenActual())
     },
     body: JSON.stringify(payload)
   });
@@ -4061,7 +4088,7 @@ async function _fetchClaude(payload) {
   try {
     var resp = await fetch('/api/claude', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (await tokenActual()) },
       body: JSON.stringify(payload)
     });
     var ct = (resp.headers.get('content-type') || '').toLowerCase();
@@ -4075,6 +4102,13 @@ async function _fetchClaude(payload) {
       data = { error: 'Respuesta no-JSON', detalle: txt.slice(0, 200) };
     }
     _sumarCostoLista(data, payload && payload.tipo);
+    // Si ni siquiera con el token refrescado hay sesión válida, no tiene sentido
+    // mostrar "Token inválido": el usuario no puede hacer nada con eso. El caso
+    // real es que la sesión venció del todo y hay que volver a entrar.
+    if (resp.status === 401) {
+      data.error = 'Tu sesión venció. Cerrá sesión y volvé a entrar para seguir.';
+      data.codigo = 'SESION_VENCIDA';
+    }
     return { resp: resp, data: data };
   } finally {
     _claudeRelease();
@@ -4480,7 +4514,7 @@ async function buscarRangoWebCliente(tipoProducto, unidadBase) {
     if (_WEB_SEARCH_DISABLED) return null;
     var resp = await fetch('/api/claude', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (await tokenActual()) },
       body: JSON.stringify({
         tipo: 'buscar_rango_web',
         tipo_producto: tipoProducto,
@@ -5467,7 +5501,7 @@ async function cargarEmpleados() {
   try {
     var resp = await fetch('/api/empleados', {
       method: 'GET',
-      headers: { 'Authorization': 'Bearer ' + sesion.access_token }
+      headers: { 'Authorization': 'Bearer ' + (await tokenActual()) }
     });
     var data = await resp.json();
     if (!resp.ok) throw new Error(data.error || 'Error cargando empleados');
@@ -5576,7 +5610,7 @@ async function guardarEmpleado() {
     }
     var resp = await fetch(url, {
       method: method,
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (await tokenActual()) },
       body: JSON.stringify(body)
     });
     var data = await resp.json();
@@ -5601,7 +5635,7 @@ async function borrarEmpleadoActual() {
   try {
     var resp = await fetch('/api/empleados?id=' + encodeURIComponent(empleadoEditandoId), {
       method: 'DELETE',
-      headers: { 'Authorization': 'Bearer ' + sesion.access_token }
+      headers: { 'Authorization': 'Bearer ' + (await tokenActual()) }
     });
     var data = await resp.json();
     if (!resp.ok) throw new Error(data.error || 'Error eliminando empleado');
@@ -6056,7 +6090,7 @@ async function expandirQueryIA(q) {
   try {
     var resp = await fetch('/api/claude', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (await tokenActual()) },
       body: JSON.stringify({ tipo: 'expandir_query', max_tokens: 150, messages: [{ role: 'user', content: prompt }] })
     });
     var data = await resp.json();
@@ -7677,7 +7711,7 @@ async function enviarMensajeAI() {
   try {
     var resp = await fetch('/api/claude', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sesion.access_token },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (await tokenActual()) },
       body: JSON.stringify({
         tipo: 'chat',
         max_tokens: 1500,
@@ -7690,7 +7724,8 @@ async function enviarMensajeAI() {
     var data = await resp.json();
     if (!resp.ok) {
       var msg = data.error || 'Error';
-      if (data.codigo === 'PLAN_SIN_IA') msg = 'Tu plan no incluye el asistente IA. Mejorá a Max.';
+      if (resp.status === 401) msg = 'Tu sesión venció. Cerrá sesión y volvé a entrar para seguir.';
+      else if (data.codigo === 'PLAN_SIN_IA') msg = 'Tu plan no incluye el asistente IA. Mejorá a Max.';
       else if (data.codigo === 'CUOTA_IA_AGOTADA') msg = 'Llegaste al límite mensual de consultas IA (' + data.limite + ').';
       renderMensajeAI('assistant', msg);
       aiHistorial.pop();

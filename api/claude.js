@@ -35,8 +35,6 @@ const TIPOS_SONNET_SIN_THINKING = [];
 
 // Asistente IA: solo plan Max (business). Pro NO lo tiene.
 const LIMITES_IA = { pro: 0, business: 500 };
-// Listas procesadas por mes: Pro y Max ilimitado.
-const LIMITES_LISTAS_MES = { pro: 999, business: 999 };
 
 module.exports = async function handler(req, res) {
   // CORS (Vercel maneja same-origin si todo está en el mismo dominio,

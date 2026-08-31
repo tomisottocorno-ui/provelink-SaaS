@@ -786,11 +786,9 @@ section.block { padding: 120px 0; position: relative; }
 .plan::before {
   content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
 }
-.plan-free::before    { background: linear-gradient(90deg, transparent, var(--emerald), transparent); }
 .plan-pro::before     { background: linear-gradient(90deg, transparent, var(--blue-bright), transparent); height: 3px; }
 .plan-max::before     { background: linear-gradient(90deg, transparent, var(--gold-bright), transparent); }
 
-.plan-free  { --tier: var(--emerald);        --tier-bright: var(--emerald-bright);   --tier-glow: var(--emerald-glow); }
 .plan-pro   { --tier: var(--blue);           --tier-bright: var(--blue-bright);      --tier-glow: var(--blue-glow); }
 .plan-max   { --tier: var(--gold);           --tier-bright: var(--gold-bright);      --tier-glow: var(--gold-glow); }
 
@@ -872,7 +870,6 @@ section.block { padding: 120px 0; position: relative; }
   box-shadow: 0 8px 24px -8px var(--gold-glow);
 }
 .plan-max .plan-cta:hover { box-shadow: 0 12px 32px -8px var(--gold-glow); transform: translateY(-1px); }
-.plan-free .plan-cta:hover { border-color: rgba(16,185,129,0.4); }
 
 .plan-features { list-style: none; flex: 1; }
 .plan-features li {
@@ -1459,34 +1456,11 @@ footer {
   <div class="wrap">
     <div class="section-head reveal">
       <div class="section-eyebrow" style="justify-content:center;">Planes</div>
-      <h2>Tres planes. <span class="italic">Empezás gratis.</span></h2>
-      <p>El plan Free no pide tarjeta ni vence. Pasás a Pro o Max solo si necesitás más proveedores, listas o funciones.</p>
+      <h2>Dos planes. <span class="italic">Sin letra chica.</span></h2>
+      <p>Pro cubre todo el día a día. Max suma métricas y el asistente IA para equipos que ya escalaron.</p>
     </div>
 
     <div class="plans reveal">
-      <!-- FREE -->
-      <article class="plan plan-free">
-        <div class="plan-head">
-          <span class="plan-dot"></span>
-          <span class="plan-name">Free</span>
-        </div>
-        <p class="plan-headline">Para probar la herramienta con tus propias listas.</p>
-        <div class="plan-price">
-          <span class="currency">$</span>
-          <span class="amount">0</span>
-          <span class="per">/ mes</span>
-        </div>
-        <div class="plan-bill">Sin tarjeta · Sin límite de tiempo</div>
-        <a href="/login" class="plan-cta">Empezar gratis <span class="arrow">→</span></a>
-        <ul class="plan-features">
-          <li><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span> Hasta 2 proveedores</li>
-          <li><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span> 2 listas de precios por mes</li>
-          <li><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span> Comparador de precios completo</li>
-          <li><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span> Pedidos por WhatsApp</li>
-          <li><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span> Soporte por email</li>
-        </ul>
-      </article>
-
       <!-- PRO -->
       <article class="plan plan-pro">
         <span class="plan-pop">Recomendado</span>
@@ -1551,7 +1525,7 @@ footer {
     <div class="faq-wrap reveal">
       <div class="faq-item">
         <button class="faq-q">¿Necesito tarjeta de crédito para empezar?<span class="plus"></span></button>
-        <div class="faq-a"><div class="faq-a-inner">No. El plan Free es de verdad gratis y no pide tarjeta. Solo te pedimos tarjeta cuando decidís pasar a Pro o Max — y siempre podés volver a Free.</div></div>
+        <div class="faq-a"><div class="faq-a-inner">No pedimos tarjeta para arrancar. Te registrás, probás la herramienta, y coordinamos el cobro de tu plan por WhatsApp o email.</div></div>
       </div>
       <div class="faq-item">
         <button class="faq-q">¿En qué formatos puedo subir las listas de precios?<span class="plus"></span></button>
@@ -1567,11 +1541,11 @@ footer {
       </div>
       <div class="faq-item">
         <button class="faq-q">¿Cómo cancelo el plan si me arrepiento?<span class="plus"></span></button>
-        <div class="faq-a"><div class="faq-a-inner">En dos clicks desde tu cuenta, sin llamar a nadie ni mandar mails. Te queda el plan activo hasta el final del período que ya pagaste, y después volvés a Free sin perder tus listas.</div></div>
+        <div class="faq-a"><div class="faq-a-inner">Nos escribís (el botón te arma el mail) y procesamos la baja el mismo día. No perdés ninguno de tus datos aunque canceles.</div></div>
       </div>
       <div class="faq-item">
         <button class="faq-q">¿Puedo invitar a mi equipo a usar la misma cuenta?<span class="plus"></span></button>
-        <div class="faq-a"><div class="faq-a-inner">En el plan Max sí — hasta 10 usuarios con roles diferenciados (compras, gerencia, contabilidad). En Free y Pro la cuenta es individual.</div></div>
+        <div class="faq-a"><div class="faq-a-inner">En el plan Max sí — hasta 10 usuarios con roles diferenciados (compras, gerencia, contabilidad). En Pro la cuenta es individual.</div></div>
       </div>
       <div class="faq-item">
         <button class="faq-q">¿Funciona si tengo muchos proveedores?<span class="plus"></span></button>

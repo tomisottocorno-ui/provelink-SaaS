@@ -1,7 +1,7 @@
 # ProveLink SaaS
 
 Plataforma de gestión de proveedores, pedidos y producción para comercios.
-Multi-tenant, con planes Free / Pro / Business y asistente IA integrado.
+Multi-tenant, con planes Pro / Business y asistente IA integrado.
 
 ---
 
@@ -95,11 +95,10 @@ provelink-saas/
 
 | Plan     | Precio       | Proveedores | Listas | Consultas IA/mes |
 |----------|--------------|-------------|--------|------------------|
-| Free     | $0           | 3           | 1      | 0                |
 | Pro      | $20 USD/mes  | Ilimitado   | ∞      | 150              |
 | Business | $100 USD/mes | Ilimitado   | ∞      | 500              |
 
-El procesamiento de listas (pipeline IA) **no consume cuota de consultas** — tiene su propio límite por plan (free = 1 lista). El asistente IA conversacional sí consume cuota.
+El procesamiento de listas (pipeline IA) **no consume cuota de consultas** — tiene su propio límite por plan (ver tabla arriba). El asistente IA conversacional sí consume cuota.
 
 El cambio de plan se gestiona manualmente: el admin actualiza `plan` en `profiles`.
 
@@ -142,7 +141,7 @@ ANTHROPIC_API_KEY         = sk-ant-...
 
 ### 4. Primer usuario
 
-Registrarse desde `/login` → Supabase crea automáticamente un registro en `profiles` con `plan = 'free'`.
+Registrarse desde `/login` → Supabase crea automáticamente un registro en `profiles` con `plan = 'pro'`.
 Para dar plan Pro/Business: Supabase → Table Editor → `profiles` → editar campo `plan`.
 
 ---
@@ -406,7 +405,7 @@ Cuando Claude devuelve 429 (rate limit), 529 (overload) o 503 (service unavailab
 - **Paleta base**: `--bg: #050507` (midnight) hasta `--bg-elev3: #1d1d28`
 - **Fuentes**: Geist (sans), Instrument Serif (display), JetBrains Mono (mono)
 - **Acento principal**: `--accent: #3b82f6` (blue)
-- **Tri-color**: `--emerald` (Free), `--accent` (Pro), `--gold` (Business)
+- **Bi-color**: `--accent` (Pro), `--gold` (Business)
 - **Glass**: `backdrop-filter: blur(20px)` en cards, header, sidebar, modales
 - **Fondo atmosférico**: `body::before` — mesh gradient animado; `body::after` — grid overlay sutil
 - **Radios**: `--r-sm: 8px` / `--r-md: 12px` / `--r-lg: 18px` / `--r-xl: 28px`

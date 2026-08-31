@@ -103,7 +103,7 @@ function crearSupabaseFake(tablas, log, opciones) {
 }
 
 // ── Monta la app ────────────────────────────────────────────────────────────
-// seed: { profile, proveedores, listas_precios, historial_pedidos, pedidos_programados,
+// seed: { profile, empleados, proveedores, listas_precios, historial_pedidos, pedidos_programados,
 //         __columnasFaltantes, email }
 // seed.email: qué email devuelve auth.getSession() (sesion.user.email en app/index.html).
 // Default 'test@test.com' — el mismo que se usaba antes de que existiera esta opción,
@@ -118,7 +118,11 @@ async function montarApp(seed) {
 
   var tablas = {
     profiles: [Object.assign({ id: 'user-1', plan: 'business', consultas_ia_mes: 0, listas_procesadas_mes: 0, recorrido_visto: true }, seed.profile || {})],
-    empleados: [],
+    // seed.empleados: filas de la tabla `empleados`. Para simular que la
+    // sesión actual (siempre user-1, ver crearSupabaseFake) ES un empleado,
+    // hace falta una fila con empleado_id:'user-1' — cargarProfile() la busca
+    // por ese campo y, si la encuentra, arma empleadoInfo (ver app/index.html).
+    empleados: seed.empleados || [],
     proveedores: seed.proveedores || [],
     listas_precios: seed.listas_precios || [],
     historial_pedidos: seed.historial_pedidos || [],

@@ -480,6 +480,35 @@ function itemPorNombre(app, frag) {
     ok('una cuenta normal NO lo ve', !itemNormal || itemNormal.style.display === 'none');
   }
 
+  seccion('Banner de plan: un empleado no lo ve, aunque el dueño esté en prueba/vencido');
+  {
+    // seed.empleados con empleado_id:'user-1' (la sesión simulada siempre es
+    // user-1, ver crearSupabaseFake) hace que cargarProfile() arme
+    // empleadoInfo y esEmpleado() pase a ser true. owner_id también apunta a
+    // 'user-1' a propósito: así effectiveUserId() sigue resolviendo a la
+    // misma fila de `profiles` que seedeamos con plan_estado 'prueba', sin
+    // necesitar una segunda fila de perfil separada para el dueño.
+    var enDiasIso = function(n) { return new Date(Date.now() + n * 24 * 60 * 60 * 1000).toISOString(); };
+    var empleadoSeed = [{ empleado_id: 'user-1', owner_id: 'user-1', nombre: 'Empleado Test', permisos: ['pedido'], activo: true }];
+
+    var appPrueba = await montarApp({
+      profile: { plan: 'business', plan_estado: 'prueba', plan_vence: enDiasIso(5) },
+      empleados: empleadoSeed
+    });
+    await appPrueba.esperar(80);
+    ok('esEmpleado() da true con la sesión simulada', appPrueba.win.esEmpleado() === true);
+    ok('el banner queda oculto para un empleado aunque el dueño esté en prueba',
+       appPrueba.doc.getElementById('plan-banner').style.display === 'none');
+
+    var appVencido = await montarApp({
+      profile: { plan: 'business', plan_estado: 'vencido' },
+      empleados: empleadoSeed
+    });
+    await appVencido.esperar(80);
+    ok('el banner también queda oculto para un empleado con el dueño vencido',
+       appVencido.doc.getElementById('plan-banner').style.display === 'none');
+  }
+
   // ── RESUMEN ───────────────────────────────────────────────────────────────
   console.log('\n' + '═'.repeat(62));
   console.log(fallos === 0

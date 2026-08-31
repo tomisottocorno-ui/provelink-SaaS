@@ -956,6 +956,7 @@ function renderHeader() {
 
 function renderPlanBanner() {
   var banner = $('plan-banner');
+  if (esEmpleado()) { banner.style.display = 'none'; return; }
   var txt = $('plan-banner-txt');
   if (profile.plan_estado === 'prueba') {
     if (!profile.plan_vence) { banner.style.display = 'none'; return; }

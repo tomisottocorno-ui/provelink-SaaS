@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="/app/styles.css">
 <script src="/app/icons.js"></script>
+<script src="/app/tour.js"></script>
 </head>
 <body>
 
@@ -82,6 +83,12 @@
       <button class="menu-btn" onclick="toggleMenu()" aria-label="Menú">
         <span class="icon-slot" data-icon="kebab"></span>
       </button>
+    </div>
+
+    <!-- Banner del plan -->
+    <div class="plan-banner" id="plan-banner" style="display:none;">
+      <div class="plan-banner-txt" id="plan-banner-txt"></div>
+      <button class="btn primary" onclick="abrirPlanes()">Mejorar</button>
     </div>
 
     <!-- Tabs (solo mobile; en desktop quedan ocultas) -->
@@ -316,6 +323,8 @@
 <!-- Menú desplegable global (mobile: top-right, desktop: junto al sidebar-user) -->
 <div class="menu" id="menu">
   <div class="menu-item" id="menu-planes" onclick="abrirPlanes()"><span class="icon-slot" data-icon="star"></span> Cambiar plan</div>
+  <div class="menu-item" id="menu-recorrido" onclick="reabrirRecorrido()"><span class="icon-slot" data-icon="info"></span> Ver recorrido</div>
+  <div class="menu-item" id="menu-codigos-prueba" onclick="window.location.href='/app/admin-codigos.html'" style="display:none;"><span class="icon-slot" data-icon="lock"></span> Códigos de prueba</div>
   <div class="menu-item" id="menu-empleados" onclick="abrirEmpleados()"><span class="icon-slot" data-icon="user"></span> Empleados</div>
   <div class="menu-item" onclick="abrirConfig()"><span class="icon-slot" data-icon="settings"></span> Configuración</div>
   <div class="menu-divider"></div>
@@ -839,6 +848,71 @@ async function cargarProfile() {
   }
 }
 
+// ============================================================
+// PRUEBA DE 15 DÍAS
+// ============================================================
+// Sin cron: se resuelve solo, la primera vez que se abre la app después de
+// que venció. Un único update, idempotente — si dos pestañas lo disparan a
+// la vez, las dos mandan el mismo valor, no pasa nada raro.
+async function chequearVencimientoPrueba() {
+  if (profile.plan_estado !== 'prueba') return;
+  if (!profile.plan_vence || new Date(profile.plan_vence) > new Date()) return;
+
+  try {
+    var { error } = await supabase
+      .from('profiles')
+      .update({ plan_estado: 'vencido' })
+      .eq('id', profile.id);
+    if (error) throw error;
+    profile.plan_estado = 'vencido';
+  } catch(e) {
+    console.error('chequearVencimientoPrueba', e);
+  }
+}
+
+// Chequeo compartido por los tres puntos donde se "crea valor nuevo"
+// (agregar proveedor, cargar lista, confirmar pedido). Ver también el
+// respaldo real del lado del servidor: sql/MIGRACION_DEMO_TRIAL.sql.
+function bloqueadoPorVencimiento() {
+  if (profile.plan_estado !== 'vencido') return false;
+  showToast('Tu prueba terminó. Elegí un plan para seguir.', 'error');
+  return true;
+}
+
+// ============================================================
+// RECORRIDO GUIADO
+// ============================================================
+function pasosRecorrido() {
+  return [
+    { selector: '#side-link-prov', titulo: 'Tus proveedores',
+      texto: 'Acá cargás cada proveedor: nombre, teléfono, y si te cotiza por bulto o por kilo.' },
+    { selector: '#side-link-listas', titulo: 'Listas de precios',
+      texto: 'Subí la lista de cada proveedor: a mano, con la plantilla, o con IA leyendo el PDF, Excel o una foto.' },
+    { selector: '#side-link-pedido', titulo: 'Comparar y armar el pedido',
+      texto: 'El corazón de la app: buscás un producto y ves el precio de TODOS tus proveedores juntos, para elegir el más barato.' },
+    { selector: '#side-link-calendario', titulo: 'Calendario',
+      texto: 'Programá pedidos que se repiten: se arman solos en la fecha que elijas.' },
+    { selector: '#side-link-metricas', titulo: 'Métricas',
+      texto: 'El dashboard del plan Max: cuánto gastaste, con quién, y cómo evolucionan tus precios.' },
+    { selector: '#ai-fab', titulo: 'Asistente IA',
+      texto: 'Preguntale directo: "¿cuál es el dulce de leche más barato?" o "armame un pedido de harina y aceite".' }
+  ];
+}
+
+async function marcarRecorridoVisto() {
+  profile.recorrido_visto = true;
+  try {
+    await supabase.from('profiles').update({ recorrido_visto: true }).eq('id', profile.id);
+  } catch(e) {
+    console.error('marcarRecorridoVisto', e);
+  }
+}
+
+function reabrirRecorrido() {
+  $('menu').classList.remove('open');
+  Tour.iniciar(pasosRecorrido(), function() {});
+}
+
 async function cerrarSesion() {
   if (!confirm('¿Cerrar sesión?')) return;
   try {
@@ -880,6 +954,29 @@ function renderHeader() {
   });
 }
 
+function renderPlanBanner() {
+  var banner = $('plan-banner');
+  var txt = $('plan-banner-txt');
+  if (profile.plan_estado === 'prueba') {
+    if (!profile.plan_vence) { banner.style.display = 'none'; return; }
+    var dias = Math.max(0, Math.ceil((new Date(profile.plan_vence) - new Date()) / 86400000));
+    banner.classList.remove('warn');
+    banner.classList.remove('danger');
+    txt.innerHTML = '<strong>Prueba gratis</strong> · Te queda' + (dias === 1 ? '' : 'n') + ' ' +
+      dias + (dias === 1 ? ' día' : ' días');
+    banner.style.display = 'flex';
+    return;
+  }
+  if (profile.plan_estado === 'vencido') {
+    banner.classList.remove('warn');
+    banner.classList.add('danger');
+    txt.innerHTML = '<strong>Tu prueba terminó</strong> — elegí un plan para seguir';
+    banner.style.display = 'flex';
+    return;
+  }
+  banner.style.display = 'none';
+}
+
 // ============================================================
 // PROVEEDORES — CRUD
 // ============================================================
@@ -892,6 +989,7 @@ async function cargarProveedores() {
     if (error) throw error;
     proveedores = data || [];
     renderProveedores();
+    renderPlanBanner();
   } catch(e) {
     console.error('cargarProveedores', e);
     showToast('Error al cargar proveedores', 'error');
@@ -993,6 +1091,7 @@ async function subirLogoAStorage(file, proveedorId) {
 }
 
 function abrirModalProv() {
+  if (bloqueadoPorVencimiento()) return;
   var limite = LIMITES[profile.plan || 'pro'].proveedores;
   if (proveedores.length >= limite) {
     showToast('Llegaste al límite de tu plan. Mejorá para agregar más.', 'error');
@@ -2877,7 +2976,21 @@ function aplicarPermisosUI() {
   if (menuEmp) menuEmp.style.display = esOwner() ? '' : 'none';
   if (menuPlan) menuPlan.style.display = esOwner() ? '' : 'none';
 
-  // 3) Si el empleado NO puede editar negocio (siempre), deshabilitar inputs de config
+  // 2b) Códigos de prueba: solo para los admins de ProveLink (mismo email
+  // que auth.getSession() devuelve, igual que en renderPlanesGrid() y en
+  // admin-codigos.html).
+  var ADMINS_CODIGOS = ['luchivega1212@gmail.com', 'tomisottocorno@gmail.com'];
+  var menuCodigos = $('menu-codigos-prueba');
+  if (menuCodigos) {
+    var emailLogueado = (sesion && sesion.user && sesion.user.email) || '';
+    menuCodigos.style.display = ADMINS_CODIGOS.indexOf(emailLogueado) >= 0 ? 'flex' : 'none';
+  }
+
+  // 3) Banner del plan: solo owner
+  var banner = $('plan-banner');
+  if (banner && esEmpleado()) banner.style.display = 'none';
+
+  // 4) Si el empleado NO puede editar negocio (siempre), deshabilitar inputs de config
   //    El email queda visible pero solo lectura
   if (esEmpleado()) {
     ['config-nombre', 'config-telefono'].forEach(function(id) {
@@ -5234,6 +5347,7 @@ function borrarFilaPreview(idx) {
 // Guardar lista (con snapshot de la versión anterior)
 // ============================================================
 async function guardarLista() {
+  if (bloqueadoPorVencimiento()) return;
   var ficha = cargaActiva();
   if (!ficha) return;
   var proveedorId = ficha.proveedorId;
@@ -6744,6 +6858,7 @@ function actualizarBotonConfirmar() {
 }
 
 function confirmarPedido() {
+  if (bloqueadoPorVencimiento()) return;
   var ped = pedidoGet();
   var ids = Object.keys(ped.items || {}).filter(function(k) { return ped.items[k].qty > 0; });
   if (!ids.length) { showToast('El pedido está vacío'); return; }
@@ -7175,6 +7290,7 @@ function escapeHtml(s) {
     if (!ok) { window.location.href = '/login'; return; }
     ok = await cargarProfile();
     if (!ok) { window.location.href = '/login'; return; }
+    await chequearVencimientoPrueba();
     renderHeader();
     aplicarPermisosUI(); // esconder tabs/menu según rol y permisos
     await cargarProveedores();
@@ -7203,6 +7319,9 @@ function escapeHtml(s) {
     cambiarTab(tabInicial);
     $('loader').style.display = 'none';
     $('app-shell').style.display = 'flex';
+    if (!profile.recorrido_visto && !esEmpleado()) {
+      Tour.iniciar(pasosRecorrido(), marcarRecorridoVisto);
+    }
   } catch(e) {
     console.error('init error', e);
     window.location.href = '/login';

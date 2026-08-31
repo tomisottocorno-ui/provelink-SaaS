@@ -368,6 +368,118 @@ function itemPorNombre(app, frag) {
        app.db.historial_pedidos.length === 1, 'filas=' + app.db.historial_pedidos.length);
   }
 
+  // ── 9. PRUEBA DE 15 DÍAS: VENCIMIENTO ─────────────────────────────────────
+  seccion('Prueba de 15 días: transición a "vencido"');
+  {
+    var ayer = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    var app = await montarApp({
+      profile: { plan: 'business', plan_estado: 'prueba', plan_vence: ayer }
+    });
+    await app.esperar(80);
+
+    ok('el perfil local ya quedó en "vencido" tras cargar', app.win.profile.plan_estado === 'vencido');
+    ok('y se escribió en la base, no solo en memoria',
+       app.db.profiles[0].plan_estado === 'vencido', app.db.profiles[0].plan_estado);
+  }
+
+  seccion('Prueba de 15 días: mientras no venció, no toca nada');
+  {
+    var manana = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    var app = await montarApp({
+      profile: { plan: 'business', plan_estado: 'prueba', plan_vence: manana }
+    });
+    await app.esperar(80);
+
+    ok('sigue en "prueba"', app.win.profile.plan_estado === 'prueba');
+    ok('no se disparó ningún update de más',
+       app.dbLog.filter(function(l) { return l.tabla === 'profiles' && l.op === 'update'; }).length === 0);
+  }
+
+  seccion('Prueba de 15 días: el cartel');
+  {
+    var enDiasIso = function(n) { return new Date(Date.now() + n * 24 * 60 * 60 * 1000).toISOString(); };
+
+    var app1 = await montarApp({ profile: { plan: 'business', plan_estado: 'prueba', plan_vence: enDiasIso(6) } });
+    await app1.esperar(80);
+    var txt1 = app1.texto('#plan-banner-txt');
+    ok('en prueba activa, dice "Prueba gratis"', /prueba gratis/i.test(txt1), txt1);
+    ok('y menciona los días que quedan', /6/.test(txt1), txt1);
+
+    var app2 = await montarApp({ profile: { plan: 'business', plan_estado: 'vencido' } });
+    await app2.esperar(80);
+    var txt2 = app2.texto('#plan-banner-txt');
+    ok('vencido, dice que terminó', /termin/i.test(txt2), txt2);
+    ok('el botón para elegir plan sigue ahí (es el mismo de siempre)',
+       !!app2.doc.querySelector('#plan-banner button'));
+
+    var app3 = await montarApp({ profile: { plan: 'business', plan_estado: 'activo' } });
+    await app3.esperar(80);
+    ok('un plan Max activo normal no muestra ningún cartel de prueba',
+       app3.doc.getElementById('plan-banner').style.display === 'none');
+  }
+
+  seccion('Prueba vencida: no se puede seguir operando (pero sí ver lo que hay)');
+  {
+    var app = await montarApp({
+      profile: { plan: 'business', plan_estado: 'vencido' },
+      proveedores: [{ id: 'p1', user_id: 'user-1', nombre: 'Proveedor Test', telefono: '' }]
+    });
+    await app.esperar(80);
+
+    app.win.abrirModalProv();
+    ok('no abre el modal de nuevo proveedor', app.doc.getElementById('modal-prov').classList.contains('open') === false);
+    ok('avisa por qué', app.toastsTexto().some(function(t) { return /prueba/i.test(t); }));
+
+    ok('pero los proveedores que ya tenía se siguen viendo',
+       app.doc.querySelectorAll('.prov-card').length === 1);
+  }
+
+  seccion('Recorrido guiado: se dispara solo una vez, y se puede reabrir');
+  {
+    var app = await montarApp({ profile: { recorrido_visto: false } });
+    await app.esperar(80);
+
+    ok('aparece el overlay del tour en una cuenta nueva',
+       !!app.doc.querySelector('.tour-overlay'));
+
+    app.doc.getElementById('tour-saltar').click();
+    await app.esperar(30);
+
+    ok('al saltarlo, se marca como visto en la base',
+       app.db.profiles[0].recorrido_visto === true);
+    ok('y desaparece el overlay', !app.doc.querySelector('.tour-overlay'));
+
+    app.win.reabrirRecorrido();
+    ok('el menú lo puede reabrir en cualquier momento',
+       !!app.doc.querySelector('.tour-overlay'));
+  }
+
+  seccion('Recorrido guiado: una cuenta que ya lo vio, no lo ve de nuevo solo');
+  {
+    var app = await montarApp({ profile: { recorrido_visto: true } });
+    await app.esperar(80);
+    ok('no aparece el overlay', !app.doc.querySelector('.tour-overlay'));
+  }
+
+  seccion('Menú: acceso a códigos de prueba solo para admins');
+  {
+    // El email del usuario logueado sale de sesion.user.email (la sesión
+    // simulada de auth), no de profile.email — por eso se pasa como
+    // seed.email y no dentro de seed.profile. Ver comentario en harness.js.
+    // El ítem está siempre en el HTML (display:none por defecto) y la JS lo
+    // muestra o no según el email, así que getElementById() nunca da null:
+    // hay que mirar style.display, igual que se hace con plan-banner arriba.
+    var appAdmin = await montarApp({ email: 'luchivega1212@gmail.com' });
+    await appAdmin.esperar(80);
+    var itemAdmin = appAdmin.doc.getElementById('menu-codigos-prueba');
+    ok('un admin ve el ítem de menú', !!itemAdmin && itemAdmin.style.display !== 'none');
+
+    var appNormal = await montarApp({ email: 'un-negocio-cualquiera@gmail.com' });
+    await appNormal.esperar(80);
+    var itemNormal = appNormal.doc.getElementById('menu-codigos-prueba');
+    ok('una cuenta normal NO lo ve', !itemNormal || itemNormal.style.display === 'none');
+  }
+
   // ── RESUMEN ───────────────────────────────────────────────────────────────
   console.log('\n' + '═'.repeat(62));
   console.log(fallos === 0

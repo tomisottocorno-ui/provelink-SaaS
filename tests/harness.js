@@ -152,16 +152,14 @@ async function montarApp(seed) {
   win.alert = function() {};
 
   // Cargar scripts en el mismo orden que el navegador
-  // NOTA: app/index.html todavía NO carga app/tour.js (esa integración es una
-  // tarea aparte, en curso en paralelo) — por eso acá no se agrega. Cuando esa
-  // tarea aterrice y app/index.html sume el <script src="/app/tour.js">, este
-  // harness tiene que sumar la misma carga aquí, en el mismo orden.
   var icons = fs.readFileSync(path.join(RAIZ, 'app/icons.js'), 'utf8');
+  var tour = fs.readFileSync(path.join(RAIZ, 'app/tour.js'), 'utf8');
   var pipeline = fs.readFileSync(path.join(RAIZ, 'app/pipeline.js'), 'utf8');
   var inline = (html.match(/<script>([\s\S]*?)<\/script>/) || [])[1];
   if (!inline) throw new Error('No encontré el script inline de index.html');
 
   win.eval(icons);
+  win.eval(tour);
   win.eval(pipeline);
   win.eval(inline);
 

@@ -3036,8 +3036,7 @@ function renderTabsCargas() {
   });
   html += '<button class="carga-tab-add" onclick="nuevaCargaTab()" title="Cargar otra lista">+</button>';
   cont.innerHTML = html;
-  // Una sola pestaña: no tiene sentido la barra salvo que el usuario pueda sumar más
-  cont.style.display = (cargas.length <= 1) ? 'none' : 'flex';
+  cont.style.display = 'flex';
 }
 
 // Renderiza el cuerpo del modal (selector + carga + preview) según la ficha activa

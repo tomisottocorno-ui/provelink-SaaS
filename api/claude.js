@@ -97,30 +97,11 @@ module.exports = async function handler(req, res) {
     }
 
     // 3) Cargar profile del usuario (siempre el del OWNER).
-    // Si las columnas nuevas (listas_procesadas_*) no existen porque no se corrió
-    // la migración SQL v2, hacemos un fallback al select básico para no romper.
-    let profile = null;
-    let profileError = null;
-    {
-      const r1 = await sb
-        .from('profiles')
-        .select('plan, plan_estado, consultas_ia_mes, consultas_ia_reset, listas_procesadas_mes, listas_procesadas_reset')
-        .eq('id', userId)
-        .single();
-      if (r1.error && /listas_procesadas_/.test(r1.error.message || '')) {
-        // Columnas nuevas no existen aún → fallback sin ellas
-        const r2 = await sb
-          .from('profiles')
-          .select('plan, plan_estado, consultas_ia_mes, consultas_ia_reset')
-          .eq('id', userId)
-          .single();
-        profile = r2.data;
-        profileError = r2.error;
-      } else {
-        profile = r1.data;
-        profileError = r1.error;
-      }
-    }
+    const { data: profile, error: profileError } = await sb
+      .from('profiles')
+      .select('plan, plan_estado, consultas_ia_mes, consultas_ia_reset')
+      .eq('id', userId)
+      .single();
     if (profileError || !profile) {
       console.error('Profile error:', profileError);
       return res.status(404).json({ error: 'Profile no encontrado', detalle: profileError && profileError.message });
@@ -284,11 +265,9 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    if (esProcesarLista) {
-      // Límite de listas PROCESADAS POR MES según el plan: Pro y Max, ilimitado.
-      // No se valida cuota de listas: todos los planes son ilimitados.
-    } else {
-      // Tipo 'chat' (asistente IA): valida cuota normal
+    // Las listas (procesar_lista, etc.) no consumen cuota de IA: Pro y Max son
+    // ilimitados para eso. Solo el 'chat' (asistente IA) valida cuota.
+    if (!esProcesarLista) {
       if (limite === 0) {
         return res.status(403).json({
           error: 'Tu plan actual no incluye asistente IA. Mejorá a Max para usarlo.',

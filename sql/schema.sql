@@ -44,6 +44,9 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
+-- Migración: recorrido guiado (prueba de 15 días) — si ya lo vio, no repetírselo
+alter table public.profiles add column if not exists recorrido_visto boolean not null default false;
+
 
 -- ============================================================================
 -- TABLA: proveedores
@@ -270,6 +273,93 @@ alter table public.profiles add column if not exists listas_procesadas_reset tim
 
 -- ID de preapproval de Mercado Pago (suscripción recurrente)
 alter table public.profiles add column if not exists mp_preapproval_id text;
+
+
+-- ============================================================================
+-- PRUEBA GRATUITA DE 15 DÍAS: bloqueo de escritura al vencer
+-- ============================================================================
+-- `plan_estado` ya existía arriba y no tiene check constraint (es un `text`
+-- con un comentario documentando los valores esperados), así que sumarle
+-- 'prueba' y 'vencido' no necesita ningún ALTER sobre esa columna, solo hay
+-- que empezar a escribirlos y a leerlos.
+
+-- SECURITY DEFINER porque el trigger tiene que poder leer `plan_estado` del
+-- DUEÑO de la fila (profiles.id = new.user_id), y ese dueño puede ser distinto
+-- de quien está autenticado ahora mismo (un empleado inserta con el user_id
+-- del owner). La RLS de `profiles` ("los usuarios ven su propio profile") le
+-- taparía la lectura a la sesión del empleado si no fuera security definer.
+create or replace function public.bloquear_si_prueba_vencida()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_estado text;
+begin
+  select plan_estado into v_estado from public.profiles where id = new.user_id;
+  if v_estado = 'vencido' then
+    raise exception 'Tu prueba terminó. Elegí un plan para seguir cargando.';
+  end if;
+  return new;
+end;
+$$;
+
+-- `proveedores`: solo INSERT. Editar uno que ya existe (cambiarle el teléfono,
+-- por ejemplo) no es "crear valor nuevo", no hace falta bloquearlo.
+drop trigger if exists trg_bloquear_proveedor_vencido on public.proveedores;
+create trigger trg_bloquear_proveedor_vencido
+  before insert on public.proveedores
+  for each row execute function public.bloquear_si_prueba_vencida();
+
+-- `listas_precios`: INSERT *y* UPDATE. Tiene `unique(proveedor_id)` — una sola
+-- fila por proveedor — así que recargar la lista de un proveedor que ya tiene
+-- una (el caso más común, "subí la lista actualizada del mes") es un UPDATE,
+-- no un INSERT. Si el trigger solo mirara INSERT, dejaría pasar justo la
+-- acción que más importa bloquear.
+drop trigger if exists trg_bloquear_lista_vencida on public.listas_precios;
+create trigger trg_bloquear_lista_vencida
+  before insert or update on public.listas_precios
+  for each row execute function public.bloquear_si_prueba_vencida();
+
+
+-- ============================================================================
+-- TABLA: codigos_prueba (códigos de un solo uso para activar la prueba de 15 días)
+-- ============================================================================
+-- Reemplaza el link fijo `?prueba=1` por códigos únicos por negocio. Cada
+-- código se puede reclamar una sola vez (columna `usado`) — el reclamo real
+-- lo hace api/reclamar-codigo.js con la service_role key, nunca el cliente
+-- directo, así que no hace falta una política de UPDATE para `authenticated`.
+
+create table if not exists public.codigos_prueba (
+  id uuid default gen_random_uuid() primary key,
+  codigo text unique not null,
+  nota text,
+  usado boolean default false not null,
+  usado_por uuid references auth.users(id),
+  usado_en timestamptz,
+  creado_por text not null,
+  creado timestamptz default now() not null
+);
+
+alter table public.codigos_prueba enable row level security;
+
+-- Solo Luchi y Tomi pueden ver la lista de códigos.
+drop policy if exists "Codigos prueba: solo admins ven" on public.codigos_prueba;
+create policy "Codigos prueba: solo admins ven"
+  on public.codigos_prueba for select
+  using (auth.jwt() ->> 'email' in ('luchivega1212@gmail.com', 'tomisottocorno@gmail.com'));
+
+-- Solo Luchi y Tomi pueden generar códigos nuevos.
+drop policy if exists "Codigos prueba: solo admins crean" on public.codigos_prueba;
+create policy "Codigos prueba: solo admins crean"
+  on public.codigos_prueba for insert
+  with check (auth.jwt() ->> 'email' in ('luchivega1212@gmail.com', 'tomisottocorno@gmail.com'));
+
+-- A propósito, NO hay política de UPDATE ni DELETE para `authenticated` — el
+-- único UPDATE (marcar usado) pasa por el endpoint de servidor, que usa la
+-- service_role key y por lo tanto bypassea RLS. Nadie puede marcar un código
+-- como usado (o "des-usarlo") desde el cliente, ni siquiera un admin.
 
 
 -- ============================================================================

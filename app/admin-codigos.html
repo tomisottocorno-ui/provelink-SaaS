@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>ProveLink — Códigos de prueba</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22white%22><rect width=%2224%22 height=%2224%22 rx=%226%22/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/app/styles.css">
+<script src="/app/icons.js"></script>
+</head>
+<body>
+
+<div class="admin-cargando" id="cargando">Cargando…</div>
+
+<div class="admin-wrap" id="admin-wrap" style="display:none;">
+  <header class="admin-header">
+    <div class="admin-header-title">
+      <span class="icon-slot" data-icon="lock"></span>
+      <h1>Códigos de prueba</h1>
+    </div>
+    <a href="/app" class="btn">
+      <span class="icon-slot" data-icon="arrowLeft"></span>
+      Volver a la app
+    </a>
+  </header>
+
+  <section class="admin-generar">
+    <input type="text" id="input-nota" placeholder="¿Para qué negocio es? (opcional)">
+    <button type="button" class="btn primary" id="btn-generar" onclick="generarCodigo()">
+      <span class="icon-slot" data-icon="plus"></span>
+      Generar código nuevo
+    </button>
+  </section>
+
+  <div id="link-generado" class="admin-link-generado" style="display:none;">
+    <span class="icon-slot" data-icon="checkCircle"></span>
+    <span id="link-generado-texto" class="admin-link-generado-texto"></span>
+    <button type="button" class="btn btn-sm" onclick="copiarLink(ultimoLinkGenerado)">Copiar link</button>
+  </div>
+
+  <div class="admin-tabla-wrap">
+    <table class="admin-tabla">
+      <thead>
+        <tr><th>Nota</th><th>Código</th><th>Estado</th><th>Creado</th><th>Usado</th><th></th></tr>
+      </thead>
+      <tbody id="tabla-codigos-body"></tbody>
+    </table>
+    <div class="admin-tabla-vacio" id="tabla-vacio" style="display:none;">Todavía no generaste ningún código.</div>
+  </div>
+</div>
+
+<!-- Supabase JS -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// Solo Luchi y Tomi pueden generar y ver códigos de prueba (mismo criterio
+// que las políticas RLS de la tabla codigos_prueba en sql/schema.sql).
+var ADMINS = ['luchivega1212@gmail.com', 'tomisottocorno@gmail.com'];
+
+// =========================================================
+// CONFIG — mismas credenciales que usa app/login.html
+// =========================================================
+var SUPABASE_URL = 'https://himtrizetvkywrtperqu.supabase.co';
+var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhpbXRyaXpldHZreXdydHBlcnF1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4NjAxODgsImV4cCI6MjA5NDQzNjE4OH0.MIuFHZmJMxVYZmJ3SXBgKumw9XYLrhNwHNlzfNgKMVs';
+
+var supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+var sesion = null;
+var ultimoLinkGenerado = '';
+
+function $(id) { return document.getElementById(id); }
+
+function generarCadenaAleatoria(largo) {
+  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  var out = '';
+  for (var i = 0; i < largo; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+  return out;
+}
+
+async function verificarAcceso() {
+  var { data } = await supabase.auth.getSession();
+  var session = data && data.session;
+  if (!session || !session.user || ADMINS.indexOf(session.user.email) < 0) {
+    window.location.href = '/login';
+    return false;
+  }
+  sesion = session;
+  return true;
+}
+
+async function cargarCodigos() {
+  var { data, error } = await supabase
+    .from('codigos_prueba')
+    .select('*')
+    .order('creado', { ascending: false });
+  if (error) { console.error('cargarCodigos', error); return; }
+  renderTabla(data || []);
+}
+
+function renderTabla(codigos) {
+  var body = $('tabla-codigos-body');
+  var vacio = $('tabla-vacio');
+  vacio.style.display = codigos.length ? 'none' : 'block';
+  body.innerHTML = codigos.map(function(c) {
+    var estado = c.usado
+      ? '<span class="badge badge-usado">Usado</span>'
+      : '<span class="badge badge-disponible">Disponible</span>';
+    var link = window.location.origin + '/login?prueba=' + c.codigo;
+    var boton = c.usado ? '' : '<button type="button" class="btn btn-sm" onclick="copiarLink(\'' + escapeAtributoJs(link) + '\')">Copiar link</button>';
+    return '<tr>' +
+      '<td>' + escapeHtml(c.nota || '—') + '</td>' +
+      '<td><code>' + escapeHtml(c.codigo) + '</code></td>' +
+      '<td>' + estado + '</td>' +
+      '<td>' + new Date(c.creado).toLocaleDateString('es-AR') + '</td>' +
+      '<td>' + (c.usado_en ? new Date(c.usado_en).toLocaleDateString('es-AR') : '—') + '</td>' +
+      '<td>' + boton + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+// Para texto que se inserta dentro de un string JS de comillas simples que a
+// su vez va dentro de un atributo HTML tipo onclick="fn('...')". escapeHtml()
+// sola NO alcanza acá: el parser HTML decodifica las entidades del atributo
+// (&#39; → ') ANTES de compilar ese atributo como el handler JS, así que un
+// valor con una comilla simple rompería igual el string y podría ejecutar
+// código arbitrario aunque esté "escapado" con escapeHtml. Por eso primero
+// escapamos para el contexto JS (barra invertida y comilla simple) y recién
+// después para el HTML — así, al decodificar, el resultado sigue siendo una
+// comilla ESCAPADA dentro del string JS (\'), no una que lo cierra.
+function escapeAtributoJs(s) {
+  return escapeHtml(String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+}
+
+async function generarCodigo() {
+  var nota = $('input-nota').value.trim();
+  var codigo = generarCadenaAleatoria(8);
+  var btn = $('btn-generar');
+
+  btn.disabled = true;
+
+  var payload = {
+    codigo: codigo,
+    nota: nota || null,
+    usado: false,
+    creado_por: sesion.user.email
+  };
+
+  var { error } = await supabase.from('codigos_prueba').insert(payload);
+
+  if (error) {
+    if (error.code === '23505') {
+      // Colisión de código único: reintentamos una vez con otro código.
+      payload.codigo = generarCadenaAleatoria(8);
+      var reintento = await supabase.from('codigos_prueba').insert(payload);
+      if (reintento.error) {
+        console.error('generarCodigo', reintento.error);
+        btn.disabled = false;
+        return;
+      }
+      codigo = payload.codigo;
+    } else {
+      console.error('generarCodigo', error);
+      btn.disabled = false;
+      return;
+    }
+  }
+
+  $('input-nota').value = '';
+  ultimoLinkGenerado = window.location.origin + '/login?prueba=' + codigo;
+  $('link-generado-texto').textContent = ultimoLinkGenerado;
+  $('link-generado').style.display = 'flex';
+  await cargarCodigos();
+  btn.disabled = false;
+}
+
+function copiarLink(link) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(link).catch(function(e) { console.error('copiarLink', e); });
+  }
+}
+
+(async function init() {
+  try {
+    var accesoOk = await verificarAcceso();
+    if (!accesoOk) return;
+    await cargarCodigos();
+    $('cargando').style.display = 'none';
+    $('admin-wrap').style.display = 'block';
+  } catch (e) {
+    console.error('init error', e);
+    window.location.href = '/login';
+  }
+})();
+
+// Pintar íconos estáticos del HTML
+function pintarIconosEstaticos(root) {
+  (root || document).querySelectorAll('.icon-slot[data-icon]').forEach(function(el) {
+    var name = el.dataset.icon;
+    if (window.Icon && typeof window.Icon[name] === 'function') {
+      el.innerHTML = window.Icon[name]();
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', function(){ pintarIconosEstaticos(); });
+pintarIconosEstaticos();
+</script>
+
+</body>
+</html>

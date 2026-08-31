@@ -61,7 +61,7 @@
         <span class="icon-slot" data-icon="user"></span>
         <div class="header-titulos">
           <div class="header-negocio" id="header-negocio-desktop">—</div>
-          <div class="header-plan" id="header-plan-desktop">FREE</div>
+          <div class="header-plan" id="header-plan-desktop">—</div>
         </div>
         <span class="icon-slot" data-icon="chevronDown"></span>
       </div>
@@ -76,7 +76,7 @@
         <div class="header-logo"><img src="/imagenes/logo.png" alt="ProveLink" class="logo-img"></div>
         <div class="header-titulos">
           <div class="header-negocio" id="header-negocio">—</div>
-          <div class="header-plan" id="header-plan">FREE</div>
+          <div class="header-plan" id="header-plan">—</div>
         </div>
       </div>
       <button class="menu-btn" onclick="toggleMenu()" aria-label="Menú">
@@ -721,11 +721,9 @@ function canAccess(perm) {
 }
 
 // Límites por plan (espejo de la función SQL)
-// - Free: 2 proveedores, 2 listas/mes, SIN IA, SIN métricas
 // - Pro ($40k/mes): proveedores y listas ilimitados, SIN IA, SIN métricas
 // - Max (business, $70k/mes): TODO ilimitado, IA con 500 consultas/mes, métricas
 var LIMITES = {
-  free:     { proveedores: 2,   listasMes: 2,   consultasIA: 0,   empleados: 0,  metricas: false, ia: false },
   pro:      { proveedores: 999, listasMes: 999, consultasIA: 0,   empleados: 2,  metricas: false, ia: false },
   business: { proveedores: 999, listasMes: 999, consultasIA: 500, empleados: 10, metricas: true,  ia: true  }
 };
@@ -835,8 +833,8 @@ async function cerrarSesion() {
 // ============================================================
 function renderHeader() {
   var negocio = profile.nombre_negocio || profile.email || 'Mi negocio';
-  var planClass = 'header-plan ' + (profile.plan || 'free');
-  var planText = (profile.plan || 'free').toUpperCase();
+  var planClass = 'header-plan ' + (profile.plan || 'pro');
+  var planText = (profile.plan || 'pro').toUpperCase();
   // Si es empleado, mostrar su nombre + badge "EMPLEADO" en lugar del nombre del negocio
   ['header-negocio', 'header-negocio-desktop'].forEach(function(id){
     var el = document.getElementById(id);
@@ -864,20 +862,7 @@ function renderHeader() {
 function renderPlanBanner() {
   var banner = $('plan-banner');
   var txt = $('plan-banner-txt');
-  if (profile.plan === 'free') {
-    var max = LIMITES.free.proveedores;
-    if (proveedores.length >= max) {
-      banner.classList.add('warn');
-      txt.innerHTML = 'Llegaste al límite del plan <strong>Free</strong> (' + max + ' proveedores). Mejorá a <strong>Pro</strong> para tener ilimitados.';
-      banner.style.display = 'flex';
-    } else {
-      banner.classList.remove('warn');
-      txt.innerHTML = 'Plan <strong>Free</strong>: ' + proveedores.length + ' de ' + max + ' proveedores · Sin IA';
-      banner.style.display = 'flex';
-    }
-  } else {
-    banner.style.display = 'none';
-  }
+  banner.style.display = 'none';
 }
 
 // ============================================================
@@ -994,7 +979,7 @@ async function subirLogoAStorage(file, proveedorId) {
 }
 
 function abrirModalProv() {
-  var limite = LIMITES[profile.plan || 'free'].proveedores;
+  var limite = LIMITES[profile.plan || 'pro'].proveedores;
   if (proveedores.length >= limite) {
     showToast('Llegaste al límite de tu plan. Mejorá para agregar más.', 'error');
     return;
@@ -1593,7 +1578,7 @@ function _nombreDiaCorto(d) {
 }
 
 function calendarioPermitido() {
-  var planActual = (profile && profile.plan) || 'free';
+  var planActual = (profile && profile.plan) || 'pro';
   return !!(LIMITES[planActual] && LIMITES[planActual].metricas);  // mismo gating que métricas (Max)
 }
 
@@ -2379,7 +2364,7 @@ function convertirDiaEnPedido() {
 function renderMetricasPreview() {
   var cont = $('ingreso-metricas-preview');
   if (!cont) return;
-  var planActual = (profile && profile.plan) || 'free';
+  var planActual = (profile && profile.plan) || 'pro';
   if (!LIMITES[planActual] || !LIMITES[planActual].metricas) {
     cont.innerHTML = '';
     return;
@@ -2808,7 +2793,7 @@ function tabPermitida(tab) {
   // Gating por PLAN (independiente del rol):
   // - Métricas y Calendario: solo plan Max (business)
   if (tab === 'metricas' || tab === 'calendario') {
-    var planActual = (profile && profile.plan) || 'free';
+    var planActual = (profile && profile.plan) || 'pro';
     if (!LIMITES[planActual] || !LIMITES[planActual].metricas) return false;
   }
   // Gating por ROL DE EMPLEADO
@@ -2864,8 +2849,8 @@ function aplicarPermisosUI() {
   });
 
   // 1b) Asistente IA: solo plan Max (business). El backend devuelve PLAN_SIN_IA
-  // para Free y Pro, así que el FAB tiene que estar oculto para evitar confusión.
-  var planActualUI = (profile && profile.plan) || 'free';
+  // para Pro, así que el FAB tiene que estar oculto para evitar confusión.
+  var planActualUI = (profile && profile.plan) || 'pro';
   var tieneIA = LIMITES[planActualUI] && LIMITES[planActualUI].ia;
   // Empleado: además del plan, requiere permiso 'ia'
   if (esEmpleado()) tieneIA = tieneIA && canAccess('ia');
@@ -2969,11 +2954,8 @@ function abrirModalLista(proveedorId) {
     return;
   }
 
-  // El límite "2 listas por mes" del plan Free se valida en el backend
-  // (api/claude.js mira el contador `listas_procesadas_mes`). El frontend
-  // ya no bloquea por cantidad de listas activas — pueden tener una por
-  // proveedor sin tope. Si pasan el límite mensual, el backend devuelve
-  // error LIMITE_LISTAS_FREE_MES y mostramos el mensaje ahí.
+  // Pro y Max no tienen límite de listas por mes ni de listas activas en
+  // paralelo — no hace falta bloquear nada acá.
 
   // Arrancar con una sola ficha (pestaña)
   cargas = [];
@@ -3052,13 +3034,10 @@ function renderTabsCargas() {
       '<span class="carga-tab-x" onclick="event.stopPropagation();cerrarCargaTab(\'' + c.id + '\')" title="Descartar">×</span>' +
       '</button>';
   });
-  // Botón "+" para agregar otra lista (oculto en plan free)
-  if (profile.plan !== 'free') {
-    html += '<button class="carga-tab-add" onclick="nuevaCargaTab()" title="Cargar otra lista">+</button>';
-  }
+  html += '<button class="carga-tab-add" onclick="nuevaCargaTab()" title="Cargar otra lista">+</button>';
   cont.innerHTML = html;
   // Una sola pestaña: no tiene sentido la barra salvo que el usuario pueda sumar más
-  cont.style.display = (cargas.length <= 1 && profile.plan === 'free') ? 'none' : 'flex';
+  cont.style.display = (cargas.length <= 1) ? 'none' : 'flex';
 }
 
 // Renderiza el cuerpo del modal (selector + carga + preview) según la ficha activa
@@ -3101,10 +3080,6 @@ function onCambiarProvCarga(provId) {
 }
 
 function nuevaCargaTab() {
-  if (profile.plan === 'free') {
-    showToast('El plan Free permite 2 listas por mes. Cargá una a la vez. Mejorá a Pro para varias en paralelo.', 'error');
-    return;
-  }
   var pid = primerProveedorLibre(null);
   if (!pid) {
     showToast('No quedan proveedores libres para otra pestaña', 'error');
@@ -3235,10 +3210,6 @@ async function procesarArchivo(event) {
     event.target.value = '';
     return;
   }
-
-  // Límite del plan Free (2 listas/mes) se valida en backend.
-  // Si pasan el cap, /api/claude responde 403 con codigo LIMITE_LISTAS_FREE_MES
-  // y mostramos el mensaje del backend.
 
   var esPDF = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   var esExcel = /\.(xlsx|xls|csv)$/i.test(file.name) ||
@@ -5521,7 +5492,7 @@ async function cargarEmpleados() {
     empleadosCache = data.empleados || [];
     var usados = data.usados || 0;
     var limite = data.limite || 0;
-    resumen.innerHTML = '<strong>' + usados + ' / ' + limite + '</strong> empleados usados · Plan <strong>' + (data.plan || 'free').toUpperCase() + '</strong>';
+    resumen.innerHTML = '<strong>' + usados + ' / ' + limite + '</strong> empleados usados · Plan <strong>' + (data.plan || 'pro').toUpperCase() + '</strong>';
     var btnNuevo = $('btn-nuevo-empleado');
     btnNuevo.disabled = limite === 0 || usados >= limite;
     if (limite === 0) {
@@ -5692,7 +5663,6 @@ async function eliminarCuenta() {
 // PLANES
 // ============================================================
 var PLANES_INFO = [
-  { id: 'free',     nombre: 'Free',    precio: 'Gratis',         color: 'var(--emerald)', features: ['Hasta 2 proveedores','2 listas por mes','Comparador de precios','Pedidos por WhatsApp'] },
   { id: 'pro',      nombre: 'Pro',     precio: '$40.000 / mes',  color: 'var(--accent)',  features: ['Proveedores ilimitados','Listas ilimitadas','Histórico de precios','Sistema de empleados'] },
   { id: 'business', nombre: 'Max',     precio: '$70.000 / mes',  color: 'var(--gold)',    features: ['Todo lo del plan Pro','Dashboard de métricas','Asistente IA · 500 consultas/mes','Soporte prioritario'] }
 ];
@@ -5708,7 +5678,7 @@ function cerrarPlanes() {
 }
 
 function renderPlanesGrid() {
-  var planActual = (profile && profile.plan) || 'free';
+  var planActual = (profile && profile.plan) || 'pro';
   var userEmail = (sesion && sesion.user && sesion.user.email) || '';
   var html = '';
   PLANES_INFO.forEach(function(p) {
@@ -5729,7 +5699,7 @@ function renderPlanesGrid() {
     if (!esCurrent) {
       var waMsg = encodeURIComponent('Hola! Quiero activar el plan ' + p.nombre + ' de ProveLink. Mi email es: ' + userEmail);
       html += '<a href="https://wa.me/5491112345678?text=' + waMsg + '" target="_blank" rel="noopener" style="display:block;text-align:center;padding:10px 14px;border-radius:var(--r-md);background:' + p.color + ';color:#fff;font-size:13px;font-weight:700;text-decoration:none;margin-top:auto;">Mejorar a ' + p.nombre + '</a>';
-    } else if (planActual !== 'free') {
+    } else {
       html += '<a href="mailto:soporte@provelink.com?subject=Cancelar+plan+' + encodeURIComponent(p.nombre) + '&body=' + encodeURIComponent('Hola, quiero cancelar mi plan ' + p.nombre + '. Mi email es: ' + userEmail) + '" style="display:block;text-align:center;padding:8px 14px;border-radius:var(--r-md);border:1px solid var(--border-hi);color:var(--text-muted);font-size:12px;text-decoration:none;margin-top:auto;">Cancelar plan</a>';
     }
     html += '</div>';
@@ -7259,7 +7229,7 @@ document.addEventListener('keydown', function(e) {
 var aiHistorial = [];
 
 function abrirAsistente() {
-  var planAct = (profile && profile.plan) || 'free';
+  var planAct = (profile && profile.plan) || 'pro';
   if (!LIMITES[planAct] || !LIMITES[planAct].ia) {
     showToast('El asistente IA está disponible solo en el plan Max.', 'error');
     return;

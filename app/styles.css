@@ -230,7 +230,6 @@ h3 { font-size: 18px; }
   letter-spacing: 0.12em;
   margin-top: 2px;
 }
-.header-plan.free     { color: var(--emerald-bright); }
 .header-plan.pro      { color: var(--accent-bright); }
 .header-plan.business { color: var(--gold-bright); }
 

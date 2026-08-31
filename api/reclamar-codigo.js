@@ -2,13 +2,20 @@
 // /api/reclamar-codigo.js — Reclama un código de prueba de un solo uso
 // ============================================================================
 // Método:
-//   POST /api/reclamar-codigo   → body: { codigo, user_id }
+//   POST /api/reclamar-codigo   → body: { codigo }
+//   Header: Authorization: Bearer <token de sesión>
 //
 // El UPDATE es atómico: sólo afecta la fila si todavía está `usado = false`,
 // así que si dos requests llegan casi al mismo tiempo con el mismo código,
 // como mucho uno de los dos encuentra la fila para actualizar — el otro no
 // actualiza nada y `data` le queda vacío. No hace falta un SELECT previo ni
 // un lock manual.
+//
+// El user_id se deriva SIEMPRE del token de sesión verificado (mismo patrón
+// que empleados.js / claude.js) — nunca del body. Los códigos se reparten
+// por WhatsApp/email a negocios reales antes de que la cuenta exista; si
+// confiáramos en un user_id de body, cualquiera que interceptara el código
+// podría pegarle al endpoint directo y quemárselo, sin pasar por la UI.
 // ============================================================================
 
 const { createClient } = require('@supabase/supabase-js');
@@ -31,19 +38,28 @@ module.exports = async function handler(req, res) {
       return res.status(500).json({ ok: false, error: 'Servidor mal configurado' });
     }
 
-    const body = req.body || {};
-    const codigo = (body.codigo || '').trim();
-    const userId = body.user_id;
-
-    if (!codigo || !userId) {
-      return res.status(400).json({ ok: false, error: 'Falta codigo o user_id' });
-    }
+    // Autenticar el caller (mismo patrón que empleados.js / claude.js)
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace('Bearer ', '').trim();
+    if (!token) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const sb = createClient(SUPABASE_URL, SERVICE_KEY);
+    const { data: userData, error: userError } = await sb.auth.getUser(token);
+    if (userError || !userData || !userData.user) {
+      return res.status(401).json({ ok: false, error: 'Token inválido' });
+    }
+    const callerId = userData.user.id;
+
+    const body = req.body || {};
+    const codigo = (body.codigo || '').trim();
+
+    if (!codigo) {
+      return res.status(400).json({ ok: false, error: 'Falta codigo' });
+    }
 
     const { data, error } = await sb
       .from('codigos_prueba')
-      .update({ usado: true, usado_por: userId, usado_en: new Date().toISOString() })
+      .update({ usado: true, usado_por: callerId, usado_en: new Date().toISOString() })
       .eq('codigo', codigo)
       .eq('usado', false)
       .select();

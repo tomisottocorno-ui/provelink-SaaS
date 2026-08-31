@@ -195,18 +195,20 @@
   // reclama en el servidor (api/reclamar-codigo.js) de forma atómica, para
   // que no se pueda reusar el mismo link dos veces. Es un link privado — lo
   // genera un admin desde /app/admin-codigos.html y se lo pasa al negocio
-  // en persona.
-  async function datosDePrueba(queryString, userId) {
+  // en persona. El servidor verifica el token de sesión y deriva el usuario
+  // de ahí (no confía en un user_id mandado por el cliente).
+  async function datosDePrueba(queryString, token) {
     var params = new URLSearchParams(queryString || window.location.search);
     var codigo = params.get('prueba');
     if (!codigo) return null;
+    if (!token) return null;
 
     var ok = false;
     try {
       var resp = await fetch('/api/reclamar-codigo', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codigo: codigo, user_id: userId })
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ codigo: codigo })
       });
       var data = await resp.json();
       ok = !!data.ok;
@@ -259,7 +261,8 @@
       }
 
       if (data.user) {
-        var infoPrueba = await datosDePrueba(undefined, data.user.id);
+        var token = data.session && data.session.access_token;
+        var infoPrueba = await datosDePrueba(undefined, token);
         var actualizacion = Object.assign({ nombre_negocio: negocio }, infoPrueba || {});
         await supabase.from('profiles').update(actualizacion).eq('id', data.user.id);
       }

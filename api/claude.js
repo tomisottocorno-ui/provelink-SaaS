@@ -288,7 +288,6 @@ module.exports = async function handler(req, res) {
 
     if (esProcesarLista) {
       // Límite de listas PROCESADAS POR MES según el plan: Pro y Max, ilimitado.
-      const limiteListasMes = LIMITES_LISTAS_MES[plan] || LIMITES_LISTAS_MES.pro;
       // No se valida cuota de listas: todos los planes son ilimitados.
     } else {
       // Tipo 'chat' (asistente IA): valida cuota normal

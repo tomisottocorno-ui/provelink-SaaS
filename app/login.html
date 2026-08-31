@@ -190,6 +190,37 @@
     }
   }
 
+  // Si la URL trae ?prueba=<código>, y ese código es válido y no fue usado
+  // todavía, esta cuenta arranca en el plan Max por 15 días. El código se
+  // reclama en el servidor (api/reclamar-codigo.js) de forma atómica, para
+  // que no se pueda reusar el mismo link dos veces. Es un link privado — lo
+  // genera un admin desde /app/admin-codigos.html y se lo pasa al negocio
+  // en persona.
+  async function datosDePrueba(queryString, userId) {
+    var params = new URLSearchParams(queryString || window.location.search);
+    var codigo = params.get('prueba');
+    if (!codigo) return null;
+
+    var ok = false;
+    try {
+      var resp = await fetch('/api/reclamar-codigo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codigo: codigo, user_id: userId })
+      });
+      var data = await resp.json();
+      ok = !!data.ok;
+    } catch (e) {
+      console.error('datosDePrueba', e);
+      return null;
+    }
+    if (!ok) return null;
+
+    var vence = new Date();
+    vence.setDate(vence.getDate() + 15);
+    return { plan: 'business', plan_estado: 'prueba', plan_vence: vence.toISOString() };
+  }
+
   async function hacerRegistro() {
     var negocio = document.getElementById('reg-negocio').value.trim();
     var email = document.getElementById('reg-email').value.trim();
@@ -228,7 +259,9 @@
       }
 
       if (data.user) {
-        await supabase.from('profiles').update({ nombre_negocio: negocio }).eq('id', data.user.id);
+        var infoPrueba = await datosDePrueba(undefined, data.user.id);
+        var actualizacion = Object.assign({ nombre_negocio: negocio }, infoPrueba || {});
+        await supabase.from('profiles').update(actualizacion).eq('id', data.user.id);
       }
 
       if (data.session) {

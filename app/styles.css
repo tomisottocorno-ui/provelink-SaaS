@@ -2546,3 +2546,51 @@ h3 { font-size: 18px; }
 .plan-banner.danger { border-left-color: var(--danger); }
 .plan-banner-txt { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
 .plan-banner-txt strong { color: var(--text); font-weight: 600; }
+
+/* ============================================================
+   CARGA EN SEGUNDO PLANO
+   ============================================================ */
+.carga-flotante {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 600;
+  font-size: 13px;
+}
+.carga-flotante-resumen {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-md);
+  padding: 8px 14px;
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.carga-flotante-resumen.con-error { border-color: var(--danger); }
+.carga-flotante-panel {
+  margin-top: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-md);
+  padding: 8px;
+  min-width: 220px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+.carga-flotante-fila {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.carga-flotante-fila:hover { background: var(--bg-elev2); }
+.carga-flotante-fila.error { color: var(--danger); }
+.carga-flotante-fila.listo { color: var(--text); }

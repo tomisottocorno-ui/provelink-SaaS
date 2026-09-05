@@ -509,6 +509,51 @@ function itemPorNombre(app, frag) {
        appVencido.doc.getElementById('plan-banner').style.display === 'none');
   }
 
+  seccion('Indicador flotante: aparece con una carga procesando');
+  {
+    var app = await montarApp({ proveedores: [{ id: 'p1', user_id: 'user-1', nombre: 'Proveedor Uno' }] });
+    await app.esperar(80);
+
+    app.win.cargas = [{ id: 'f1', proveedorId: 'p1', titulo: 'Proveedor Uno', estado: 'procesando', jobId: 'j1' }];
+    app.win.renderCargaFlotante();
+
+    ok('el indicador se muestra', app.doc.getElementById('carga-flotante').style.display !== 'none');
+    var texto = app.doc.getElementById('carga-flotante-resumen').textContent;
+    ok('el resumen menciona que está procesando', /procesando|cargando/i.test(texto), texto);
+  }
+
+  seccion('Indicador flotante: desaparece sin cargas activas');
+  {
+    var app = await montarApp({});
+    await app.esperar(80);
+    app.win.cargas = [];
+    app.win.renderCargaFlotante();
+    ok('el indicador queda oculto', app.doc.getElementById('carga-flotante').style.display === 'none');
+  }
+
+  seccion('Indicador flotante: marca error si alguna ficha falló');
+  {
+    var app = await montarApp({});
+    await app.esperar(80);
+    app.win.cargas = [{ id: 'f1', proveedorId: 'p1', titulo: 'Proveedor Uno', estado: 'error', error: 'Fallo la IA' }];
+    app.win.renderCargaFlotante();
+    ok('el resumen queda marcado con la clase de error',
+       app.doc.getElementById('carga-flotante-resumen').classList.contains('con-error'));
+  }
+
+  seccion('Indicador flotante: el panel desplegado lista cada ficha');
+  {
+    var app = await montarApp({});
+    await app.esperar(80);
+    app.win.cargas = [
+      { id: 'f1', proveedorId: 'p1', titulo: 'Proveedor Uno', estado: 'procesando', jobId: 'j1' },
+      { id: 'f2', proveedorId: 'p2', titulo: 'Proveedor Dos', estado: 'listo' }
+    ];
+    app.win.renderCargaFlotante();
+    ok('el panel tiene una fila por ficha',
+       app.doc.querySelectorAll('#carga-flotante-panel .carga-flotante-fila').length === 2);
+  }
+
   // ── RESUMEN ───────────────────────────────────────────────────────────────
   console.log('\n' + '═'.repeat(62));
   console.log(fallos === 0

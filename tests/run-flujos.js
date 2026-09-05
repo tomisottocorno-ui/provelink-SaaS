@@ -554,6 +554,34 @@ function itemPorNombre(app, frag) {
        app.doc.querySelectorAll('#carga-flotante-panel .carga-flotante-fila').length === 2);
   }
 
+  seccion('Indicador flotante: se actualiza cuando guardarLista() saca una ficha de cargas');
+  {
+    var app = await montarApp({
+      proveedores: [
+        { id: 'p1', user_id: 'user-1', nombre: 'Proveedor Uno' },
+        { id: 'p2', user_id: 'user-1', nombre: 'Proveedor Dos' }
+      ]
+    });
+    await app.esperar(80);
+
+    app.win.cargas = [
+      { id: 'f1', proveedorId: 'p1', titulo: 'Proveedor Uno', estado: 'listo',
+        filasPreview: [{ productoLista: 'Producto A', precio: 100, unidad: 'kg' }] },
+      { id: 'f2', proveedorId: 'p2', titulo: 'Proveedor Dos', estado: 'procesando', jobId: 'j2', filasPreview: [] }
+    ];
+    app.win.cargaActivaId = 'f1';
+    app.win.renderCargaFlotante();
+    ok('antes de guardar, el panel lista las 2 fichas',
+       app.doc.querySelectorAll('#carga-flotante-panel .carga-flotante-fila').length === 2);
+
+    await app.win.guardarLista();
+    await app.esperar(50);
+
+    ok('la ficha guardada ya no está en cargas', app.win.cargas.length === 1);
+    ok('el panel del indicador ya refleja el cambio (ya no lista la guardada)',
+       app.doc.querySelectorAll('#carga-flotante-panel .carga-flotante-fila').length === 1);
+  }
+
   // ── RESUMEN ───────────────────────────────────────────────────────────────
   console.log('\n' + '═'.repeat(62));
   console.log(fallos === 0

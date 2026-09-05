@@ -3243,12 +3243,29 @@ function cerrarCargaTab(id) {
 }
 
 function cerrarModalLista() {
-  var procesando = cargas.filter(function(c) { return c.estado === 'procesando'; });
-  if (procesando.length > 0) {
-    if (!confirm('Hay ' + procesando.length + ' lista(s) procesando. Si cerrás, se cancelan. ¿Cerrar igual?')) return;
+  var hayProcesando = cargas.some(function(c) { return c.estado === 'procesando'; });
+  if (hayProcesando) {
+    // Ya no cancela: se oculta nomás, el trabajo sigue y se retoma desde el
+    // indicador flotante (ver renderCargaFlotante / reabrirModalCargas).
+    $('modal-lista').classList.remove('open');
+    return;
   }
-  cargas.forEach(function(c) { c.cancelado = true; if (c.jobId) removeBarraProgreso(c.jobId); });
   _cerrarModalListaReal();
+}
+
+// Vuelve a mostrar el modal sobre las cargas que ya existían (sin resetear
+// `cargas`, a diferencia de abrirModalLista()) — la usa el indicador
+// flotante para volver a la ficha que corresponda.
+function reabrirModalCargas(fichaId) {
+  if (!cargas.length) return;
+  if (fichaId && cargaPorId(fichaId)) {
+    cargaActivaId = fichaId;
+  } else if (!cargaActivaId || !cargaPorId(cargaActivaId)) {
+    cargaActivaId = cargas[0].id;
+  }
+  $('modal-lista').classList.add('open');
+  renderTabsCargas();
+  renderCuerpoCarga();
 }
 
 function _cerrarModalListaReal() {

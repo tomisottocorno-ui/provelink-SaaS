@@ -597,6 +597,47 @@ function itemPorNombre(app, frag) {
        app.doc.querySelectorAll('#carga-flotante-panel .carga-flotante-fila').length === 1);
   }
 
+  seccion('Cerrar el modal mientras procesa ya NO cancela');
+  {
+    var app = await montarApp({ proveedores: [{ id: 'p1', user_id: 'user-1', nombre: 'Proveedor Uno' }] });
+    await app.esperar(80);
+    app.win.cargas = [{ id: 'f1', proveedorId: 'p1', titulo: 'Proveedor Uno', estado: 'procesando', jobId: 'j1', cancelado: false }];
+    app.win.cargaActivaId = 'f1';
+    app.doc.getElementById('modal-lista').classList.add('open');
+
+    app.win.cerrarModalLista();
+
+    ok('el modal se oculta', !app.doc.getElementById('modal-lista').classList.contains('open'));
+    ok('la ficha sigue SIN cancelar', app.win.cargas[0].cancelado === false);
+    ok('la ficha sigue en el array (no se resetea)', app.win.cargas.length === 1);
+  }
+
+  seccion('Cerrar el modal sin nada procesando sigue limpiando todo (comportamiento viejo)');
+  {
+    var app = await montarApp({ proveedores: [{ id: 'p1', user_id: 'user-1', nombre: 'Proveedor Uno' }] });
+    await app.esperar(80);
+    app.win.cargas = [{ id: 'f1', proveedorId: 'p1', titulo: 'Proveedor Uno', estado: 'listo' }];
+    app.doc.getElementById('modal-lista').classList.add('open');
+
+    app.win.cerrarModalLista();
+
+    ok('el modal se cierra', !app.doc.getElementById('modal-lista').classList.contains('open'));
+    ok('y esta vez sí se limpia el array', app.win.cargas.length === 0);
+  }
+
+  seccion('reabrirModalCargas() vuelve a mostrar el modal sin resetear nada');
+  {
+    var app = await montarApp({ proveedores: [{ id: 'p1', user_id: 'user-1', nombre: 'Proveedor Uno' }] });
+    await app.esperar(80);
+    app.win.cargas = [{ id: 'f1', proveedorId: 'p1', titulo: 'Proveedor Uno', estado: 'listo', filasPreview: [] }];
+
+    app.win.reabrirModalCargas('f1');
+
+    ok('el modal queda abierto', app.doc.getElementById('modal-lista').classList.contains('open'));
+    ok('la ficha activa es la pedida', app.win.cargaActivaId === 'f1');
+    ok('el array sigue teniendo la misma ficha (no se reseteó)', app.win.cargas.length === 1);
+  }
+
   // ── RESUMEN ───────────────────────────────────────────────────────────────
   console.log('\n' + '═'.repeat(62));
   console.log(fallos === 0

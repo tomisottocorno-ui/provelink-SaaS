@@ -582,6 +582,21 @@ function itemPorNombre(app, frag) {
        app.doc.querySelectorAll('#carga-flotante-panel .carga-flotante-fila').length === 1);
   }
 
+  seccion('Indicador flotante: abrirModalLista() en modo edición también lo refresca');
+  {
+    var app = await montarApp({
+      proveedores: [{ id: 'p1', user_id: 'user-1', nombre: 'Proveedor Uno' }],
+      listas_precios: [{ id: 'l1', proveedor_id: 'p1', user_id: 'user-1', items: [{ productoLista: 'Producto A', precio: 100, unidad: 'kg' }] }]
+    });
+    await app.esperar(80);
+
+    app.win.abrirModalLista('p1');
+
+    ok('la ficha en modo edición queda en cargas', app.win.cargas.length === 1);
+    ok('y el indicador la refleja (queda relevante porque nace en estado listo)',
+       app.doc.querySelectorAll('#carga-flotante-panel .carga-flotante-fila').length === 1);
+  }
+
   // ── RESUMEN ───────────────────────────────────────────────────────────────
   console.log('\n' + '═'.repeat(62));
   console.log(fallos === 0
